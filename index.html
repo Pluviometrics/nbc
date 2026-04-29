@@ -4423,10 +4423,12 @@ function resolveReliningCoordinate(row) {
 }
 
 function resolveReliningCriticalityScore(row) {
+  // Primary: numeric 'Score' column
+  const numeric = parseNumberValue(getValueByAliases(row, ['Score', 'Criticality Score', 'Critical_Score']));
+  if (Number.isFinite(numeric) && numeric > 0) return Math.max(0, numeric);
+  // Fallback: Criticality Y/N flag
   const raw = String(getValueByAliases(row, ['Criticality', 'criticality', 'SW_Criticality']) || '').trim().toUpperCase();
-  if (raw === 'Y') return 3;
-  const numeric = parseNumberValue(getValueByAliases(row, ['Criticality Score', 'Critical_Score', 'Score', 'score']));
-  if (Number.isFinite(numeric)) return Math.max(0, Math.min(5, numeric));
+  if (raw === 'Y') return 1;
   return 0;
 }
 
@@ -4489,7 +4491,7 @@ function buildReliningPackagingPreview(assetRows, options) {
 }
 
 function getReliningDiamSizeKey(diameterMm, customSizeGroups) {
-  if (!customSizeGroups || !customSizeGroups.length) return '__anysize__'; // no groups = mix freely
+  if (!customSizeGroups || !customSizeGroups.length) return `solo_${Math.round(diameterMm ?? 0)}`; // no groups = diameter-first, top-up bridges sizes
   const diam = Math.round(diameterMm ?? 0);
   for (let i = 0; i < customSizeGroups.length; i++) {
     if (customSizeGroups[i].includes(diam)) return `sizegroup_${i}`;
@@ -4698,8 +4700,10 @@ function topupReliningPackages(packages, allCostedItems, options) {
     });
     const pkgSuburb = pkg.primary_suburb || pkg.suburb || '';
     let candidates = pool.filter(i => !usedIds.has(i.assetId) && (i.suburb || '') === pkgSuburb);
+    // Both modes apply ±2 size rule; same_size also filters by condition
+    candidates = candidates.filter(i => adjacentDiams.has(i.diameterMm));
     if (options.topupMode === 'same_size') {
-      candidates = candidates.filter(i => i.condition === dominantCondition && adjacentDiams.has(i.diameterMm));
+      candidates = candidates.filter(i => i.condition === dominantCondition);
     }
     candidates.sort((a, b) =>
       (Number(b.criticalityScore) || 0) - (Number(a.criticalityScore) || 0) ||
@@ -4943,7 +4947,7 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.</li>
       <li>${methodText}</li>
       <li>${options.proximityM ? `Pipes are grouped by spatial proximity — anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
-      <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'No size groups set — each diameter is packaged separately.'}</li>
+      <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'Diameter is the primary grouping factor — packages are built per diameter, then top-up adds adjacent sizes to reach the target value.'}</li>
       <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
       <li>${options.topupMode === 'same_size' ? 'Top-up active — underfilled packages pull in same-condition pipes within ±2 adjacent sizes, critical pipes first.' : options.topupMode === 'any_condition' ? 'Top-up active — underfilled packages pull in any pipe from the current condition selection, critical pipes first.' : 'No top-up — packages are not filled beyond their initial split.'}</li>
       <li>Packages are prioritised by criticality score first, then value, then length, then Condition 8 count.</li>
