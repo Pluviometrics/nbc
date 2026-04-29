@@ -965,9 +965,9 @@ window.addEventListener('keydown', (event) => {
       <div id="pkgTopupRow" style="margin-top:10px">
         <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top up underfilled packages</div>
         <div style="display:flex;gap:20px;font-size:12px;align-items:center">
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="none" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> None</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="same_size" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition, similar size (±2 sizes)</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="any_condition" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Any condition in selection</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
         </div>
       </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
@@ -1197,6 +1197,7 @@ window.addEventListener('keydown', (event) => {
             <label><input type="checkbox" value="5-6"/> 5-6</label>
             <label><input type="checkbox" value="1-6" checked/> 1-6</label>
             <label><input type="checkbox" value="7-8"/> 7-8</label>
+            <label><input type="checkbox" value="9-10"/> 9-10</label>
             <label><input type="checkbox" value="tba" checked/> TBA</label>
           </div>
         </div>
@@ -1544,6 +1545,19 @@ let reliningAssetsFileName = '';
 let reliningRatesFileName = '';
 let lastReliningPackagingPreview = null;
 const DEFAULT_RELINING_DIAMETERS = [300, 375, 450, 525, 600, 675, 750, 825, 900, 1050, 1200, 1350, 1500, 1800];
+const MIN_RELINING_DIAMETER_MM = 300;
+const TBA_SUBURB_VALUES = new Set(['', 'TBA', 'N/A', 'NA', 'NONE', 'NULL', 'UNKNOWN', 'UNSPECIFIED']);
+const DIAMETER_COMPATIBLE_PAIRS = [
+  [300, 375],
+  [375, 450],
+  [450, 525],
+  [525, 600],
+  [600, 750],
+  [750, 825],
+  [825, 900],
+  [900, 1050]
+];
+const DIAMETER_LARGE_THRESHOLD = 1050;
 let reliningPackagesMap = null;
 let reliningPackagesLayer = null;
 let reliningPackageFocusLayers = new Map();
@@ -4194,8 +4208,9 @@ function getRowSuburb(row, suburbCol = null) {
   return '';
 }
 
-function normaliseNumeric(value) {
+function cleanNumber(value) {
   if (value == null || value === '') return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   const cleaned = String(value).replace(/[$,\s]/g, '');
   const num = Number(cleaned);
   if (Number.isFinite(num)) return num;
@@ -4203,34 +4218,36 @@ function normaliseNumeric(value) {
   return embedded ? Number(embedded[0]) : null;
 }
 
+function normaliseNumeric(value) {
+  return cleanNumber(value);
+}
+
 function getReliningConditionNumber(row) {
+  return extractConditionScore(row);
+}
+
+function extractConditionScore(row) {
   const candidates = [
-    row?.['SW_Condition'],
     row?.['Observed_Condition'],
-    row?.['Calculated_Condition'],
+    row?.['SW_Condition'],
+    row?.['Schedule7_Condition2'],
     row?.['Schedule7_Condition'],
-    row?.['Schedule_7_Condition'],
     getValueByAliases(row, [
-      'SW_Condition',
       'Observed_Condition',
       'Observed Condition',
-      'Calculated_Condition',
-      'Calculated Condition',
+      'SW_Condition',
+      'SW Condition',
+      'Schedule7_Condition2',
+      'Schedule 7 Condition 2',
       'Schedule7_Condition',
-      'Schedule_7_Condition',
-      'Schedule 7 Condition',
-      'Condition'
+      'Schedule 7 Condition'
     ])
   ];
   for (const raw of candidates) {
     const text = String(raw ?? '').trim();
     if (!text) continue;
-    const numericOnly = text.match(/^\d+(\.\d+)?$/);
-    if (numericOnly) return Number(numericOnly[0]);
-    const leadingCondition = text.match(/\bcondition\s*(\d+)\b/i);
-    if (leadingCondition) return Number(leadingCondition[1]);
-    const compactCondition = text.match(/\bcond\.?\s*(\d+)\b/i);
-    if (compactCondition) return Number(compactCondition[1]);
+    const firstNumber = text.match(/(\d+)/);
+    if (firstNumber) return Number(firstNumber[1]);
   }
   return null;
 }
@@ -4250,6 +4267,12 @@ function parseDescriptorDiameters(desc) {
   return [];
 }
 
+function parseFirstDescriptorDiameter(desc) {
+  const text = String(desc ?? '');
+  const match = text.match(/[ØO]?(\d+)/i);
+  return match ? Number(match[1]) : null;
+}
+
 function parseLengthBand(desc) {
   const text = String(desc ?? '');
   const plus = text.match(/\+(\d+)/);
@@ -4267,7 +4290,7 @@ function cleanRateRows(rows) {
 }
 
 function getReliningDiameterValue(row) {
-  return normaliseNumeric(getValueByAliases(row, [
+  return cleanDiameter(getValueByAliases(row, [
     'SWP_Pipe Diameter_mm',
     'SWP_Pipe_Diameter_mm',
     'SWP__Pipe_Diameter_mm',
@@ -4278,8 +4301,13 @@ function getReliningDiameterValue(row) {
   ]));
 }
 
+function cleanDiameter(value) {
+  const parsed = cleanNumber(value);
+  return Number.isFinite(parsed) ? parsed : parseFirstDescriptorDiameter(String(value ?? ''));
+}
+
 function getReliningLengthValue(row) {
-  return normaliseNumeric(getValueByAliases(row, [
+  return cleanLength(getValueByAliases(row, [
     'Spatial Length_m',
     'Spatial_Length_m',
     'Length',
@@ -4288,11 +4316,15 @@ function getReliningLengthValue(row) {
   ]));
 }
 
+function cleanLength(value) {
+  return cleanNumber(value);
+}
+
 function getReliningRateForRow(row) {
   return getReliningRateInfoForRow(row).rate;
 }
 
-function getReliningRateInfoForRow(row) {
+function getReliningRateInfoForRow(row, options = null) {
   const diameter = getReliningDiameterValue(row);
   const lengthM = getReliningLengthValue(row);
   if (!Number.isFinite(diameter)) return { rate: null, reason: 'Missing diameter', diameter, lengthM };
@@ -4315,18 +4347,34 @@ function getReliningRateInfoForRow(row) {
     return { rate: null, reason: 'No matching length band', diameter, lengthM };
   }
 
-  const assetClassMatches = matches.filter(rate => /Median/i.test(String(rate?.['Asset Class'] || '')));
-  if (assetClassMatches.length) matches = assetClassMatches;
-  else {
+  const costMode = String(options?.costMode || 'median').toLowerCase();
+  const contractor = String(options?.contractor || '').trim();
+  if (costMode === 'contractor' && contractor) {
+    const contractorCol = matches.some(rate => rate?.Component != null) ? 'Component' : 'Origin of Average/Mean Price';
     const panelMatches = matches.filter(rate => /Panel/i.test(String(rate?.['Asset Class'] || '')));
     if (panelMatches.length) matches = panelMatches;
+    const vendorMatches = matches.filter(rate => String(rate?.[contractorCol] || '').trim() === contractor);
+    if (vendorMatches.length) matches = vendorMatches;
+  } else if (costMode === 'lowest' || costMode === 'min') {
+    const panelMatches = matches.filter(rate => /Panel/i.test(String(rate?.['Asset Class'] || '')));
+    if (panelMatches.length) matches = panelMatches;
+  } else {
+    const assetClassMatches = matches.filter(rate => /Median/i.test(String(rate?.['Asset Class'] || '')));
+    if (assetClassMatches.length) matches = assetClassMatches;
+    else {
+      const panelMatches = matches.filter(rate => /Panel/i.test(String(rate?.['Asset Class'] || '')));
+      if (panelMatches.length) matches = panelMatches;
+    }
   }
 
   const numericRates = matches.map(rate => normaliseNumeric(rate?.['Unit Rate'])).filter(value => Number.isFinite(value));
   if (!numericRates.length) return { rate: null, reason: 'Matching rate has no unit rate', diameter, lengthM };
   numericRates.sort((a, b) => a - b);
+  const selectedRate = (costMode === 'lowest' || costMode === 'min')
+    ? numericRates[0]
+    : numericRates[Math.floor(numericRates.length / 2)];
   return {
-    rate: numericRates[Math.floor(numericRates.length / 2)],
+    rate: selectedRate,
     reason: '',
     diameter,
     lengthM,
@@ -4395,10 +4443,14 @@ function getReliningPackagingOptions() {
     method,
     maxPackageValue: Math.max(Number.isFinite(maxPackageValue) ? maxPackageValue : 500000, 1),
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
+    costMode: 'median',
+    contractor: null,
+    trafficControl: false,
+    projectInitiation: false,
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
-    topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'none'),
+    topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up'),
     customSizeGroups: (() => {
       const seen = new Set();
       return [1, 2, 3, 4].map(i => {
@@ -4434,23 +4486,42 @@ function resolveReliningCriticalityScore(row) {
 }
 
 function resolveReliningSuburb(row, suburbCol) {
-  return formatSuburbName(getRowSuburb(row, suburbCol)) || getRowSuburb(row, suburbCol) || resolveCctvSuburb(row) || 'Unknown';
+  const raw = getValueByAliases(row, ['Asset Suburb', 'Location - Suburb', 'Suburb']);
+  const parsedRaw = deriveSuburbFromText(raw) || raw;
+  const value = formatSuburbName(parsedRaw) || String(parsedRaw || '').trim();
+  const knownSuburbs = new Set((typeof NORTHERN_BEACHES_SUBURBS !== 'undefined' ? NORTHERN_BEACHES_SUBURBS : []).map(s => String(s).toUpperCase()));
+  if (value && value.toUpperCase() !== 'TBA' && knownSuburbs.has(value.toUpperCase())) return value;
+  for (const candidate of ['Formatted_Address', 'Asset_Address', 'Pipe_Start_Address']) {
+    const derived = deriveSuburbFromText(row?.[candidate]);
+    if (derived && (!knownSuburbs.size || knownSuburbs.has(String(derived).toUpperCase()))) return formatSuburbName(derived) || derived;
+  }
+  if (value && value.toUpperCase() !== 'TBA') return value;
+  return 'TBA';
 }
 
 function normaliseReliningCandidateRow(row, index, options, suburbCol) {
   const condition = getReliningConditionNumber(row);
   const allowed = options.reliningMode === 'Condition 8 only' ? new Set([8]) : (options.reliningMode === 'Condition 7 only' ? new Set([7]) : new Set([7, 8]));
   if (!allowed.has(condition)) return null;
-  const rateInfo = getReliningRateInfoForRow(row);
+  const rawDiameter = getReliningDiameterValue(row);
+  if (!Number.isFinite(rawDiameter) || rawDiameter < MIN_RELINING_DIAMETER_MM) return null;
+  const rateInfo = getReliningRateInfoForRow(row, options);
   const lengthM = Number.isFinite(rateInfo.lengthM) ? rateInfo.lengthM : 0;
   const diameterMm = Number.isFinite(rateInfo.diameter) ? rateInfo.diameter : null;
-  const pipeCost = Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM) ? rateInfo.rate * lengthM : null;
+  let pipeCost = Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM) ? rateInfo.rate * lengthM : null;
+  if (Number.isFinite(pipeCost)) {
+    if (options.trafficControl !== false) pipeCost += 2000;
+    if (options.projectInitiation !== false) pipeCost *= 1.15;
+  }
   const coord = resolveReliningCoordinate(row);
+  const xMid = cleanNumber(getValueByAliases(row, ['XMid', 'XMid.1']));
+  const yMid = cleanNumber(getValueByAliases(row, ['YMid', 'YMid.1']));
   const assetId = String(getValueByAliases(row, ['Asset', 'Asset Number', 'Asset_Number', 'OBJECTID', 'MAPKEY', 'CATLG_ID']) || `asset-${index + 1}`).trim();
   const criticalityScore = resolveReliningCriticalityScore(row);
+  const suburb = resolveReliningSuburb(row, suburbCol);
   return {
     assetId,
-    suburb: resolveReliningSuburb(row, suburbCol),
+    suburb,
     condition,
     conditionLabel: String(condition || ''),
     diameterMm,
@@ -4463,8 +4534,21 @@ function normaliseReliningCandidateRow(row, index, options, suburbCol) {
     costReason: Number.isFinite(pipeCost) ? '' : (rateInfo.reason || 'Unable to cost'),
     lat: coord?.lat ?? null,
     lon: coord?.lon ?? null,
+    xMid: Number.isFinite(xMid) ? xMid : null,
+    yMid: Number.isFinite(yMid) ? yMid : null,
     coordinateSource: coord?.source || '',
     criticalityScore,
+    criticality_1dp: Number((Number(criticalityScore) || 0).toFixed(1)),
+    'Asset': assetId,
+    'SWP_Pipe Diameter_mm': diameterMm,
+    'Spatial Length_m': lengthM,
+    'SW_Condition': condition,
+    'Score': criticalityScore,
+    'Asset Suburb': suburb,
+    'XMid': Number.isFinite(xMid) ? xMid : '',
+    'YMid': Number.isFinite(yMid) ? yMid : '',
+    rate_per_m: rateInfo.rate,
+    pipe_cost: pipeCost,
     raw: row
   };
 }
@@ -4503,10 +4587,16 @@ function getReliningDiamSizeKey(diameterMm, customSizeGroups) {
 function populateReliningDiameterSelects(rows) {
   const diamSet = new Set();
   rows.forEach(row => {
-    const d = Math.round(Number(row?.['SWP_Pipe Diameter_mm'] ?? row?.['Pipe Diameter'] ?? row?.['Diameter'] ?? 0));
+    const d = Math.round(cleanDiameter(getValueByAliases(row, ['SWP_Pipe Diameter_mm', 'SWP_Pipe_Diameter_mm', 'Pipe Diameter', 'Diameter'])) || 0);
     if (d > 0) diamSet.add(d);
   });
   const diams = [...diamSet].sort((a, b) => a - b);
+  const defaults = [
+    [300, 375, 450, 525],
+    [600, 750],
+    [825, 900],
+    [1050, 1200, 1350, 1500, 1800]
+  ];
   [1, 2, 3, 4].forEach(i => {
     const el = document.getElementById(`pkgSizeGroup${i}`);
     if (!el) return;
@@ -4515,41 +4605,89 @@ function populateReliningDiameterSelects(rows) {
       return;
     }
     const prev = new Set(Array.from(el.selectedOptions).map(o => o.value));
-    el.innerHTML = diams.map(d => `<option value="${d}"${prev.has(String(d)) ? ' selected' : ''}>${d} mm</option>`).join('');
+    const active = prev.size ? prev : new Set(defaults[i - 1].map(String));
+    el.innerHTML = diams.map(d => `<option value="${d}"${active.has(String(d)) ? ' selected' : ''}>${d} mm</option>`).join('');
   });
 }
 
+const MAX_PACKAGE_DISTANCE_METRES = 500;
+
+function getPackageDistanceThresholdM(options = {}) {
+  const value = Number(options.proximityM ?? options.package_radius_m ?? options.packageRadiusM);
+  return Number.isFinite(value) && value > 0 ? value : MAX_PACKAGE_DISTANCE_METRES;
+}
+
+function isUsablePackageCoordinate(item) {
+  return Number.isFinite(item?.lat) && Number.isFinite(item?.lon);
+}
+
+function packageDistanceM(a, b) {
+  if (isUsablePackageCoordinate(a) && isUsablePackageCoordinate(b)) return haversineDistanceM(a, b);
+  if (Number.isFinite(a?.xMid) && Number.isFinite(a?.yMid) && Number.isFinite(b?.xMid) && Number.isFinite(b?.yMid)) {
+    return Math.hypot(a.xMid - b.xMid, a.yMid - b.yMid);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
+function maxDistanceFromCentroidM(items, centroid = meanCoordinate(items)) {
+  if (!centroid) return 0;
+  return (items || []).reduce((maxDistance, item) => {
+    if (!isUsablePackageCoordinate(item)) return maxDistance;
+    return Math.max(maxDistance, haversineDistanceM(centroid, item));
+  }, 0);
+}
+
+function canJoinSpatialPackage(items, item, options = {}) {
+  if (!items?.length) return isUsablePackageCoordinate(item);
+  if (!isUsablePackageCoordinate(item)) return false;
+  const thresholdM = getPackageDistanceThresholdM(options);
+  const centroid = meanCoordinate(items);
+  const closeToExisting = items.some(existing => packageDistanceM(existing, item) <= thresholdM);
+  const closeToCentroid = centroid ? haversineDistanceM(centroid, item) <= thresholdM : false;
+  if (!closeToExisting && !closeToCentroid) return false;
+  const tentative = [...items, item];
+  return maxPackageSpanM(tentative) <= thresholdM && maxDistanceFromCentroidM(tentative) <= thresholdM;
+}
+
 function assignReliningClusters(items, proximityM) {
-  // Anchor-radius spatial clustering (port of Python assign_spatial_clusters).
-  // Items with coords are clustered; items without coords each get their own cluster.
+  // Geographic clustering: every cluster has a seed pipe and is capped by the configured package spread.
   const result = items.map(item => ({ ...item, _cluster: null }));
-  const withCoords = result.filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lon));
-  const noCoords   = result.filter(item => !Number.isFinite(item.lat) || !Number.isFinite(item.lon));
-  noCoords.forEach(item => { item._cluster = `__nocoords_${item.assetId}`; });
-  const assigned = new Set();
   let clusterCounter = 0;
+  const withCoords = result.filter(item => isUsablePackageCoordinate(item));
+  const noCoords = result.filter(item => !isUsablePackageCoordinate(item));
+  noCoords.forEach(item => { item._cluster = `nocoord_${clusterCounter++}`; });
+  const assigned = new Set();
+  const thresholdM = Number(proximityM) || MAX_PACKAGE_DISTANCE_METRES;
   while (true) {
     const remaining = withCoords.filter(item => !assigned.has(item.assetId));
     if (!remaining.length) break;
-    // Find centroid of remaining items
-    const avgLat = remaining.reduce((s, i) => s + i.lat, 0) / remaining.length;
-    const avgLon = remaining.reduce((s, i) => s + i.lon, 0) / remaining.length;
-    const centroid = { lat: avgLat, lon: avgLon };
-    // Pick the item closest to centroid as anchor
-    let anchor = remaining[0];
-    let bestDist = haversineDistanceM(centroid, anchor);
-    for (const item of remaining) {
-      const d = haversineDistanceM(centroid, item);
-      if (d < bestDist) { bestDist = d; anchor = item; }
-    }
-    // Claim all remaining items within proximityM of anchor
-    const label = `cluster_${++clusterCounter}`;
-    for (const item of remaining) {
-      if (haversineDistanceM(anchor, item) <= proximityM) {
-        item._cluster = label;
-        assigned.add(item.assetId);
+    const anchor = findBestPackageCenter(remaining, { proximityM: thresholdM, criticalityWeight: 0 });
+    const clusterItems = [anchor];
+    assigned.add(anchor.assetId);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      const clusterIds = new Set(clusterItems.map(item => item.assetId));
+      const candidates = withCoords
+        .filter(item => !assigned.has(item.assetId) && !clusterIds.has(item.assetId))
+        .map(item => ({
+          item,
+          distanceM: Math.min(
+            ...clusterItems.map(existing => packageDistanceM(existing, item)),
+            meanCoordinate(clusterItems) ? haversineDistanceM(meanCoordinate(clusterItems), item) : Number.POSITIVE_INFINITY
+          )
+        }))
+        .sort((a, b) => a.distanceM - b.distanceM || String(a.item.assetId).localeCompare(String(b.item.assetId)));
+      for (const entry of candidates) {
+        if (!canJoinSpatialPackage(clusterItems, entry.item, { proximityM: thresholdM })) continue;
+        clusterItems.push(entry.item);
+        assigned.add(entry.item.assetId);
+        changed = true;
+        break;
       }
     }
+    const label = `cluster_${clusterCounter++}`;
+    clusterItems.forEach(item => { item._cluster = label; });
   }
   return result;
 }
@@ -4585,39 +4723,142 @@ function splitReliningItemsByCount(items, options) {
   });
 }
 
-function splitReliningItemsByValue(items, options) {
-  const workItems = options.proximityM ? assignReliningClusters(items, options.proximityM) : items;
+function diametersCompatible(d1, d2) {
+  const a = Number(d1);
+  const b = Number(d2);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  if (a === b) return true;
+  if (a >= DIAMETER_LARGE_THRESHOLD && b >= DIAMETER_LARGE_THRESHOLD) return true;
+  const low = Math.min(a, b);
+  const high = Math.max(a, b);
+  return DIAMETER_COMPATIBLE_PAIRS.some(([x, y]) => Math.min(x, y) === low && Math.max(x, y) === high);
+}
+
+function getSizeGroup(diameter) {
+  const d = Number(diameter);
+  if (!Number.isFinite(d)) return 'unknown';
+  if (d >= DIAMETER_LARGE_THRESHOLD) return '1050plus';
+  const pair = DIAMETER_COMPATIBLE_PAIRS.find(([a, b]) => d === a || d === b);
+  return pair ? `${pair[0]}_${pair[1]}` : String(Math.round(d));
+}
+
+function groupReliningItemsForPackaging(items, options) {
+  if (options.proximityM) return assignReliningClusters(items, options.proximityM);
+  return items.map(item => ({ ...item, _cluster: options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__' }));
+}
+
+function splitIntoValuePackagesTwoPass(items, options) {
+  const workItems = groupReliningItemsForPackaging(items, options);
   const groups = new Map();
   workItems.forEach(item => {
-    const spatialPart = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
-    const sizePart = getReliningDiamSizeKey(item.diameterMm, options.customSizeGroups);
-    const key = `${spatialPart}|${sizePart}`;
+    const key = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
+
+  const suburbPackages = new Map();
+  const customGroups = options.customSizeGroups || [];
+  [...groups.keys()].sort((a, b) => String(a).localeCompare(String(b))).forEach(groupKey => {
+    const groupItems = groups.get(groupKey) || [];
+    const packagesForGroup = [];
+    const presentDiameters = [...new Set(groupItems.map(item => Math.round(Number(item.diameterMm) || 0)))].sort((a, b) => a - b);
+    const claimed = new Set();
+    const resolvedGroups = [];
+    customGroups.forEach(group => {
+      const groupSet = new Set((group || []).map(d => Math.round(Number(d))).filter(Number.isFinite));
+      const present = presentDiameters.filter(d => groupSet.has(d) && !claimed.has(d));
+      if (present.length) {
+        present.forEach(d => claimed.add(d));
+        resolvedGroups.push(present);
+      }
+    });
+    let unassigned = groupItems.slice();
+    const removeAssigned = used => {
+      const ids = new Set(used.map(item => item.assetId));
+      unassigned = unassigned.filter(item => !ids.has(item.assetId));
+    };
+    const closePackage = (diamOrder, rows) => {
+      if (rows.length) packagesForGroup.push([diamOrder, rows.slice()]);
+    };
+
+    resolvedGroups.forEach(groupDiameters => {
+      const groupSet = new Set(groupDiameters.map(d => Math.round(Number(d))));
+      const pipes = unassigned
+        .filter(item => groupSet.has(Math.round(Number(item.diameterMm) || 0)))
+        .sort((a, b) => (Number(b.pipeCost) || 0) - (Number(a.pipeCost) || 0));
+      let current = [];
+      let currentValue = 0;
+      pipes.forEach(item => {
+        const pipeValue = Number(item.pipeCost) || 0;
+        if (current.length && currentValue + pipeValue > options.maxPackageValue) {
+          closePackage(Math.min(...groupDiameters), current);
+          current = [];
+          currentValue = 0;
+        }
+        current.push(item);
+        currentValue += pipeValue;
+      });
+      closePackage(Math.min(...groupDiameters), current);
+      removeAssigned(pipes);
+    });
+
+    const normalDiameters = presentDiameters.filter(d => !claimed.has(d));
+    for (let i = 0; i < normalDiameters.length; i++) {
+      const diam = normalDiameters[i];
+      const pipes = unassigned
+        .filter(item => Math.round(Number(item.diameterMm) || 0) === diam)
+        .sort((a, b) => (Number(b.pipeCost) || 0) - (Number(a.pipeCost) || 0));
+      if (!pipes.length) continue;
+      let current = [];
+      let currentValue = 0;
+      pipes.forEach(item => {
+        const pipeValue = Number(item.pipeCost) || 0;
+        if (current.length && currentValue + pipeValue > options.maxPackageValue) {
+          closePackage(diam, current);
+          current = [];
+          currentValue = 0;
+        }
+        current.push(item);
+        currentValue += pipeValue;
+      });
+      removeAssigned(pipes);
+      if (current.length && i + 1 < normalDiameters.length) {
+        const nextDiam = normalDiameters[i + 1];
+        if (diametersCompatible(diam, nextDiam)) {
+          const fill = unassigned
+            .filter(item => Math.round(Number(item.diameterMm) || 0) === nextDiam)
+            .sort((a, b) => (Number(a.pipeCost) || 0) - (Number(b.pipeCost) || 0));
+          const used = [];
+          fill.forEach(item => {
+            const pipeValue = Number(item.pipeCost) || 0;
+            if (currentValue + pipeValue <= options.maxPackageValue) {
+              current.push(item);
+              currentValue += pipeValue;
+              used.push(item);
+            }
+          });
+          removeAssigned(used);
+        }
+      }
+      closePackage(diam, current);
+    }
+    suburbPackages.set(groupKey, packagesForGroup);
+  });
+
   const packaged = [];
   let pkgCounter = 1;
-  groups.forEach(groupItems => {
-    const sorted = [...groupItems].sort((a, b) => (b.pipeCost || 0) - (a.pipeCost || 0));
-    let current = [];
-    let currentValue = 0;
-    sorted.forEach(item => {
-      const pipeValue = Number(item.pipeCost || 0);
-      if (current.length && (currentValue + pipeValue > options.maxPackageValue)) {
-        current.forEach(entry => packaged.push({ ...entry, package_id: `RLN_${String(pkgCounter).padStart(3, '0')}` }));
-        pkgCounter += 1;
-        current = [];
-        currentValue = 0;
-      }
-      current.push(item);
-      currentValue += pipeValue;
-    });
-    if (current.length) {
-      current.forEach(entry => packaged.push({ ...entry, package_id: `RLN_${String(pkgCounter).padStart(3, '0')}` }));
+  [...suburbPackages.keys()].sort((a, b) => String(a).localeCompare(String(b))).forEach(groupKey => {
+    (suburbPackages.get(groupKey) || []).forEach(([, rows]) => {
+      const packageId = `RLN_${String(pkgCounter).padStart(3, '0')}`;
+      rows.forEach(row => packaged.push({ ...row, package_id: packageId }));
       pkgCounter += 1;
-    }
+    });
   });
   return packaged;
+}
+
+function splitReliningItemsByValue(items, options) {
+  return splitIntoValuePackagesTwoPass(items, options);
 }
 
 function maxReliningPackageSpanM(items) {
@@ -4648,6 +4889,9 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       .map(([suburb]) => suburb);
     const center = meanCoordinate(items);
     const maxSpanM = maxReliningPackageSpanM(items);
+    const maxCentroidDistanceM = maxDistanceFromCentroidM(items, center);
+    const maxAllowedSpreadM = getPackageDistanceThresholdM(options);
+    const isSpatiallyInvalid = !!options.proximityM && (maxSpanM > maxAllowedSpreadM || maxCentroidDistanceM > maxAllowedSpreadM);
     const diameters = [...new Set(items.map(item => item.diameterMm).filter(value => Number.isFinite(value)))].sort((a, b) => a - b);
     return {
       package_id: packageId,
@@ -4661,7 +4905,9 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       total_cost: Number(totalCost.toFixed(2)),
       diameters_mm: diameters,
       max_span_m: Number(maxSpanM.toFixed(0)),
-      distance_warning: maxSpanM > (options.proximityM ? options.proximityM * 2 : 2000) ? 'Check package spread or coordinate quality' : '',
+      max_centroid_distance_m: Number(maxCentroidDistanceM.toFixed(0)),
+      spatially_invalid: isSpatiallyInvalid,
+      distance_warning: isSpatiallyInvalid ? 'Invalid spatial spread - excluded from normal output' : '',
       coordinate_sources: packageCoordinateSourceSummary(items),
       asset_ids: items.map(item => item.assetId),
       criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
@@ -4676,44 +4922,29 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
           : null
       }))
     };
-  });
+  }).filter(pkg => !pkg.spatially_invalid);
 }
 
 function topupReliningPackages(packages, allCostedItems, options) {
-  if (options.topupMode === 'none' || options.method === 'count') return packages;
-  const allDiams = [...new Set(allCostedItems.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
+  if (options.topupMode === 'No top up' || options.method === 'count') return packages;
   const packagedIds = new Set(packages.flatMap(pkg => pkg.asset_ids || []));
-  const pool = allCostedItems.filter(i => !packagedIds.has(i.assetId) && Number.isFinite(i.pipeCost));
+  const pool = groupReliningItemsForPackaging(allCostedItems.filter(i => !packagedIds.has(i.assetId) && Number.isFinite(i.pipeCost)), options);
   const usedIds = new Set();
   const result = packages.map(pkg => {
     let remaining = options.maxPackageValue - pkg.total_cost;
     if (remaining <= 0) return pkg;
-    const dominantCondition = (pkg.condition_8_count || 0) >= (pkg.condition_7_count || 0) ? 8 : 7;
-    const pkgDiams = (pkg.diameters_mm || []).map(Number);
-    const adjacentDiams = new Set();
-    pkgDiams.forEach(d => {
-      const idx = allDiams.indexOf(d);
-      if (idx === -1) return;
-      for (let offset = -2; offset <= 2; offset++) {
-        const adj = allDiams[idx + offset];
-        if (adj != null) adjacentDiams.add(adj);
-      }
-    });
-    const pkgSuburb = pkg.primary_suburb || pkg.suburb || '';
-    let candidates = pool.filter(i => !usedIds.has(i.assetId) && (i.suburb || '') === pkgSuburb);
-    // Both modes apply ±2 size rule; same_size also filters by condition
-    candidates = candidates.filter(i => adjacentDiams.has(i.diameterMm));
-    if (options.topupMode === 'same_size') {
-      candidates = candidates.filter(i => i.condition === dominantCondition);
-    }
-    candidates.sort((a, b) =>
-      (Number(b.criticalityScore) || 0) - (Number(a.criticalityScore) || 0) ||
-      (a.pipeCost || 0) - (b.pipeCost || 0)
-    );
+    const pkgGroup = options.proximityM ? (pkg.assets?.[0]?._cluster || '') : (options.groupBySuburb ? (pkg.primary_suburb || pkg.suburb || '') : '__all__');
+    const pkgSizeGroups = new Set((pkg.diameters_mm || []).map(getSizeGroup));
+    const candidates = pool
+      .filter(i => !usedIds.has(i.assetId))
+      .filter(i => (options.proximityM ? (i._cluster || '') === pkgGroup : (options.groupBySuburb ? (i.suburb || '') === pkgGroup : true)))
+      .filter(i => pkgSizeGroups.has(getSizeGroup(i.diameterMm)))
+      .sort((a, b) => (Number(a.pipeCost) || 0) - (Number(b.pipeCost) || 0));
     if (!candidates.length) return pkg;
     const addedItems = [];
     for (const candidate of candidates) {
       if (remaining <= 0) break;
+      if (options.proximityM && !canJoinSpatialPackage([...(pkg.assets || []), ...addedItems], candidate, options)) continue;
       if ((candidate.pipeCost || 0) <= remaining) {
         addedItems.push({ ...candidate, topup: true });
         usedIds.add(candidate.assetId);
@@ -4725,6 +4956,9 @@ function topupReliningPackages(packages, allCostedItems, options) {
     const newCost = newAssets.reduce((s, i) => s + (Number(i.pipeCost) || 0), 0);
     const newLength = newAssets.reduce((s, i) => s + (Number(i.lengthM) || 0), 0);
     const newDiams = [...new Set(newAssets.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
+    const newCenter = meanCoordinate(newAssets);
+    const newMaxSpanM = maxReliningPackageSpanM(newAssets);
+    const newMaxCentroidDistanceM = maxDistanceFromCentroidM(newAssets, newCenter);
     return {
       ...pkg,
       assets: newAssets,
@@ -4735,6 +4969,10 @@ function topupReliningPackages(packages, allCostedItems, options) {
       total_length_m: Number(newLength.toFixed(1)),
       total_cost: Number(newCost.toFixed(2)),
       diameters_mm: newDiams,
+      max_span_m: Number(newMaxSpanM.toFixed(0)),
+      max_centroid_distance_m: Number(newMaxCentroidDistanceM.toFixed(0)),
+      lat: newCenter?.lat ?? pkg.lat,
+      lon: newCenter?.lon ?? pkg.lon,
       criticality_score: newAssets.reduce((s, i) => s + (Number(i.criticalityScore) || 0), 0),
       critical_pipe_count: newAssets.filter(i => (Number(i.criticalityScore) || 0) > 0).length,
       topup_count: addedItems.length
@@ -4744,26 +4982,104 @@ function topupReliningPackages(packages, allCostedItems, options) {
 }
 
 function reliningPackagePriorityCompare(a, b) {
-  const critDiff = (Number(b?.criticality_score) || 0) - (Number(a?.criticality_score) || 0);
-  if (critDiff !== 0) return critDiff;
-  const valueDiff = (Number(b?.total_cost) || 0) - (Number(a?.total_cost) || 0);
-  if (valueDiff !== 0) return valueDiff;
-  const lengthDiff = (Number(b?.total_length_m) || 0) - (Number(a?.total_length_m) || 0);
-  if (lengthDiff !== 0) return lengthDiff;
-  const cond8Diff = (Number(b?.condition_8_count) || 0) - (Number(a?.condition_8_count) || 0);
-  if (cond8Diff !== 0) return cond8Diff;
+  for (const key of ['package_priority_score', 'package_total_pipe_priority', 'package_high_crit_count', 'package_large_diam_count', 'package_worst_condition', 'package_total_length', 'package_pipe_count']) {
+    const diff = (Number(b?.[key]) || 0) - (Number(a?.[key]) || 0);
+    if (diff !== 0) return diff;
+  }
   return String(a?.package_id || '').localeCompare(String(b?.package_id || ''));
 }
 
+function reliningDiameterWeight(value) {
+  const d = Number(value) || 0;
+  if (d < 225) return 1.0;
+  if (d < 300) return 1.2;
+  if (d < 375) return 1.5;
+  if (d < 525) return 1.8;
+  return 2.2;
+}
+
+function addPackagePriority(packages) {
+  return (packages || []).map(pkg => {
+    const assets = (pkg.assets || []).map(asset => {
+      const criticality_1dp = Number((Number(asset.criticalityScore ?? asset.Score) || 0).toFixed(1));
+      const rawConditionForPriority = getValueByAliases(asset.raw || {}, ['SW_Condition']);
+      const condition_score = Math.max(cleanNumber(rawConditionForPriority) || 0, 0);
+      const diameter_weight = reliningDiameterWeight(asset.diameterMm);
+      const pipe_priority_score = condition_score * diameter_weight * (1 + criticality_1dp);
+      return {
+        ...asset,
+        criticality_1dp,
+        diameter_weight,
+        condition_score,
+        pipe_priority_score,
+        is_high_criticality: criticality_1dp >= 4.0 ? 1 : 0,
+        is_large_diameter: (Number(asset.diameterMm) || 0) >= 375 ? 1 : 0
+      };
+    });
+    const package_total_pipe_priority = assets.reduce((s, a) => s + (Number(a.pipe_priority_score) || 0), 0);
+    const package_high_crit_count = assets.reduce((s, a) => s + (Number(a.is_high_criticality) || 0), 0);
+    const package_large_diam_count = assets.reduce((s, a) => s + (Number(a.is_large_diameter) || 0), 0);
+    const package_worst_condition = Math.max(0, ...assets.map(a => Number(a.condition_score) || 0));
+    const package_total_length = assets.reduce((s, a) => s + (Number(a.lengthM) || 0), 0);
+    const package_pipe_count = assets.length;
+    const package_priority_score = package_total_pipe_priority + 5 * package_high_crit_count + 3 * package_large_diam_count + 2 * package_worst_condition;
+    return {
+      ...pkg,
+      assets,
+      package_total_pipe_priority,
+      package_high_crit_count,
+      package_large_diam_count,
+      package_worst_condition,
+      package_total_length,
+      package_pipe_count,
+      package_priority_score
+    };
+  }).sort(reliningPackagePriorityCompare).map((pkg, index) => ({
+    ...pkg,
+    package_priority_rank: index + 1,
+    assets: (pkg.assets || []).map(asset => ({
+      ...asset,
+      package_total_pipe_priority: pkg.package_total_pipe_priority,
+      package_high_crit_count: pkg.package_high_crit_count,
+      package_large_diam_count: pkg.package_large_diam_count,
+      package_worst_condition: pkg.package_worst_condition,
+      package_total_length: pkg.package_total_length,
+      package_pipe_count: pkg.package_pipe_count,
+      package_priority_score: pkg.package_priority_score,
+      package_priority_rank: index + 1
+    }))
+  }));
+}
+
 function prioritiseAndRenumberReliningPackages(packages) {
-  return [...(packages || [])]
-    .sort(reliningPackagePriorityCompare)
+  return addPackagePriority(packages)
     .map((pkg, index) => ({
       ...pkg,
       original_package_id: pkg.original_package_id || pkg.package_id,
       package_id: `RLN_${String(index + 1).padStart(3, '0')}`,
       assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: `RLN_${String(index + 1).padStart(3, '0')}` }))
     }));
+}
+
+function isIslandPipe(item) {
+  const raw = item.raw || {};
+  const fields = [item.suburb, raw['Asset Suburb'], raw['Location - Suburb'], raw['Suburb'], raw['Pipe_Start_Address'], raw['Formatted_Address'], raw['Physical_Location'], raw['Location - Street/Road Name']];
+  return fields.some(value => {
+    const text = String(value || '').toUpperCase();
+    return text.includes('SCOTLAND ISLAND') || text.includes(' ISLAND') || text.startsWith('ISLAND ');
+  });
+}
+
+function forceIslandSinglePipePackages(packagedItems) {
+  if (!packagedItems.length) return packagedItems;
+  let nextNumber = Math.max(0, ...packagedItems.map(item => {
+    const match = String(item.package_id || '').match(/(\d+)$/);
+    return match ? Number(match[1]) : 0;
+  })) + 1;
+  return packagedItems.map(item => {
+    if (!isIslandPipe(item)) return item;
+    return { ...item, package_id: `RLN_${String(nextNumber++).padStart(3, '0')}` };
+  });
 }
 
 function splitIntoPackagesByCount(rows, pipesPerPackage, groupBySuburb, suburbCol) {
@@ -4947,11 +5263,11 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>Relining rates are matched by pipe diameter first, then by the length band in <code>Size/Descriptor</code>.</li>
       <li>Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.</li>
       <li>${methodText}</li>
-      <li>${options.proximityM ? `Pipes are grouped by spatial proximity — anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
+      <li>${options.proximityM ? `Pipes are grouped by spatial proximity — package-spread clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
       <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'Diameter is the primary grouping factor — packages are built per diameter, then top-up adds adjacent sizes to reach the target value.'}</li>
-      <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
-      <li>${options.topupMode === 'same_size' ? 'Top-up active — underfilled packages pull in same-condition pipes within ±2 adjacent sizes, critical pipes first.' : options.topupMode === 'any_condition' ? 'Top-up active — underfilled packages pull in any pipe from the current condition selection, critical pipes first.' : 'No top-up — packages are not filled beyond their initial split.'}</li>
-      <li>Packages are prioritised by criticality score first, then value, then length, then Condition 8 count.</li>
+      <li>Packages with a spatial spread exceeding <strong>${getPackageDistanceThresholdM(options).toLocaleString()} m</strong> are treated as invalid and excluded from normal output.</li>
+      <li>${options.topupMode === 'Same condition only' ? 'Top-up active - underfilled packages pull cheapest fitting pipes from the same suburb or cluster and compatible size group.' : options.topupMode === 'Same condition first, lower condition if needed' ? 'Top-up active - same-condition pipes are tried first, then the old lower-condition fallback is used for single-condition modes.' : 'No top-up - packages are not filled beyond their initial split.'}</li>
+      <li>Packages are prioritised by the restored condition, diameter, and criticality scoring model, then renumbered by priority.</li>
       <li>Packages with usable coordinates are drawn on the map.</li>
     </ul>
   `;
@@ -5035,6 +5351,7 @@ function renderGeneratedPackages(data) {
   const displayPackages = data.packages.map(pkg => ({
     package_id: renderReliningPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
+    centroid_lga: 'Northern Beaches',
     pipe_count: pkg.pipe_count,
     condition_7_count: pkg.condition_7_count,
     condition_8_count: pkg.condition_8_count,
@@ -5042,6 +5359,7 @@ function renderGeneratedPackages(data) {
     total_cost: formatCurrency(pkg.total_cost),
     diameters_mm: (pkg.diameters_mm || []).join(', '),
     max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
+    max_centroid_distance_m: Number(pkg.max_centroid_distance_m || 0).toFixed(0),
     distance_warning: pkg.distance_warning || '',
     coordinate_sources: pkg.coordinate_sources || '',
     asset_ids: (pkg.asset_ids || []).join(', ')
@@ -5644,16 +5962,29 @@ async function generateReliningPackages() {
     lastReliningPackagingPreview = preview;
     setLoadTxt('Matching relining rates...');
     await waitForPaint();
-    const packagedItems = options.method === 'count'
-      ? splitReliningItemsByCount(preview.costed, options)
-      : splitReliningItemsByValue(preview.costed, options);
+    const spatialCosted = options.proximityM
+      ? preview.costed.filter(item => isUsablePackageCoordinate(item))
+      : preview.costed;
+    let packagedItems = options.method === 'count'
+      ? splitReliningItemsByCount(spatialCosted, options)
+      : splitReliningItemsByValue(spatialCosted, options);
+    packagedItems = forceIslandSinglePipePackages(packagedItems);
     setLoadTxt('Building relining packages...');
     await waitForPaint();
     let packages = buildReliningPackageObjects(packagedItems, options);
-    if (options.topupMode !== 'none') {
+    if (options.topupMode !== 'No top up') {
       setLoadTxt('Topping up underfilled packages...');
       await waitForPaint();
       packages = topupReliningPackages(packages, preview.costed, options);
+      if (options.topupMode === 'Same condition first, lower condition if needed') {
+        let lowerMode = null;
+        if (options.reliningMode === 'Condition 8 only') lowerMode = 'Condition 7 only';
+        else if (options.reliningMode === 'Condition 7 only') lowerMode = 'Condition 8 only';
+        if (lowerMode) {
+          const lowerPreview = buildReliningPackagingPreview(reliningAssetsRows, { ...options, reliningMode: lowerMode });
+          packages = topupReliningPackages(packages, lowerPreview.costed, options);
+        }
+      }
     }
     setLoadTxt('Prioritising and renumbering packages...');
     await waitForPaint();
@@ -5664,8 +5995,9 @@ async function generateReliningPackages() {
       options,
       preview,
       package_count: packages.length,
-      costed_pipe_count: preview.costed.length,
+      costed_pipe_count: spatialCosted.length,
       uncosted_pipe_count: preview.uncosted.length,
+      missing_coordinate_assets: options.proximityM ? preview.noCoords : [],
       total_length_m: Number(totalLength.toFixed(1)),
       total_cost: Number(totalCost.toFixed(2)),
       packages,
@@ -5742,6 +6074,8 @@ function exportReliningPackagesCsv() {
     'package_total_length_m',
     'package_total_cost',
     'package_max_span_m',
+    'package_max_centroid_distance_m',
+    'centroid_lga',
     'distance_warning',
     'coordinate_sources',
     'latitude',
@@ -5768,6 +6102,8 @@ function exportReliningPackagesCsv() {
         Number(pkg.total_length_m || 0).toFixed(1),
         Number(pkg.total_cost || 0).toFixed(2),
         Number(pkg.max_span_m || 0).toFixed(0),
+        Number(pkg.max_centroid_distance_m || 0).toFixed(0),
+        'Northern Beaches',
         pkg.distance_warning || '',
         pkg.coordinate_sources || '',
         item.lat ?? '',
@@ -5795,15 +6131,6 @@ async function downloadReliningPackagesZip() {
   }
 
   try {
-    function diamWeight(d) {
-      if (!Number.isFinite(d)) return 1.0;
-      if (d < 225) return 1.0;
-      if (d < 300) return 1.2;
-      if (d < 375) return 1.5;
-      if (d < 525) return 1.8;
-      return 2.2;
-    }
-
     function fmtCurrency(v) {
       if (!Number.isFinite(v)) return '';
       return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -5811,8 +6138,7 @@ async function downloadReliningPackagesZip() {
 
     function csvCell(v) {
       const s = String(v ?? '');
-      if (s.includes(',') || s.includes('"') || s.includes('
-')) {
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return '"' + s.replace(/"/g, '""') + '"';
       }
       return s;
@@ -5835,14 +6161,13 @@ async function downloadReliningPackagesZip() {
       return best || '0';
     }
 
-    function pkgFilename(idx, pkg) {
-      const num = String(idx + 1).padStart(3, '0');
+    function pkgFilename(pkg) {
       const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
         .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
         .filter(Boolean)
         .join('_');
       const dominant = modeDiameter(pkg.assets || []);
-      return `RLN_${num}_${suburbs}_D${dominant}mm.csv`;
+      return `${pkg.package_id}_${suburbs}_D${dominant}mm.csv`;
     }
 
     const HEADERS = [
@@ -5856,12 +6181,15 @@ async function downloadReliningPackagesZip() {
 
     const zip = new JSZip();
     const csvFilenames = [];
+    const summaryRows = [[
+      'Package ID', 'Suburb', 'Diameters (mm)', 'Pipes', 'Length (m)', 'Cost ($)',
+      'Priority Rank', 'Priority Score', 'Asset IDs'
+    ]];
 
-    // ── Per-package CSVs ───────────────────────────────────────────────────
-    packages.forEach((pkg, pkgIdx) => {
+    packages.forEach(pkg => {
       const assets = pkg.assets || [];
       const diametersArr = pkg.diameters_mm || pkg.diameters || [];
-      const diametersStr = diametersArr.map(d => '⌀' + d).join(', ');
+      const diametersStr = diametersArr.map(d => 'D' + d).join(', ');
       const maxSpanKm = Number.isFinite(pkg.max_span_m)
         ? (pkg.max_span_m / 1000).toFixed(1) + ' km'
         : '';
@@ -5876,10 +6204,9 @@ async function downloadReliningPackagesZip() {
         const diam = Math.round(item.diameterMm ?? 0);
         const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
         const condNum = Number.isFinite(item.condition) ? item.condition : 0;
-        const dw = diamWeight(item.diameterMm);
-        const cs = condNum;
-        const critW = 1 + Math.round(crit * 10) / 10;
-        const pps = cs * dw * critW;
+        const dw = Number(item.diameter_weight ?? reliningDiameterWeight(item.diameterMm));
+        const cs = Number(item.condition_score ?? condNum);
+        const pps = Number(item.pipe_priority_score ?? (cs * dw * (1 + Math.round(crit * 10) / 10)));
         const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
         const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
         totalLengthM += lenM;
@@ -5916,19 +6243,31 @@ async function downloadReliningPackagesZip() {
       // Totals row
       const totalsRow = HEADERS.map(() => '');
       totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
-      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2);
+      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
       totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
       totalsRow[HEADERS.indexOf('Number of Pipes')]    = numPipes;
       lines.push(csvRow(totalsRow));
 
-      const csvContent = lines.join('
-');
-      const filename = pkgFilename(pkgIdx, pkg);
+      const csvContent = lines.join('\n');
+      const filename = pkgFilename(pkg);
       csvFilenames.push(filename);
       zip.file(filename, csvContent);
+
+      const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
+      const assetIds = assets.map(i => i.assetId).join(', ');
+      summaryRows.push([
+        pkg.package_id,
+        suburbs,
+        diametersStr,
+        assets.length,
+        totalLengthM.toFixed(1),
+        totalCost.toFixed(2),
+        pkg.package_priority_rank ?? '',
+        Number(pkg.package_priority_score || 0).toFixed(4),
+        assetIds
+      ]);
     });
 
-    // ── package_summary.txt ────────────────────────────────────────────────
     const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60)];
     packages.forEach(pkg => {
       const assets = pkg.assets || [];
@@ -5947,16 +6286,17 @@ async function downloadReliningPackagesZip() {
       summaryLines.push(`Assets:     ${assetIds}`);
       summaryLines.push('-'.repeat(60));
     });
-    zip.file('package_summary.txt', summaryLines.join('
-'));
+    zip.file('package_summary.txt', summaryLines.join('\n'));
+    zip.file('package_summary.csv', summaryRows.map(csvRow).join('\n'));
 
-    // ── file_list.txt ──────────────────────────────────────────────────────
-    const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
-    csvFilenames.slice().sort().forEach(n => fileListLines.push(n));
-    zip.file('file_list.txt', fileListLines.join('
-'));
+    if (typeof XLSX !== 'undefined') {
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(summaryRows);
+      XLSX.utils.book_append_sheet(wb, ws, 'Package Summary');
+      const xlsxArray = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+      zip.file('package_summary.xlsx', xlsxArray);
+    }
 
-    // ── Generate and download ──────────────────────────────────────────────
     const blob = await zip.generateAsync({ type: 'blob' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -6399,7 +6739,7 @@ function getCctvPackagingOptions() {
     conditionGroups: conditionGroups.length ? conditionGroups : ['tba', '1-6'],
     targetMode,
     lookbackYears: Math.max(0, parseNumberValue(document.getElementById('cctvPkgLookbackYears')?.value) || 4),
-    proximityM: Math.max(50, parseNumberValue(document.getElementById('cctvPkgProximity')?.value) || 500),
+    proximityM: Math.max(50, parseNumberValue(document.getElementById('cctvPkgProximity')?.value) || MAX_PACKAGE_DISTANCE_METRES),
     targetLengthM: Math.max(1, parseNumberValue(document.getElementById('cctvPkgTargetLength')?.value) || 1000),
     pipesPerPackage: Math.max(1, Math.round(parseNumberValue(document.getElementById('cctvPkgPipeCount')?.value) || 25)),
     metresPerHour: Math.max(1, parseNumberValue(document.getElementById('cctvPkgMetresPerHour')?.value) || 80),
@@ -6455,7 +6795,8 @@ function shouldIncludeCctvCondition(condition, isTba, groups) {
     (selected.has('3-4') && conditionInRange(condition, 3, 4)) ||
     (selected.has('5-6') && conditionInRange(condition, 5, 6)) ||
     (selected.has('1-6') && conditionInRange(condition, 1, 6)) ||
-    (selected.has('7-8') && conditionInRange(condition, 7, 8))
+    (selected.has('7-8') && conditionInRange(condition, 7, 8)) ||
+    (selected.has('9-10') && conditionInRange(condition, 9, 10))
   );
 }
 
@@ -6471,8 +6812,6 @@ function targetModeLabel(options) {
 }
 
 const CCTV_MIN_HOURS_PER_PIPE = 4;
-const CCTV_MAX_PACKAGE_SPAN_M = 1000;
-
 function calculateCctvSurveyHours(totalLengthM, pipeCount, options) {
   const lengthBasedHours = totalLengthM / Math.max(1, options?.metresPerHour || 80);
   const minimumPipeHours = Math.max(0, pipeCount || 0) * CCTV_MIN_HOURS_PER_PIPE;
@@ -6516,9 +6855,8 @@ function renderCctvPackagingReasoning(options, preview = null) {
   if (!el || !options) return;
   const recentExcluded = preview?.recentExcluded?.length;
   const conditionText = conditionGroupsLabel(options.conditionGroups);
-  const consolidationSpanM = (options.consolidateSmallDistanceM || 0) * 2;
   const consolidationText = options.consolidateSmallPackages
-    ? `After the normal package run, original packages with fewer than 5 pipes are moved once into the nearest original non-small package within ${options.consolidateSmallDistanceM.toLocaleString()} m. This consolidation step is allowed to override the ${CCTV_MAX_PACKAGE_SPAN_M.toLocaleString()} m normal max-span rule, but the consolidated package span must stay within ${consolidationSpanM.toLocaleString()} m. Small packages are not chained into other small packages.`
+    ? `After the normal package run, original packages with fewer than 5 pipes are moved once into the nearest original non-small package within ${options.consolidateSmallDistanceM.toLocaleString()} m only when the merged package remains within the configured spread threshold. Small packages are not chained into other small packages.`
     : 'Small-package consolidation is switched off, so the fixed-centre package results are left as generated.';
   el.innerHTML = `
     <strong>Packaging Reasoning:</strong>
@@ -6528,8 +6866,8 @@ function renderCctvPackagingReasoning(options, preview = null) {
       <li>CCTV recency is read from explicit CCTV/inspection date fields where present. If the observation method says <code>CCTV</code>, the tool also uses update dates such as <code>Date_Changed</code> or <code>Date_Created</code>.</li>
       <li>Assets with no CCTV date remain eligible, because there is no evidence of a recent inspection.</li>
       <li>TBA condition pipes are treated as high-priority candidates when TBA is selected, because their condition is unknown.</li>
-      <li>Packages are spatially bounded: every pipe in a package must sit within <strong>${options.proximityM.toLocaleString()} m</strong> of one recomputed package centre.</li>
-      <li>Packages also have a hard maximum pipe-to-pipe span of <strong>${CCTV_MAX_PACKAGE_SPAN_M.toLocaleString()} m</strong>, so distant pipes cannot be pulled into the same package.</li>
+      <li>Packages are spatially bounded: every pipe must be within <strong>${options.proximityM.toLocaleString()} m</strong> of an existing package pipe or the recomputed package centre.</li>
+      <li>Packages also have a hard maximum pipe-to-pipe spread of <strong>${options.proximityM.toLocaleString()} m</strong>, so distant pipes cannot be pulled into the same package.</li>
       <li>The package target is ${escapeHtml(targetModeLabel(options))}; criticality affects seed and candidate ordering, and final packages are renumbered using relining-style package priority: higher value/effort first, then criticality. It cannot override the radius or max-span rules.</li>
       <li>${escapeHtml(consolidationText)}</li>
       <li>CCTV cost is estimated from package length divided by <strong>${options.metresPerHour.toLocaleString()} m/hr</strong>, with a minimum allowance of <strong>${CCTV_MIN_HOURS_PER_PIPE} hours per pipe</strong>, multiplied by the median CCTV panel rate.</li>
@@ -6955,7 +7293,7 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
       if (!canAddToCctvPackage(pkg, entry.item, options)) break;
       pkg.push(entry.item);
     }
-    const boundedPkg = pkg.filter(item => haversineDistanceM(clusterCenter, item) <= options.proximityM);
+    const boundedPkg = pkg.filter(item => isUsablePackageCoordinate(item) && canJoinSpatialPackage(pkg.filter(existing => existing.assetId !== item.assetId), item, options));
     const pkgIds = new Set(boundedPkg.map(item => item.assetId));
     for (let i = remaining.length - 1; i >= 0; i--) {
       if (pkgIds.has(remaining[i].assetId)) remaining.splice(i, 1);
@@ -6971,6 +7309,8 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
     const cctvRate = rateMeta?.medianRate || 0;
     const totalCost = surveyHours * cctvRate;
     const maxSpanM = maxPackageSpanM(items);
+    const maxCentroidDistanceM = maxDistanceFromCentroidM(items, centroid);
+    const isSpatiallyInvalid = maxSpanM > getPackageDistanceThresholdM(options) || maxCentroidDistanceM > getPackageDistanceThresholdM(options);
     const coordinateSources = packageCoordinateSourceSummary(items);
     const suburbCounts = {};
     items.filter(item => item.package_center_distance_m == null || item.package_center_distance_m <= options.proximityM).forEach(item => {
@@ -6997,7 +7337,9 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
       cctv_rate: cctvRate,
       total_cost: totalCost,
       max_span_m: maxSpanM,
-      distance_warning: maxSpanM > (options.proximityM * 2) ? 'Check coordinates or reduce radius' : '',
+      max_centroid_distance_m: maxCentroidDistanceM,
+      spatially_invalid: isSpatiallyInvalid,
+      distance_warning: isSpatiallyInvalid ? 'Invalid spatial spread - excluded from normal output' : '',
       coordinate_sources: coordinateSources,
       package_radius_m: options.proximityM,
       asset_ids: assetIds,
@@ -7017,7 +7359,7 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
           : null
       }))
     };
-  });
+  }).filter(pkg => !pkg.spatially_invalid);
 }
 
 function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
@@ -7067,7 +7409,7 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
             ? haversineDistanceM(currentCenter, item)
             : Number.POSITIVE_INFINITY
         }))
-        .filter(entry => Number.isFinite(entry.distanceM) && entry.distanceM <= options.proximityM * 1.5)
+        .filter(entry => Number.isFinite(entry.distanceM) && entry.distanceM <= options.proximityM)
         .sort((a, b) => {
           const criticalityDiff = cctvCriticalitySortScore(b.item, options) - cctvCriticalitySortScore(a.item, options);
           if (criticalityDiff !== 0) return criticalityDiff;
@@ -7079,13 +7421,9 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
         const tentativeItems = [...items, entry.item];
         const tentativeCenter = meanCoordinate(tentativeItems);
         if (!tentativeCenter) continue;
-        const allWithinPackageRadius = tentativeItems.every(item =>
-          Number.isFinite(item.lat) &&
-          Number.isFinite(item.lon) &&
-          haversineDistanceM(tentativeCenter, item) <= options.proximityM
-        );
-        if (!allWithinPackageRadius) continue;
-        if (maxPackageSpanM(tentativeItems) > CCTV_MAX_PACKAGE_SPAN_M) continue;
+        if (!canJoinSpatialPackage(items, entry.item, options)) continue;
+        if (maxPackageSpanM(tentativeItems) > getPackageDistanceThresholdM(options)) continue;
+        if (maxDistanceFromCentroidM(tentativeItems, tentativeCenter) > getPackageDistanceThresholdM(options)) continue;
         items.push(entry.item);
         acceptedInPass = true;
         break;
@@ -7107,6 +7445,8 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
     const cctvRate = rateMeta?.medianRate || 0;
     const totalCost = surveyHours * cctvRate;
     const maxSpanM = maxPackageSpanM(items);
+    const maxCentroidDistanceM = maxDistanceFromCentroidM(items, centroid);
+    const isSpatiallyInvalid = maxSpanM > getPackageDistanceThresholdM(options) || maxCentroidDistanceM > getPackageDistanceThresholdM(options);
     const coordinateSources = packageCoordinateSourceSummary(items);
     const suburbCounts = {};
     items.forEach(item => {
@@ -7128,12 +7468,15 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
       pipe_count: items.length,
       tba_pipe_count: items.filter(item => item.isTbaCondition).length,
       critical_pipe_count: items.filter(item => item.criticalityScore > 0).length,
+      criticality_score: cctvPackageCriticalityTotal(items),
       total_length_m: totalLengthM,
       cctv_hours: surveyHours,
       cctv_rate: cctvRate,
       total_cost: totalCost,
       max_span_m: maxSpanM,
-      distance_warning: maxSpanM > (options.proximityM * 2) ? 'Check coordinates or reduce radius' : '',
+      max_centroid_distance_m: maxCentroidDistanceM,
+      spatially_invalid: isSpatiallyInvalid,
+      distance_warning: isSpatiallyInvalid ? 'Invalid spatial spread - excluded from normal output' : '',
       coordinate_sources: coordinateSources,
       package_radius_m: options.proximityM,
       asset_ids: assetIds,
@@ -7153,7 +7496,7 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
           : null
       }))
     };
-  });
+  }).filter(pkg => !pkg.spatially_invalid);
 }
 
 function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOptions) {
@@ -7163,6 +7506,8 @@ function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOption
   const cctvRate = rateMeta?.medianRate || 0;
   const totalCost = surveyHours * cctvRate;
   const maxSpanM = maxPackageSpanM(items);
+  const maxCentroidDistanceM = maxDistanceFromCentroidM(items, clusterCenter);
+  const isSpatiallyInvalid = maxSpanM > getPackageDistanceThresholdM(options) || maxCentroidDistanceM > getPackageDistanceThresholdM(options);
   const coordinateSources = packageCoordinateSourceSummary(items);
   const suburbCounts = {};
   items.forEach(item => {
@@ -7189,7 +7534,9 @@ function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOption
     cctv_rate: cctvRate,
     total_cost: totalCost,
     max_span_m: maxSpanM,
-    distance_warning: maxSpanM > (options.proximityM * 2) ? 'Check coordinates or reduce radius' : '',
+    max_centroid_distance_m: maxCentroidDistanceM,
+    spatially_invalid: isSpatiallyInvalid,
+    distance_warning: isSpatiallyInvalid ? 'Invalid spatial spread - excluded from normal output' : '',
     coordinate_sources: coordinateSources,
     package_radius_m: options.proximityM,
     asset_ids: assetIds,
@@ -7240,7 +7587,8 @@ function consolidateSmallCctvPackages(packages, options, rateMeta) {
     });
     if (!bestTarget) return;
     const tentativeItems = [...bestTarget.items, ...donor.items];
-    if (maxPackageSpanM(tentativeItems) > maxDistanceM * 2) return;
+    if (maxPackageSpanM(tentativeItems) > maxDistanceM) return;
+    if (maxDistanceFromCentroidM(tentativeItems, meanCoordinate(tentativeItems)) > maxDistanceM) return;
     bestTarget.items = tentativeItems;
     bestTarget.center = meanCoordinate(bestTarget.items) || bestTarget.center;
     donor.mergedInto = bestTarget.originalIndex;
@@ -7392,9 +7740,12 @@ function renderGeneratedCctvPackages(packages) {
   const summaryRows = packages.map(pkg => ({
     package_id: renderCctvPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
+    centroid_lga: 'Northern Beaches',
     pipe_count: pkg.pipe_count,
     criticality_score: Number(pkg.criticality_score || 0).toFixed(1),
     total_length_m: pkg.total_length_m.toFixed(1),
+    max_spread_m: Number(pkg.max_span_m || 0).toFixed(0),
+    max_centroid_distance_m: Number(pkg.max_centroid_distance_m || 0).toFixed(0),
     cctv_hours: pkg.cctv_hours.toFixed(2),
     cctv_rate: formatCurrency(pkg.cctv_rate),
     total_cost: formatCurrency(pkg.total_cost),
@@ -7469,6 +7820,8 @@ function exportCctvPackagesCsv() {
     'length_m',
     'package_total_length_m',
     'package_max_span_m',
+    'package_max_centroid_distance_m',
+    'centroid_lga',
     'distance_warning',
     'coordinate_sources',
     'package_radius_m',
@@ -7499,6 +7852,8 @@ function exportCctvPackagesCsv() {
         Number(item.lengthM || 0).toFixed(1),
         Number(pkg.total_length_m || 0).toFixed(1),
         Number(pkg.max_span_m || 0).toFixed(0),
+        Number(pkg.max_centroid_distance_m || 0).toFixed(0),
+        'Northern Beaches',
         pkg.distance_warning || '',
         pkg.coordinate_sources || '',
         pkg.package_radius_m || '',
