@@ -892,7 +892,7 @@ window.addEventListener('keydown', (event) => {
 
     <div class="pkg-panel">
       <div class="lbl">Packaging Rules</div>
-      <div class="pkg-grid" style="grid-template-columns:1.2fr 1.2fr 1fr 1fr 1fr 1fr auto">
+      <div class="pkg-grid" style="grid-template-columns:1.2fr 1.2fr 1fr 1fr 1fr auto">
         <div class="fg">
           <label for="pkgReliningMode">Pipe Condition Selection</label>
           <select id="pkgReliningMode" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
@@ -924,13 +924,6 @@ window.addEventListener('keydown', (event) => {
           </select>
         </div>
         <div class="fg">
-          <label for="pkgGroupSize">Group by Size</label>
-          <select id="pkgGroupSize" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-            <option value="no" selected>No</option>
-            <option value="yes">Yes</option>
-          </select>
-        </div>
-        <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
           <select id="pkgGroupingMethod" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="suburb" selected>Suburb (no coordinates)</option>
@@ -944,6 +937,27 @@ window.addEventListener('keydown', (event) => {
         <div class="fg">
           <label>&nbsp;</label>
           <button class="run-btn" style="margin-top:0" id="pkgPreviewBtn" onclick="loadPackagingPreview()">Preview Candidates</button>
+        </div>
+      </div>
+      <div id="pkgSizeGroupsRow" style="display:none;margin-top:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Ctrl+click to select multiple.</div>
+        <div class="pkg-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
+          <div class="fg">
+            <label for="pkgSizeGroup1">Group 1</label>
+            <select id="pkgSizeGroup1" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+          </div>
+          <div class="fg">
+            <label for="pkgSizeGroup2">Group 2</label>
+            <select id="pkgSizeGroup2" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+          </div>
+          <div class="fg">
+            <label for="pkgSizeGroup3">Group 3</label>
+            <select id="pkgSizeGroup3" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+          </div>
+          <div class="fg">
+            <label for="pkgSizeGroup4">Group 4</label>
+            <select id="pkgSizeGroup4" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+          </div>
         </div>
       </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
@@ -4349,9 +4363,19 @@ function getReliningPackagingOptions() {
     maxPackageValue: Math.max(Number.isFinite(maxPackageValue) ? maxPackageValue : 500000, 1),
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
-    groupBySize: (document.getElementById('pkgGroupSize')?.value || 'no') === 'yes',
     groupingMethod,
-    proximityM
+    proximityM,
+    customSizeGroups: (() => {
+      const seen = new Set();
+      return [1, 2, 3, 4].map(i => {
+        const el = document.getElementById(`pkgSizeGroup${i}`);
+        if (!el) return [];
+        return Array.from(el.selectedOptions).map(o => parseInt(o.value, 10)).filter(d => {
+          if (seen.has(d)) return false;
+          seen.add(d); return true;
+        });
+      }).filter(g => g.length > 0);
+    })()
   };
 }
 
@@ -4421,6 +4445,32 @@ function buildReliningPackagingPreview(assetRows, options) {
   };
 }
 
+function getReliningDiamSizeKey(diameterMm, customSizeGroups) {
+  if (!customSizeGroups || !customSizeGroups.length) return `solo_${Math.round(diameterMm ?? 0)}`;
+  const diam = Math.round(diameterMm ?? 0);
+  for (let i = 0; i < customSizeGroups.length; i++) {
+    if (customSizeGroups[i].includes(diam)) return `sizegroup_${i}`;
+  }
+  return `solo_${diam}`;
+}
+
+function populateReliningDiameterSelects(rows) {
+  const diamSet = new Set();
+  rows.forEach(row => {
+    const d = Math.round(Number(row?.['SWP_Pipe Diameter_mm'] ?? row?.['Pipe Diameter'] ?? row?.['Diameter'] ?? 0));
+    if (d > 0) diamSet.add(d);
+  });
+  const diams = [...diamSet].sort((a, b) => a - b);
+  const row = document.getElementById('pkgSizeGroupsRow');
+  if (row) row.style.display = diams.length ? '' : 'none';
+  [1, 2, 3, 4].forEach(i => {
+    const el = document.getElementById(`pkgSizeGroup${i}`);
+    if (!el) return;
+    const prev = new Set(Array.from(el.selectedOptions).map(o => o.value));
+    el.innerHTML = diams.map(d => `<option value="${d}"${prev.has(String(d)) ? ' selected' : ''}>${d} mm</option>`).join('');
+  });
+}
+
 function assignReliningClusters(items, proximityM) {
   // Anchor-radius spatial clustering (port of Python assign_spatial_clusters).
   // Items with coords are clustered; items without coords each get their own cluster.
@@ -4463,10 +4513,10 @@ function splitReliningItemsByCount(items, options) {
     const bSpatial = options.proximityM ? (b._cluster || '') : (options.groupBySuburb ? (b.suburb || '') : '');
     const spatialCompare = aSpatial.localeCompare(bSpatial);
     if (spatialCompare !== 0) return spatialCompare;
-    if (options.groupBySize) {
-      const sizeCompare = (a.diameterMm || 0) - (b.diameterMm || 0);
-      if (sizeCompare !== 0) return sizeCompare;
-    }
+    const aSizeKey = getReliningDiamSizeKey(a.diameterMm, options.customSizeGroups);
+    const bSizeKey = getReliningDiamSizeKey(b.diameterMm, options.customSizeGroups);
+    const sizeCompare = aSizeKey.localeCompare(bSizeKey);
+    if (sizeCompare !== 0) return sizeCompare;
     return String(a.assetId || '').localeCompare(String(b.assetId || ''));
   });
   let pkgIndex = 0;
@@ -4474,7 +4524,7 @@ function splitReliningItemsByCount(items, options) {
   let lastGroup = null;
   return sorted.map(item => {
     const spatialPart = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
-    const sizePart = options.groupBySize ? String(item.diameterMm ?? 'unknown') : '__anysize__';
+    const sizePart = getReliningDiamSizeKey(item.diameterMm, options.customSizeGroups);
     const group = `${spatialPart}|${sizePart}`;
     if (lastGroup === null) lastGroup = group;
     if (group !== lastGroup || countInPkg >= options.pipesPerPackage) {
@@ -4492,7 +4542,7 @@ function splitReliningItemsByValue(items, options) {
   const groups = new Map();
   workItems.forEach(item => {
     const spatialPart = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
-    const sizePart = options.groupBySize ? String(item.diameterMm ?? 'unknown') : '__anysize__';
+    const sizePart = getReliningDiamSizeKey(item.diameterMm, options.customSizeGroups);
     const key = `${spatialPart}|${sizePart}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
@@ -4782,7 +4832,7 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.</li>
       <li>${methodText}</li>
       <li>${options.proximityM ? `Pipes are grouped by spatial proximity — anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
-      <li>${options.groupBySize ? 'Pipes are further separated by diameter — each package will contain only one pipe size.' : 'Pipe size grouping is off — packages may contain mixed diameters.'}</li>
+      <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'No size groups set — each diameter is packaged separately.'}</li>
       <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
       <li>Generated packages are prioritised and renumbered by estimated value first, then length, then Condition 8 count.</li>
       <li>Packages with usable coordinates are drawn on the map.</li>
@@ -5361,6 +5411,7 @@ async function loadReliningAssetsFile(event) {
     if (statusEl) statusEl.textContent = `Assets: ${escapeHtml(file.name)} (${rows.length.toLocaleString()} rows).${conditionHint} Suburb column: ${suburbCol || 'not detected'}. Coordinates: ${coordCount.toLocaleString()} rows.`;
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: rows.length, suburb_column: resolveSuburbColumn(rows) });
+    populateReliningDiameterSelects(rows);
     setPackagingStatus(reliningRatesRows.length > 0, reliningRatesRows.length > 0 ? 'Required files loaded' : 'Upload panel rates workbook to continue');
   } catch (e) {
     reliningAssetsRows = [];
