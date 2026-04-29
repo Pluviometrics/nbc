@@ -197,7 +197,7 @@ window.addEventListener('keydown', (event) => {
 </div>
 
 <!-- AEP Tool (display:flex so Leaflet map inits with correct dimensions) -->
-<div id="page-aep" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
+<div id="page-aep" style="flex-direction:column;flex:1;min-height:0;overflow:hidden;display:none">
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('map')">Map View</div>
   <div class="tab" onclick="switchTab('rainfall-totals')">Rainfall Totals</div>
@@ -862,7 +862,7 @@ window.addEventListener('keydown', (event) => {
   </div>
 </div>
 
-<div id="page-relining" style="display:none;flex:1;min-height:0;overflow:hidden;background:var(--panel);padding:20px">
+<div id="page-relining" style="display:none;flex:1;min-height:0;overflow:auto;background:var(--panel);padding:20px">
   <div class="pkg-shell">
     <div class="pkg-hero">
       <div>
@@ -9165,8 +9165,8 @@ function switchPage(page, options = {}) {
   }
 }
 
-// Show home on load. Home is also visible by default in the HTML so the tile launcher is the safe fallback if later scripts fail.
-function startOnHomeScreen() {
+// Show home on load
+document.addEventListener('DOMContentLoaded', () => {
   try {
     switchPage('home');
   } catch (e) {
@@ -9175,18 +9175,12 @@ function startOnHomeScreen() {
     const nav = document.getElementById('page-nav');
     if (home) home.style.display = '';
     if (nav) nav.style.display = 'none';
-    PAGES.forEach(p => {
-      if (p === 'home') return;
+    ['aep','criticalassets','bomgauges','prioritisation','costing','relining','cctvpackaging','futureworks'].forEach(p => {
       const el = document.getElementById('page-' + p);
       if (el) el.style.display = 'none';
     });
   }
-}
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', startOnHomeScreen);
-} else {
-  startOnHomeScreen();
-}
+});
 
 // â"€â"€ Prioritisation Tool â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 let currentPriTool = 'original';
