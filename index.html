@@ -6,9 +6,10 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
+<link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -4273,13 +4274,35 @@ function cleanRateRows(rows) {
   }));
 }
 
+function getReliningDiameterValue(row) {
+  return normaliseNumeric(getValueByAliases(row, [
+    'SWP_Pipe Diameter_mm',
+    'SWP_Pipe_Diameter_mm',
+    'SWP__Pipe_Diameter_mm',
+    'Pipe Diameter',
+    'Pipe_Diameter',
+    'Diameter',
+    'Diameter_mm'
+  ]));
+}
+
+function getReliningLengthValue(row) {
+  return normaliseNumeric(getValueByAliases(row, [
+    'Spatial Length_m',
+    'Spatial_Length_m',
+    'Length',
+    'Length_m',
+    'Shape_Length'
+  ]));
+}
+
 function getReliningRateForRow(row) {
   return getReliningRateInfoForRow(row).rate;
 }
 
 function getReliningRateInfoForRow(row) {
-  const diameter = normaliseNumeric(row?.['SWP_Pipe Diameter_mm'] ?? row?.['Pipe Diameter'] ?? row?.['Diameter']);
-  const lengthM = normaliseNumeric(row?.['Spatial Length_m'] ?? row?.['Length'] ?? row?.['Length_m']);
+  const diameter = getReliningDiameterValue(row);
+  const lengthM = getReliningLengthValue(row);
   if (!Number.isFinite(diameter)) return { rate: null, reason: 'Missing diameter', diameter, lengthM };
   if (!Number.isFinite(lengthM)) return { rate: null, reason: 'Missing length', diameter, lengthM };
   if (!reliningRatesRows.length) return { rate: null, reason: 'Rates not loaded', diameter, lengthM };
@@ -4326,8 +4349,8 @@ function getReliningRowsForMode(mode) {
 }
 
 function buildPackagingStreamSummary(name, rows, suburbCol) {
-  const totalLength = rows.reduce((sum, row) => sum + (normaliseNumeric(row?.['Spatial Length_m'] ?? row?.['Length'] ?? row?.['Length_m']) || 0), 0);
-  const sampleCols = ['Asset', suburbCol, 'SWP_Pipe Diameter_mm', 'Spatial Length_m', 'SW_Condition'].filter(Boolean);
+  const totalLength = rows.reduce((sum, row) => sum + (getReliningLengthValue(row) || 0), 0);
+  const sampleCols = ['Asset', suburbCol, 'SWP_Pipe_Diameter_mm', 'SWP_Pipe Diameter_mm', 'Spatial_Length_m', 'Spatial Length_m', 'SW_Condition'].filter(Boolean);
   const sampleAssets = rows.slice(0, 8).map(row => {
     const item = {};
     sampleCols.forEach(col => item[col] = row?.[col] ?? '');
@@ -4352,8 +4375,8 @@ function buildSplitStreams(mode) {
   });
   const amplificationRows = reliningAssetsRows.filter(row => {
     const cond = getReliningConditionNumber(row);
-    const flood = String(row?.['SW LGA 20% H1-H6'] || '').trim().toUpperCase();
-    const diameter = normaliseNumeric(row?.['SWP_Pipe Diameter_mm'] ?? row?.['Pipe Diameter'] ?? row?.['Diameter']) || 0;
+    const flood = String(getValueByAliases(row, ['SW LGA 20% H1-H6', 'SW_LGA_20%_H1-H6']) || '').trim().toUpperCase();
+    const diameter = getReliningDiameterValue(row) || 0;
     return [4, 5, 6, 7].includes(cond) && ['H3', 'H4', 'H5', 'H6'].includes(flood) && diameter >= 300;
   });
   return {
@@ -4510,7 +4533,7 @@ function removeReliningSizeFromGroup(groupIndex, value) {
 function populateReliningDiameterSelects(rows) {
   const diamSet = new Set();
   rows.forEach(row => {
-    const d = Math.round(Number(row?.['SWP_Pipe Diameter_mm'] ?? row?.['Pipe Diameter'] ?? row?.['Diameter'] ?? 0));
+    const d = Math.round(getReliningDiameterValue(row) || 0);
     if (d >= 300) diamSet.add(d);
   });
   const diams = (diamSet.size ? [...diamSet] : DEFAULT_RELINING_DIAMETERS).sort((a, b) => a - b);
@@ -4772,7 +4795,7 @@ function summarisePackages(rows, suburbCol) {
   const summaries = [];
   [...packages.keys()].sort().forEach(packageId => {
     const pkgRows = packages.get(packageId) || [];
-    const totalLength = pkgRows.reduce((sum, row) => sum + (normaliseNumeric(row?.['Spatial Length_m'] ?? row?.['Length'] ?? row?.['Length_m']) || 0), 0);
+    const totalLength = pkgRows.reduce((sum, row) => sum + (getReliningLengthValue(row) || 0), 0);
     const totalCost = pkgRows.reduce((sum, row) => sum + (Number(row?.pipe_cost) || 0), 0);
     const suburbs = [...new Set(pkgRows.map(row => getRowSuburb(row, suburbCol)).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     summaries.push({
@@ -4793,8 +4816,8 @@ function samplePackageAssets(rows, suburbCol) {
     const item = {
       package_id: row.package_id,
       Asset: row.Asset ?? row.ASSET_ID ?? row.OBJECTID ?? '',
-      'SWP_Pipe Diameter_mm': row['SWP_Pipe Diameter_mm'] ?? row['Pipe Diameter'] ?? row.Diameter ?? '',
-      'Spatial Length_m': row['Spatial Length_m'] ?? row.Length ?? row.Length_m ?? '',
+      'SWP_Pipe Diameter_mm': getValueByAliases(row, ['SWP_Pipe Diameter_mm', 'SWP_Pipe_Diameter_mm', 'SWP__Pipe_Diameter_mm', 'Pipe Diameter', 'Diameter']) ?? '',
+      'Spatial Length_m': getValueByAliases(row, ['Spatial Length_m', 'Spatial_Length_m', 'Length', 'Length_m', 'Shape_Length']) ?? '',
       pipe_cost: row.pipe_cost != null ? Number(row.pipe_cost.toFixed(2)) : ''
     };
     item.Suburb = getRowSuburb(row, suburbCol) || 'TBA';
