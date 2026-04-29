@@ -931,8 +931,15 @@ window.addEventListener('keydown', (event) => {
           </select>
         </div>
         <div class="fg">
-          <label for="pkgMaxDistance">Max Span Warning (m)</label>
-          <input type="text" id="pkgMaxDistance" value="2000"/>
+          <label for="pkgGroupingMethod">Grouping Method</label>
+          <select id="pkgGroupingMethod" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
+            <option value="suburb" selected>Suburb (no coordinates)</option>
+            <option value="250">250m</option>
+            <option value="500">500m</option>
+            <option value="1000">1000m</option>
+            <option value="2000">2000m</option>
+            <option value="3000">3000m</option>
+          </select>
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -4334,7 +4341,8 @@ function getReliningPackagingOptions() {
   const reliningMode = document.getElementById('pkgReliningMode')?.value || 'Condition 7 and 8';
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
-  const maxSpanWarningM = Number(String(document.getElementById('pkgMaxDistance')?.value || '2000').replace(/,/g, ''));
+  const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
+  const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
   return {
     reliningMode,
     method,
@@ -4342,7 +4350,8 @@ function getReliningPackagingOptions() {
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupBySize: (document.getElementById('pkgGroupSize')?.value || 'no') === 'yes',
-    maxSpanWarningM: Math.max(Number.isFinite(maxSpanWarningM) ? maxSpanWarningM : 2000, 100)
+    groupingMethod,
+    proximityM
   };
 }
 
@@ -4412,12 +4421,48 @@ function buildReliningPackagingPreview(assetRows, options) {
   };
 }
 
-function splitReliningItemsByCount(items, options) {
-  const sorted = [...items].sort((a, b) => {
-    if (options.groupBySuburb) {
-      const suburbCompare = String(a.suburb || '').localeCompare(String(b.suburb || ''));
-      if (suburbCompare !== 0) return suburbCompare;
+function assignReliningClusters(items, proximityM) {
+  // Anchor-radius spatial clustering (port of Python assign_spatial_clusters).
+  // Items with coords are clustered; items without coords each get their own cluster.
+  const result = items.map(item => ({ ...item, _cluster: null }));
+  const withCoords = result.filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lon));
+  const noCoords   = result.filter(item => !Number.isFinite(item.lat) || !Number.isFinite(item.lon));
+  noCoords.forEach(item => { item._cluster = `__nocoords_${item.assetId}`; });
+  const assigned = new Set();
+  let clusterCounter = 0;
+  while (true) {
+    const remaining = withCoords.filter(item => !assigned.has(item.assetId));
+    if (!remaining.length) break;
+    // Find centroid of remaining items
+    const avgLat = remaining.reduce((s, i) => s + i.lat, 0) / remaining.length;
+    const avgLon = remaining.reduce((s, i) => s + i.lon, 0) / remaining.length;
+    const centroid = { lat: avgLat, lon: avgLon };
+    // Pick the item closest to centroid as anchor
+    let anchor = remaining[0];
+    let bestDist = haversineDistanceM(centroid, anchor);
+    for (const item of remaining) {
+      const d = haversineDistanceM(centroid, item);
+      if (d < bestDist) { bestDist = d; anchor = item; }
     }
+    // Claim all remaining items within proximityM of anchor
+    const label = `cluster_${++clusterCounter}`;
+    for (const item of remaining) {
+      if (haversineDistanceM(anchor, item) <= proximityM) {
+        item._cluster = label;
+        assigned.add(item.assetId);
+      }
+    }
+  }
+  return result;
+}
+
+function splitReliningItemsByCount(items, options) {
+  const workItems = options.proximityM ? assignReliningClusters(items, options.proximityM) : items;
+  const sorted = [...workItems].sort((a, b) => {
+    const aSpatial = options.proximityM ? (a._cluster || '') : (options.groupBySuburb ? (a.suburb || '') : '');
+    const bSpatial = options.proximityM ? (b._cluster || '') : (options.groupBySuburb ? (b.suburb || '') : '');
+    const spatialCompare = aSpatial.localeCompare(bSpatial);
+    if (spatialCompare !== 0) return spatialCompare;
     if (options.groupBySize) {
       const sizeCompare = (a.diameterMm || 0) - (b.diameterMm || 0);
       if (sizeCompare !== 0) return sizeCompare;
@@ -4428,9 +4473,9 @@ function splitReliningItemsByCount(items, options) {
   let countInPkg = 0;
   let lastGroup = null;
   return sorted.map(item => {
-    const suburbPart = options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__';
+    const spatialPart = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
     const sizePart = options.groupBySize ? String(item.diameterMm ?? 'unknown') : '__anysize__';
-    const group = `${suburbPart}|${sizePart}`;
+    const group = `${spatialPart}|${sizePart}`;
     if (lastGroup === null) lastGroup = group;
     if (group !== lastGroup || countInPkg >= options.pipesPerPackage) {
       pkgIndex += 1;
@@ -4443,11 +4488,12 @@ function splitReliningItemsByCount(items, options) {
 }
 
 function splitReliningItemsByValue(items, options) {
+  const workItems = options.proximityM ? assignReliningClusters(items, options.proximityM) : items;
   const groups = new Map();
-  items.forEach(item => {
-    const suburbPart = options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__';
+  workItems.forEach(item => {
+    const spatialPart = options.proximityM ? (item._cluster || 'unknown') : (options.groupBySuburb ? (item.suburb || 'Unknown') : '__all__');
     const sizePart = options.groupBySize ? String(item.diameterMm ?? 'unknown') : '__anysize__';
-    const key = `${suburbPart}|${sizePart}`;
+    const key = `${spatialPart}|${sizePart}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(item);
   });
@@ -4517,7 +4563,7 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       total_cost: Number(totalCost.toFixed(2)),
       diameters_mm: diameters,
       max_span_m: Number(maxSpanM.toFixed(0)),
-      distance_warning: maxSpanM > (options.maxSpanWarningM ?? 2000) ? 'Check package spread or coordinate quality' : '',
+      distance_warning: maxSpanM > (options.proximityM ? options.proximityM * 2 : 2000) ? 'Check package spread or coordinate quality' : '',
       coordinate_sources: packageCoordinateSourceSummary(items),
       asset_ids: items.map(item => item.assetId),
       lat: center?.lat ?? null,
@@ -4735,9 +4781,9 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>Relining rates are matched by pipe diameter first, then by the length band in <code>Size/Descriptor</code>.</li>
       <li>Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.</li>
       <li>${methodText}</li>
-      <li>${options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off, so eligible pipes are packaged together across the uploaded dataset.'}</li>
-      <li>${options.groupBySize ? 'Pipes are further grouped by diameter — each package will contain only one pipe size.' : 'Pipe size grouping is off — packages may contain mixed diameters.'}</li>
-      <li>Packages with a spatial span exceeding <strong>${(options.maxSpanWarningM ?? 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
+      <li>${options.proximityM ? `Pipes are grouped by spatial proximity — anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
+      <li>${options.groupBySize ? 'Pipes are further separated by diameter — each package will contain only one pipe size.' : 'Pipe size grouping is off — packages may contain mixed diameters.'}</li>
+      <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
       <li>Generated packages are prioritised and renumbered by estimated value first, then length, then Condition 8 count.</li>
       <li>Packages with usable coordinates are drawn on the map.</li>
     </ul>
