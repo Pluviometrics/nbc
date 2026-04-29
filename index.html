@@ -13,6 +13,7 @@
 <!-- v3 | relining-size-groups-restored-20260429 -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
@@ -5071,6 +5072,7 @@ function renderGeneratedPackages(data) {
       </div>
       <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="export-btn" onclick="exportReliningPackagesCsv()">Export ESRI CSV</button>
+        <button class="export-btn" onclick="downloadReliningPackagesZip()">Download ZIP</button>
         <button class="export-btn" onclick="loadFutureWorksFromRelining(true)">Load Into Future Works Plan</button>
       </div>
     </div>
@@ -5779,6 +5781,147 @@ function exportReliningPackagesCsv() {
   });
   const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
   origPriDownload(`relining_packages_esri_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
+async function downloadReliningPackagesZip() {
+  const packages = lastPackagingGeneration?.packages || [];
+  if (!packages.length) {
+    alert('Generate relining packages before downloading.');
+    return;
+  }
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip library not loaded. Please refresh the page and try again.');
+    return;
+  }
+
+  function diamWeight(d) {
+    if (!Number.isFinite(d)) return 1.0;
+    if (d < 225) return 1.0;
+    if (d < 300) return 1.2;
+    if (d < 375) return 1.5;
+    if (d < 525) return 1.8;
+    return 2.2;
+  }
+
+  function fmtCurrency(v) {
+    if (!Number.isFinite(v)) return '';
+    return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function csvCell(v) {
+    const s = String(v ?? '');
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function csvRow(arr) {
+    return arr.map(csvCell).join(',');
+  }
+
+  function modeDiameter(assets) {
+    const counts = {};
+    assets.forEach(a => {
+      const d = Math.round(a.diameterMm ?? 0);
+      counts[d] = (counts[d] || 0) + 1;
+    });
+    let best = null, bestCount = 0;
+    Object.entries(counts).forEach(([d, c]) => {
+      if (c > bestCount || (c === bestCount && Number(d) > Number(best))) {
+        best = d; bestCount = c;
+      }
+    });
+    return best || '0';
+  }
+
+  function pkgFilename(idx, pkg) {
+    const num = String(idx + 1).padStart(3, '0');
+    const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
+      .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
+      .filter(Boolean)
+      .join('_');
+    const dominant = modeDiameter(pkg.assets || []);
+    return `RLN_${num}_${suburbs}_D${dominant}mm.csv`;
+  }
+
+  const HEADERS = [
+    'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+    'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
+    'condition_score', 'pipe_priority_score',
+    'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
+    'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
+    'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
+  ];
+
+  const zip = new JSZip();
+
+  packages.forEach((pkg, pkgIdx) => {
+    const assets = pkg.assets || [];
+    const diametersStr = (pkg.diameters || [])
+      .map(d => `⌀${d}`)
+      .join(', ');
+    const maxSpanKm = Number.isFinite(pkg.max_span_m)
+      ? (pkg.max_span_m / 1000).toFixed(1) + ' km'
+      : '';
+    const numPipes = assets.length;
+
+    const lines = [csvRow(HEADERS)];
+
+    assets.forEach((item, itemIdx) => {
+      const raw = item.raw || {};
+      const diam = Math.round(item.diameterMm ?? 0);
+      const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
+      const condNum = Number.isFinite(item.condition) ? item.condition : 0;
+      const dw = diamWeight(item.diameterMm);
+      const cs = condNum;
+      const critW = 1 + Math.round(crit * 10) / 10;
+      const pps = cs * dw * critW;
+
+      const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
+      const rawLga = raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
+      const rawUp = raw['SW_Upstream Node'] ?? raw['Upstream Node'] ?? '';
+      const rawDown = raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
+      const rawAddr = raw['Pipe_Start_Address'] ?? raw['Start Address'] ?? '';
+
+      const row = [
+        pkg.package_id,
+        item.assetId,
+        diam ? diam + 'mm' : '',
+        Number.isFinite(item.lengthM) ? item.lengthM.toFixed(1) + ' m' : '',
+        condNum || '',
+        rawScore,
+        crit.toFixed(1),
+        dw.toFixed(1),
+        cs,
+        pps.toFixed(4),
+        rawLga,
+        rawUp,
+        rawDown,
+        Number.isFinite(item.ratePerM) ? item.ratePerM.toFixed(2) : '',
+        Number.isFinite(item.pipeCost) ? fmtCurrency(item.pipeCost) : '',
+        rawAddr,
+        item.suburb || '',
+        diametersStr,
+        maxSpanKm,
+        itemIdx === 0 ? numPipes : ''
+      ];
+      lines.push(csvRow(row));
+    });
+
+    const csvContent = lines.join('\r\n');
+    const filename = pkgFilename(pkgIdx, pkg);
+    zip.file(filename, csvContent);
+  });
+
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `relining_packages_${new Date().toISOString().slice(0, 10)}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 }
 
 const RELINING_PACKAGE_COLORS = [
