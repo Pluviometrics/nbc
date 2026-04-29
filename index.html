@@ -4687,64 +4687,138 @@ function maxDistanceFromCentroidM(items, centroid = meanCoordinate(items)) {
   }, 0);
 }
 
-function canJoinSpatialPackage(items, item, options = {}) {
-  if (!items?.length) return isUsablePackageCoordinate(item);
-  if (!isUsablePackageCoordinate(item)) return false;
-  const thresholdM = getPackageDistanceThresholdM(options);
-  const centroid = meanCoordinate(items);
-  const closeToExisting = items.some(existing => packageDistanceM(existing, item) <= thresholdM);
-  const closeToCentroid = centroid ? haversineDistanceM(centroid, item) <= thresholdM : false;
-  if (!closeToExisting && !closeToCentroid) return false;
-  const tentative = [...items, item];
-  return maxPackageSpanM(tentative) <= thresholdM && maxDistanceFromCentroidM(tentative) <= thresholdM;
+function distanceFromPackageCenterM(center, item) {
+  return center && isUsablePackageCoordinate(item) ? haversineDistanceM(center, item) : Number.POSITIVE_INFINITY;
+}
+
+function reliningClusterSeedCompare(a, b) {
+  const priorityDiff = (Number(b.criticalityScore) || 0) - (Number(a.criticalityScore) || 0);
+  if (priorityDiff !== 0) return priorityDiff;
+  const conditionDiff = (Number(b.condition) || 0) - (Number(a.condition) || 0);
+  if (conditionDiff !== 0) return conditionDiff;
+  const costDiff = (Number(b.pipeCost) || 0) - (Number(a.pipeCost) || 0);
+  if (costDiff !== 0) return costDiff;
+  return String(a.assetId || '').localeCompare(String(b.assetId || ''));
+}
+
+function finaliseReliningCluster(items, radiusM, rejectedFarCount = 0) {
+  let cluster = (items || []).filter(isUsablePackageCoordinate);
+  let rejected = rejectedFarCount;
+  let center = meanCoordinate(cluster);
+  let changed = true;
+  while (changed && center && cluster.length) {
+    changed = false;
+    const kept = [];
+    for (const item of cluster) {
+      if (haversineDistanceM(center, item) <= radiusM) {
+        kept.push(item);
+      } else {
+        rejected += 1;
+        changed = true;
+      }
+    }
+    cluster = kept;
+    center = meanCoordinate(cluster);
+  }
+  const maxDistanceM = center ? maxDistanceFromCentroidM(cluster, center) : 0;
+  return { items: cluster, center, maxDistanceM, rejectedFarCount: rejected };
+}
+
+function buildReliningSpatialCluster(seed, remaining, radiusM) {
+  let cluster = [seed];
+  let center = meanCoordinate(cluster);
+  let rejectedFarCount = 0;
+  let changed = true;
+
+  while (changed && center) {
+    changed = false;
+    const nearby = [...remaining]
+      .filter(item => isUsablePackageCoordinate(item) && distanceFromPackageCenterM(center, item) <= radiusM)
+      .sort((a, b) => distanceFromPackageCenterM(center, a) - distanceFromPackageCenterM(center, b) || reliningClusterSeedCompare(a, b));
+
+    for (const candidate of nearby) {
+      cluster.push(candidate);
+      remaining.delete(candidate);
+      changed = true;
+    }
+
+    const finalised = finaliseReliningCluster(cluster, radiusM, rejectedFarCount);
+    if (!finalised.items.some(item => item.assetId === seed.assetId)) {
+      cluster.forEach(item => {
+        if (item !== seed) remaining.add(item);
+      });
+      return { items: [seed], center: meanCoordinate([seed]), maxDistanceM: 0, rejectedFarCount: finalised.rejectedFarCount };
+    }
+    if (finalised.items.length !== cluster.length) {
+      const keptIds = new Set(finalised.items.map(item => item.assetId));
+      cluster.forEach(item => {
+        if (item !== seed && !keptIds.has(item.assetId)) remaining.add(item);
+      });
+      changed = true;
+    }
+    cluster = finalised.items.length ? finalised.items : [seed];
+    rejectedFarCount = finalised.rejectedFarCount;
+    center = finalised.center || meanCoordinate(cluster);
+  }
+
+  const finalised = finaliseReliningCluster(cluster, radiusM, rejectedFarCount);
+  if (!finalised.items.some(item => item.assetId === seed.assetId)) {
+    cluster.forEach(item => {
+      if (item !== seed) remaining.add(item);
+    });
+    return { items: [seed], center: meanCoordinate([seed]), maxDistanceM: 0, rejectedFarCount: finalised.rejectedFarCount };
+  }
+  return finalised.items.length ? finalised : { items: [seed], center: meanCoordinate([seed]), maxDistanceM: 0, rejectedFarCount };
 }
 
 function assignReliningClusters(items, proximityM) {
-  // Port of the working Excel/VBA AssignSpatialClusters routine.
+  const radiusM = Number(proximityM) || MAX_PACKAGE_DISTANCE_METRES;
   const result = items.map(item => ({ ...item, _cluster: null }));
-  let clusterCounter = 0;
-  const isTba = item => TBA_SUBURB_VALUES.has(String(item.suburb || '').trim().toUpperCase());
-  result.forEach(item => {
-    const hasCoords = Number.isFinite(item.xMid) && Number.isFinite(item.yMid);
-    if (isTba(item) && !hasCoords) item._cluster = '__TBA__';
-  });
-  const hasProjectedCoords = item => item._cluster == null && Number.isFinite(item.xMid) && Number.isFinite(item.yMid);
-  const assigned = new Set();
-  const thresholdM = Number(proximityM) || MAX_PACKAGE_DISTANCE_METRES;
-  result.forEach(item => { if (item._cluster) assigned.add(item.assetId); });
-  const dist = (a, b) => Math.hypot((Number(a.xMid) || 0) - (Number(b.xMid) || 0), (Number(a.yMid) || 0) - (Number(b.yMid) || 0));
+  const coordinateItems = result.filter(isUsablePackageCoordinate);
+  const noCoordinateItems = result.filter(item => !isUsablePackageCoordinate(item));
+  const remaining = new Set(coordinateItems);
+  const clusters = [];
 
-  while (true) {
-    const remaining = result.filter(item => hasProjectedCoords(item) && !assigned.has(item.assetId));
-    if (!remaining.length) break;
-    const centroid = {
-      xMid: remaining.reduce((sum, item) => sum + item.xMid, 0) / remaining.length,
-      yMid: remaining.reduce((sum, item) => sum + item.yMid, 0) / remaining.length
-    };
-    let anchor = remaining[0];
-    let bestDistance = dist(centroid, anchor);
-    for (const item of remaining) {
-      const distance = dist(centroid, item);
-      if (distance < bestDistance) {
-        bestDistance = distance;
-        anchor = item;
-      }
-    }
-    const label = `C${String(clusterCounter + 1).padStart(3, '0')}`;
-    clusterCounter += 1;
-    remaining.forEach(item => {
-      if (dist(anchor, item) <= thresholdM) {
-        item._cluster = label;
-        assigned.add(item.assetId);
-      }
-    });
+  while (remaining.size) {
+    const candidates = [...remaining];
+    const density = new Map(candidates.map(item => [
+      item.assetId,
+      candidates.reduce((count, other) => (
+        item !== other && haversineDistanceM(item, other) <= radiusM ? count + 1 : count
+      ), 0)
+    ]));
+    const seed = candidates.sort((a, b) => {
+      const densityDiff = (density.get(b.assetId) || 0) - (density.get(a.assetId) || 0);
+      if (densityDiff !== 0) return densityDiff;
+      return reliningClusterSeedCompare(a, b);
+    })[0];
+    remaining.delete(seed);
+    const cluster = buildReliningSpatialCluster(seed, remaining, radiusM);
+    clusters.push({ ...cluster, seed });
   }
 
-  result.forEach(item => {
-    if (item._cluster != null) return;
-    clusterCounter += 1;
-    item._cluster = `NC${String(clusterCounter).padStart(3, '0')}`;
-  });
+  clusters
+    .sort((a, b) => reliningClusterSeedCompare(a.seed, b.seed))
+    .forEach((cluster, index) => {
+      const label = `C${String(index + 1).padStart(3, '0')}`;
+      cluster.items.forEach(item => {
+        item._cluster = label;
+        item._clusterSeedAssetId = cluster.seed.assetId;
+        item._clusterCenterLat = cluster.center?.lat ?? null;
+        item._clusterCenterLon = cluster.center?.lon ?? null;
+        item._clusterMaxCenterDistanceM = cluster.maxDistanceM;
+        item._clusterRejectedFarCount = cluster.rejectedFarCount;
+      });
+    });
+
+  noCoordinateItems
+    .sort(reliningClusterSeedCompare)
+    .forEach((item, index) => {
+      item._cluster = `NC${String(index + 1).padStart(3, '0')}`;
+      item._clusterSeedAssetId = item.assetId;
+      item._clusterRejectedFarCount = 0;
+    });
+
   return result;
 }
 
@@ -4928,52 +5002,117 @@ function maxReliningPackageSpanM(items) {
   return maxSpan;
 }
 
+function maxReliningPackageCenterDistanceM(items, center = meanCoordinate(items)) {
+  return maxDistanceFromCentroidM(items, center);
+}
+
+function summariseReliningPackageSuburbs(items) {
+  const suburbCounts = {};
+  (items || []).forEach(item => {
+    const suburb = item.suburb || 'Unknown';
+    suburbCounts[suburb] = (suburbCounts[suburb] || 0) + 1;
+  });
+  return Object.entries(suburbCounts)
+    .filter(([suburb]) => suburb && suburb !== 'Unknown')
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([suburb]) => suburb);
+}
+
+function buildReliningPackageObject(packageId, items, options = {}, existing = {}) {
+  const totalLengthM = items.reduce((sum, item) => sum + (Number(item.lengthM) || 0), 0);
+  const totalCost = items.reduce((sum, item) => sum + (Number(item.pipeCost) || 0), 0);
+  const suburbs = summariseReliningPackageSuburbs(items);
+  const center = meanCoordinate(items);
+  const maxSpanM = maxReliningPackageSpanM(items);
+  const maxCenterDistanceM = maxReliningPackageCenterDistanceM(items, center);
+  const diameters = [...new Set(items.map(item => item.diameterMm).filter(value => Number.isFinite(value)))].sort((a, b) => a - b);
+  return {
+    ...existing,
+    package_id: packageId,
+    suburb: suburbs[0] || 'Unknown',
+    primary_suburb: suburbs[0] || 'Unknown',
+    suburbs: suburbs.length ? suburbs : ['Unknown'],
+    pipe_count: items.length,
+    condition_7_count: items.filter(item => item.condition === 7).length,
+    condition_8_count: items.filter(item => item.condition === 8).length,
+    total_length_m: Number(totalLengthM.toFixed(1)),
+    total_cost: Number(totalCost.toFixed(2)),
+    diameters_mm: diameters,
+    max_span_m: Number(maxSpanM.toFixed(0)),
+    max_distance_from_center_m: Number(maxCenterDistanceM.toFixed(0)),
+    package_radius_m: options.proximityM || null,
+    distance_warning: maxCenterDistanceM > (options.proximityM || 2000) ? 'Check package spread or coordinate quality' : '',
+    coordinate_sources: packageCoordinateSourceSummary(items),
+    asset_ids: items.map(item => item.assetId),
+    criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
+    critical_pipe_count: items.filter(item => (Number(item.criticalityScore) || 0) > 0).length,
+    rejected_far_candidate_count: items.reduce((max, item) => Math.max(max, Number(item._clusterRejectedFarCount) || 0), Number(existing.rejected_far_candidate_count) || 0),
+    seed_asset_id: existing.seed_asset_id || items.find(item => item._clusterSeedAssetId)?._clusterSeedAssetId || items[0]?.assetId || '',
+    lat: center?.lat ?? null,
+    lon: center?.lon ?? null,
+    assets: items.map(item => ({
+      ...item,
+      package_id: packageId,
+      asset_id_text: item.assetId,
+      package_center_distance_m: center && Number.isFinite(item.lat) && Number.isFinite(item.lon)
+        ? haversineDistanceM(center, item)
+        : null
+    }))
+  };
+}
+
 function buildReliningPackageObjects(packagedItems, options = {}) {
   const byPackage = new Map();
   packagedItems.forEach(item => {
     if (!byPackage.has(item.package_id)) byPackage.set(item.package_id, []);
     byPackage.get(item.package_id).push(item);
   });
-  return [...byPackage.entries()].map(([packageId, items]) => {
-    const totalLengthM = items.reduce((sum, item) => sum + (Number(item.lengthM) || 0), 0);
-    const totalCost = items.reduce((sum, item) => sum + (Number(item.pipeCost) || 0), 0);
-    const suburbCounts = {};
-    items.forEach(item => { suburbCounts[item.suburb || 'Unknown'] = (suburbCounts[item.suburb || 'Unknown'] || 0) + 1; });
-    const suburbs = Object.entries(suburbCounts)
-      .filter(([suburb]) => suburb && suburb !== 'Unknown')
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([suburb]) => suburb);
-    const center = meanCoordinate(items);
-    const maxSpanM = maxReliningPackageSpanM(items);
-    const diameters = [...new Set(items.map(item => item.diameterMm).filter(value => Number.isFinite(value)))].sort((a, b) => a - b);
-    return {
-      package_id: packageId,
-      suburb: suburbs[0] || 'Unknown',
-      primary_suburb: suburbs[0] || 'Unknown',
-      suburbs: suburbs.length ? suburbs : ['Unknown'],
-      pipe_count: items.length,
-      condition_7_count: items.filter(item => item.condition === 7).length,
-      condition_8_count: items.filter(item => item.condition === 8).length,
-      total_length_m: Number(totalLengthM.toFixed(1)),
-      total_cost: Number(totalCost.toFixed(2)),
-      diameters_mm: diameters,
-      max_span_m: Number(maxSpanM.toFixed(0)),
-      distance_warning: maxSpanM > (options.proximityM ? options.proximityM * 2 : 2000) ? 'Check package spread or coordinate quality' : '',
-      coordinate_sources: packageCoordinateSourceSummary(items),
-      asset_ids: items.map(item => item.assetId),
-      criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
-      critical_pipe_count: items.filter(item => (Number(item.criticalityScore) || 0) > 0).length,
-      lat: center?.lat ?? null,
-      lon: center?.lon ?? null,
-      assets: items.map(item => ({
-        ...item,
-        asset_id_text: item.assetId,
-        package_center_distance_m: center && Number.isFinite(item.lat) && Number.isFinite(item.lon)
-          ? haversineDistanceM(center, item)
-          : null
-      }))
-    };
+  return [...byPackage.entries()].map(([packageId, items]) => buildReliningPackageObject(packageId, items, options));
+}
+
+function enforceReliningPackageRadius(packages, options = {}) {
+  const radiusM = Number(options.proximityM);
+  if (!Number.isFinite(radiusM) || radiusM <= 0) return packages;
+  return (packages || []).map(pkg => {
+    let assets = (pkg.assets || []).slice();
+    let rejected = Number(pkg.rejected_far_candidate_count) || 0;
+    let changed = true;
+    while (changed && assets.length) {
+      changed = false;
+      const center = meanCoordinate(assets);
+      if (!center) break;
+      const kept = assets.filter(asset => {
+        const inRadius = !isUsablePackageCoordinate(asset) || haversineDistanceM(center, asset) <= radiusM;
+        if (!inRadius) {
+          rejected += 1;
+          changed = true;
+        }
+        return inRadius;
+      });
+      assets = kept;
+    }
+    return buildReliningPackageObject(pkg.package_id, assets, options, {
+      ...pkg,
+      rejected_far_candidate_count: rejected
+    });
+  }).filter(pkg => (pkg.assets || []).length);
+}
+
+function logReliningPackageDebug(packages, options = {}) {
+  const radiusM = Number(options.proximityM);
+  console.groupCollapsed(`[Relining Packaging] ${packages.length} packages generated. Selected radius: ${Number.isFinite(radiusM) ? `${radiusM} m` : 'suburb/no radius'}`);
+  packages.forEach(pkg => {
+    console.debug('[Relining Packaging]', {
+      package_id: pkg.package_id,
+      selected_radius_m: Number.isFinite(radiusM) ? radiusM : null,
+      seed_asset: pkg.seed_asset_id || pkg.assets?.[0]?.assetId || '',
+      package_center: { lat: pkg.lat, lon: pkg.lon },
+      max_distance_from_center_m: pkg.max_distance_from_center_m,
+      rejected_far_candidates: pkg.rejected_far_candidate_count || 0,
+      package_suburbs: pkg.suburbs || []
+    });
   });
+  console.groupEnd();
 }
 
 function topupReliningPackages(packages, allCostedItems, options) {
@@ -4996,6 +5135,12 @@ function topupReliningPackages(packages, allCostedItems, options) {
     for (const candidate of candidates) {
       if (remaining <= 0) break;
       if ((candidate.pipeCost || 0) <= remaining) {
+        if (options.proximityM) {
+          const tentativeAssets = [...(pkg.assets || []), candidate];
+          const tentativeCenter = meanCoordinate(tentativeAssets);
+          const maxDistanceM = maxReliningPackageCenterDistanceM(tentativeAssets, tentativeCenter);
+          if (!tentativeCenter || maxDistanceM > options.proximityM) continue;
+        }
         addedItems.push({ ...candidate, topup: true });
         usedIds.add(candidate.assetId);
         remaining -= candidate.pipeCost;
@@ -5003,28 +5148,10 @@ function topupReliningPackages(packages, allCostedItems, options) {
     }
     if (!addedItems.length) return pkg;
     const newAssets = [...(pkg.assets || []), ...addedItems];
-    const newCost = newAssets.reduce((s, i) => s + (Number(i.pipeCost) || 0), 0);
-    const newLength = newAssets.reduce((s, i) => s + (Number(i.lengthM) || 0), 0);
-    const newDiams = [...new Set(newAssets.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
-    const newCenter = meanCoordinate(newAssets);
-    const newMaxSpanM = maxReliningPackageSpanM(newAssets);
-    return {
+    return buildReliningPackageObject(pkg.package_id, newAssets, options, {
       ...pkg,
-      assets: newAssets,
-      asset_ids: newAssets.map(i => i.assetId),
-      pipe_count: newAssets.length,
-      condition_7_count: newAssets.filter(i => i.condition === 7).length,
-      condition_8_count: newAssets.filter(i => i.condition === 8).length,
-      total_length_m: Number(newLength.toFixed(1)),
-      total_cost: Number(newCost.toFixed(2)),
-      diameters_mm: newDiams,
-      max_span_m: Number(newMaxSpanM.toFixed(0)),
-      lat: newCenter?.lat ?? pkg.lat,
-      lon: newCenter?.lon ?? pkg.lon,
-      criticality_score: newAssets.reduce((s, i) => s + (Number(i.criticalityScore) || 0), 0),
-      critical_pipe_count: newAssets.filter(i => (Number(i.criticalityScore) || 0) > 0).length,
-      topup_count: addedItems.length
-    };
+      topup_count: (Number(pkg.topup_count) || 0) + addedItems.length
+    });
   });
   return result;
 }
@@ -5050,8 +5177,7 @@ function addPackagePriority(packages) {
   return (packages || []).map(pkg => {
     const assets = (pkg.assets || []).map(asset => {
       const criticality_1dp = Number((Number(asset.criticalityScore ?? asset.Score) || 0).toFixed(1));
-      const rawConditionForPriority = getValueByAliases(asset.raw || {}, ['SW_Condition']);
-      const condition_score = Math.max(cleanNumber(rawConditionForPriority) || 0, 0);
+      const condition_score = Math.max(Number(asset.condition) || 0, 0);
       const diameter_weight = reliningDiameterWeight(asset.diameterMm);
       const pipe_priority_score = condition_score * diameter_weight * (1 + criticality_1dp);
       return {
@@ -6029,9 +6155,12 @@ async function generateReliningPackages() {
         }
       }
     }
+    packages = enforceReliningPackageRadius(packages, options);
     setLoadTxt('Prioritising and renumbering packages...');
     await waitForPaint();
     packages = prioritiseAndRenumberReliningPackages(packages);
+    packages = enforceReliningPackageRadius(packages, options);
+    logReliningPackageDebug(packages, options);
     const totalLength = packages.reduce((sum, pkg) => sum + (Number(pkg.total_length_m) || 0), 0);
     const totalCost = packages.reduce((sum, pkg) => sum + (Number(pkg.total_cost) || 0), 0);
     const data = {
