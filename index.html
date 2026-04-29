@@ -4650,45 +4650,51 @@ function canJoinSpatialPackage(items, item, options = {}) {
 }
 
 function assignReliningClusters(items, proximityM) {
-  // Geographic clustering: every cluster has a seed pipe and is capped by the configured package spread.
+  // Port of the working Excel/VBA AssignSpatialClusters routine.
   const result = items.map(item => ({ ...item, _cluster: null }));
   let clusterCounter = 0;
-  const withCoords = result.filter(item => isUsablePackageCoordinate(item));
-  const noCoords = result.filter(item => !isUsablePackageCoordinate(item));
-  noCoords.forEach(item => { item._cluster = `nocoord_${clusterCounter++}`; });
+  const isTba = item => TBA_SUBURB_VALUES.has(String(item.suburb || '').trim().toUpperCase());
+  result.forEach(item => {
+    const hasCoords = Number.isFinite(item.xMid) && Number.isFinite(item.yMid);
+    if (isTba(item) && !hasCoords) item._cluster = '__TBA__';
+  });
+  const hasProjectedCoords = item => item._cluster == null && Number.isFinite(item.xMid) && Number.isFinite(item.yMid);
   const assigned = new Set();
   const thresholdM = Number(proximityM) || MAX_PACKAGE_DISTANCE_METRES;
+  result.forEach(item => { if (item._cluster) assigned.add(item.assetId); });
+  const dist = (a, b) => Math.hypot((Number(a.xMid) || 0) - (Number(b.xMid) || 0), (Number(a.yMid) || 0) - (Number(b.yMid) || 0));
+
   while (true) {
-    const remaining = withCoords.filter(item => !assigned.has(item.assetId));
+    const remaining = result.filter(item => hasProjectedCoords(item) && !assigned.has(item.assetId));
     if (!remaining.length) break;
-    const anchor = findBestPackageCenter(remaining, { proximityM: thresholdM, criticalityWeight: 0 });
-    const clusterItems = [anchor];
-    assigned.add(anchor.assetId);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      const clusterIds = new Set(clusterItems.map(item => item.assetId));
-      const candidates = withCoords
-        .filter(item => !assigned.has(item.assetId) && !clusterIds.has(item.assetId))
-        .map(item => ({
-          item,
-          distanceM: Math.min(
-            ...clusterItems.map(existing => packageDistanceM(existing, item)),
-            meanCoordinate(clusterItems) ? haversineDistanceM(meanCoordinate(clusterItems), item) : Number.POSITIVE_INFINITY
-          )
-        }))
-        .sort((a, b) => a.distanceM - b.distanceM || String(a.item.assetId).localeCompare(String(b.item.assetId)));
-      for (const entry of candidates) {
-        if (!canJoinSpatialPackage(clusterItems, entry.item, { proximityM: thresholdM })) continue;
-        clusterItems.push(entry.item);
-        assigned.add(entry.item.assetId);
-        changed = true;
-        break;
+    const centroid = {
+      xMid: remaining.reduce((sum, item) => sum + item.xMid, 0) / remaining.length,
+      yMid: remaining.reduce((sum, item) => sum + item.yMid, 0) / remaining.length
+    };
+    let anchor = remaining[0];
+    let bestDistance = dist(centroid, anchor);
+    for (const item of remaining) {
+      const distance = dist(centroid, item);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        anchor = item;
       }
     }
-    const label = `cluster_${clusterCounter++}`;
-    clusterItems.forEach(item => { item._cluster = label; });
+    const label = `C${String(clusterCounter + 1).padStart(3, '0')}`;
+    clusterCounter += 1;
+    remaining.forEach(item => {
+      if (dist(anchor, item) <= thresholdM) {
+        item._cluster = label;
+        assigned.add(item.assetId);
+      }
+    });
   }
+
+  result.forEach(item => {
+    if (item._cluster != null) return;
+    clusterCounter += 1;
+    item._cluster = `NC${String(clusterCounter).padStart(3, '0')}`;
+  });
   return result;
 }
 
@@ -4889,9 +4895,6 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       .map(([suburb]) => suburb);
     const center = meanCoordinate(items);
     const maxSpanM = maxReliningPackageSpanM(items);
-    const maxCentroidDistanceM = maxDistanceFromCentroidM(items, center);
-    const maxAllowedSpreadM = getPackageDistanceThresholdM(options);
-    const isSpatiallyInvalid = !!options.proximityM && (maxSpanM > maxAllowedSpreadM || maxCentroidDistanceM > maxAllowedSpreadM);
     const diameters = [...new Set(items.map(item => item.diameterMm).filter(value => Number.isFinite(value)))].sort((a, b) => a - b);
     return {
       package_id: packageId,
@@ -4905,9 +4908,7 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       total_cost: Number(totalCost.toFixed(2)),
       diameters_mm: diameters,
       max_span_m: Number(maxSpanM.toFixed(0)),
-      max_centroid_distance_m: Number(maxCentroidDistanceM.toFixed(0)),
-      spatially_invalid: isSpatiallyInvalid,
-      distance_warning: isSpatiallyInvalid ? 'Invalid spatial spread - excluded from normal output' : '',
+      distance_warning: maxSpanM > (options.proximityM ? options.proximityM * 2 : 2000) ? 'Check package spread or coordinate quality' : '',
       coordinate_sources: packageCoordinateSourceSummary(items),
       asset_ids: items.map(item => item.assetId),
       criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
@@ -4922,7 +4923,7 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
           : null
       }))
     };
-  }).filter(pkg => !pkg.spatially_invalid);
+  });
 }
 
 function topupReliningPackages(packages, allCostedItems, options) {
@@ -4944,7 +4945,6 @@ function topupReliningPackages(packages, allCostedItems, options) {
     const addedItems = [];
     for (const candidate of candidates) {
       if (remaining <= 0) break;
-      if (options.proximityM && !canJoinSpatialPackage([...(pkg.assets || []), ...addedItems], candidate, options)) continue;
       if ((candidate.pipeCost || 0) <= remaining) {
         addedItems.push({ ...candidate, topup: true });
         usedIds.add(candidate.assetId);
@@ -4958,7 +4958,6 @@ function topupReliningPackages(packages, allCostedItems, options) {
     const newDiams = [...new Set(newAssets.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
     const newCenter = meanCoordinate(newAssets);
     const newMaxSpanM = maxReliningPackageSpanM(newAssets);
-    const newMaxCentroidDistanceM = maxDistanceFromCentroidM(newAssets, newCenter);
     return {
       ...pkg,
       assets: newAssets,
@@ -4970,7 +4969,6 @@ function topupReliningPackages(packages, allCostedItems, options) {
       total_cost: Number(newCost.toFixed(2)),
       diameters_mm: newDiams,
       max_span_m: Number(newMaxSpanM.toFixed(0)),
-      max_centroid_distance_m: Number(newMaxCentroidDistanceM.toFixed(0)),
       lat: newCenter?.lat ?? pkg.lat,
       lon: newCenter?.lon ?? pkg.lon,
       criticality_score: newAssets.reduce((s, i) => s + (Number(i.criticalityScore) || 0), 0),
@@ -5263,9 +5261,9 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>Relining rates are matched by pipe diameter first, then by the length band in <code>Size/Descriptor</code>.</li>
       <li>Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.</li>
       <li>${methodText}</li>
-      <li>${options.proximityM ? `Pipes are grouped by spatial proximity — package-spread clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
+      <li>${options.proximityM ? `Pipes are grouped by spatial proximity using the restored anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
       <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'Diameter is the primary grouping factor — packages are built per diameter, then top-up adds adjacent sizes to reach the target value.'}</li>
-      <li>Packages with a spatial spread exceeding <strong>${getPackageDistanceThresholdM(options).toLocaleString()} m</strong> are treated as invalid and excluded from normal output.</li>
+      <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
       <li>${options.topupMode === 'Same condition only' ? 'Top-up active - underfilled packages pull cheapest fitting pipes from the same suburb or cluster and compatible size group.' : options.topupMode === 'Same condition first, lower condition if needed' ? 'Top-up active - same-condition pipes are tried first, then the old lower-condition fallback is used for single-condition modes.' : 'No top-up - packages are not filled beyond their initial split.'}</li>
       <li>Packages are prioritised by the restored condition, diameter, and criticality scoring model, then renumbered by priority.</li>
       <li>Packages with usable coordinates are drawn on the map.</li>
@@ -5351,7 +5349,6 @@ function renderGeneratedPackages(data) {
   const displayPackages = data.packages.map(pkg => ({
     package_id: renderReliningPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
-    centroid_lga: 'Northern Beaches',
     pipe_count: pkg.pipe_count,
     condition_7_count: pkg.condition_7_count,
     condition_8_count: pkg.condition_8_count,
@@ -5359,7 +5356,6 @@ function renderGeneratedPackages(data) {
     total_cost: formatCurrency(pkg.total_cost),
     diameters_mm: (pkg.diameters_mm || []).join(', '),
     max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
-    max_centroid_distance_m: Number(pkg.max_centroid_distance_m || 0).toFixed(0),
     distance_warning: pkg.distance_warning || '',
     coordinate_sources: pkg.coordinate_sources || '',
     asset_ids: (pkg.asset_ids || []).join(', ')
@@ -5962,12 +5958,9 @@ async function generateReliningPackages() {
     lastReliningPackagingPreview = preview;
     setLoadTxt('Matching relining rates...');
     await waitForPaint();
-    const spatialCosted = options.proximityM
-      ? preview.costed.filter(item => isUsablePackageCoordinate(item))
-      : preview.costed;
     let packagedItems = options.method === 'count'
-      ? splitReliningItemsByCount(spatialCosted, options)
-      : splitReliningItemsByValue(spatialCosted, options);
+      ? splitReliningItemsByCount(preview.costed, options)
+      : splitReliningItemsByValue(preview.costed, options);
     packagedItems = forceIslandSinglePipePackages(packagedItems);
     setLoadTxt('Building relining packages...');
     await waitForPaint();
@@ -5995,9 +5988,8 @@ async function generateReliningPackages() {
       options,
       preview,
       package_count: packages.length,
-      costed_pipe_count: spatialCosted.length,
+      costed_pipe_count: preview.costed.length,
       uncosted_pipe_count: preview.uncosted.length,
-      missing_coordinate_assets: options.proximityM ? preview.noCoords : [],
       total_length_m: Number(totalLength.toFixed(1)),
       total_cost: Number(totalCost.toFixed(2)),
       packages,
@@ -6074,8 +6066,6 @@ function exportReliningPackagesCsv() {
     'package_total_length_m',
     'package_total_cost',
     'package_max_span_m',
-    'package_max_centroid_distance_m',
-    'centroid_lga',
     'distance_warning',
     'coordinate_sources',
     'latitude',
@@ -6102,8 +6092,6 @@ function exportReliningPackagesCsv() {
         Number(pkg.total_length_m || 0).toFixed(1),
         Number(pkg.total_cost || 0).toFixed(2),
         Number(pkg.max_span_m || 0).toFixed(0),
-        Number(pkg.max_centroid_distance_m || 0).toFixed(0),
-        'Northern Beaches',
         pkg.distance_warning || '',
         pkg.coordinate_sources || '',
         item.lat ?? '',
