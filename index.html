@@ -940,7 +940,7 @@ window.addEventListener('keydown', (event) => {
           <button class="run-btn" style="margin-top:0" id="pkgPreviewBtn" onclick="loadPackagingPreview()">Preview Candidates</button>
         </div>
       </div>
-      <div id="pkgSizeGroupsRow" style="display:none;margin-top:10px">
+      <div id="pkgSizeGroupsRow" style="margin-top:10px">
         <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Ctrl+click to select multiple.</div>
         <div class="pkg-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
           <div class="fg">
@@ -4485,11 +4485,13 @@ function populateReliningDiameterSelects(rows) {
     if (d > 0) diamSet.add(d);
   });
   const diams = [...diamSet].sort((a, b) => a - b);
-  const row = document.getElementById('pkgSizeGroupsRow');
-  if (row) row.style.display = diams.length ? '' : 'none';
   [1, 2, 3, 4].forEach(i => {
     const el = document.getElementById(`pkgSizeGroup${i}`);
     if (!el) return;
+    if (!diams.length) {
+      el.innerHTML = '<option disabled>Upload assets to populate</option>';
+      return;
+    }
     const prev = new Set(Array.from(el.selectedOptions).map(o => o.value));
     el.innerHTML = diams.map(d => `<option value="${d}"${prev.has(String(d)) ? ' selected' : ''}>${d} mm</option>`).join('');
   });
@@ -9504,3 +9506,4 @@ priCalc();
 </script>
 </body>
 </html>
+          
