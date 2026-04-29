@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
@@ -136,7 +139,7 @@ window.addEventListener('keydown', (event) => {
 </div>
 
 <!-- Home Screen -->
-<div id="page-home" style="display:none">
+<div id="page-home">
   <div class="home-hero">
     <h1>NBC Stormwater Tools</h1>
     <p>Northern Beaches Council - Stormwater Engineering</p>
@@ -194,7 +197,7 @@ window.addEventListener('keydown', (event) => {
 </div>
 
 <!-- AEP Tool (display:flex so Leaflet map inits with correct dimensions) -->
-<div id="page-aep" style="flex-direction:column;flex:1;min-height:0;overflow:hidden;display:flex">
+<div id="page-aep" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden">
 <div class="tab-bar">
   <div class="tab active" onclick="switchTab('map')">Map View</div>
   <div class="tab" onclick="switchTab('rainfall-totals')">Rainfall Totals</div>
@@ -859,7 +862,7 @@ window.addEventListener('keydown', (event) => {
   </div>
 </div>
 
-<div id="page-relining">
+<div id="page-relining" style="display:none;flex:1;min-height:0;overflow:hidden;background:var(--panel);padding:20px">
   <div class="pkg-shell">
     <div class="pkg-hero">
       <div>
@@ -9162,8 +9165,28 @@ function switchPage(page, options = {}) {
   }
 }
 
-// Show home on load
-document.addEventListener('DOMContentLoaded', () => switchPage('home'));
+// Show home on load. Home is also visible by default in the HTML so the tile launcher is the safe fallback if later scripts fail.
+function startOnHomeScreen() {
+  try {
+    switchPage('home');
+  } catch (e) {
+    console.error('Home startup failed:', e);
+    const home = document.getElementById('page-home');
+    const nav = document.getElementById('page-nav');
+    if (home) home.style.display = '';
+    if (nav) nav.style.display = 'none';
+    PAGES.forEach(p => {
+      if (p === 'home') return;
+      const el = document.getElementById('page-' + p);
+      if (el) el.style.display = 'none';
+    });
+  }
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startOnHomeScreen);
+} else {
+  startOnHomeScreen();
+}
 
 // â"€â"€ Prioritisation Tool â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 let currentPriTool = 'original';
@@ -9323,4 +9346,45 @@ function priSave() {
 function renderPriList() {
   const wrap = document.getElementById('pri-list-wrap');
   if (!priList.length) { wrap.style.display = 'none'; return; }
-  wrap.style.d
+  wrap.style.display = '';
+  const rows = priList.map((r, i) => {
+    const cls = r.priority === 'HIGH' ? '#2ECC71' : r.priority === 'MEDIUM' ? '#F39C12' : '#E74C3C';
+    return `<tr>
+      <td>${i+1}</td>
+      <td><strong>${r.name}</strong><br><small style="color:var(--text-l)">${r.asset}${r.location ? ' - '+r.location : ''}</small></td>
+      <td><span style="font-weight:700;color:${cls}">${r.priority}</span></td>
+      <td class="r"><strong>${r.final.toFixed(1)}</strong></td>
+      <td class="r">${r.impact.toFixed(1)}</td>
+      <td class="r">${r.health.toFixed(1)}</td>
+      <td class="r">${r.vfm.toFixed(1)}</td>
+      <td class="r">${r.deliv.toFixed(1)}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('pri-list-table').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>#</th><th>Project</th><th>Priority</th><th class="r">Score</th>
+        <th class="r">Impact</th><th class="r">Health</th><th class="r">VFM</th><th class="r">Deliv.</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function priExportCSV() {
+  let csv = 'Rank,Project,Asset Type,Location,Priority,Score,Impact,Asset Health,VFM,Deliverability,Date\n';
+  priList.forEach((r,i) => {
+    csv += `${i+1},"${r.name}","${r.asset}","${r.location || ''}",${r.priority},${r.final.toFixed(1)},${r.impact.toFixed(1)},${r.health.toFixed(1)},${r.vfm.toFixed(1)},${r.deliv.toFixed(1)},${r.saved}\n`;
+  });
+  const a = document.createElement('a');
+  a.href = 'data:text/csv,' + encodeURIComponent(csv);
+  a.download = 'nbc_prioritisation_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+origPriUpdate();
+priCalc();
+
+// init() is called lazily by switchPage('aep') on first visit
+</script>
+</body>
+</html>
