@@ -961,6 +961,14 @@ window.addEventListener('keydown', (event) => {
           </div>
         </div>
       </div>
+      <div id="pkgTopupRow" style="margin-top:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top up underfilled packages</div>
+        <div style="display:flex;gap:20px;font-size:12px;align-items:center">
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="none" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> None</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="same_size" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition, similar size (±2 sizes)</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="any_condition" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Any condition in selection</label>
+        </div>
+      </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
@@ -4389,6 +4397,7 @@ function getReliningPackagingOptions() {
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
+    topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'none'),
     customSizeGroups: (() => {
       const seen = new Set();
       return [1, 2, 3, 4].map(i => {
@@ -4413,6 +4422,14 @@ function resolveReliningCoordinate(row) {
   return resolveCctvCoordinate(row);
 }
 
+function resolveReliningCriticalityScore(row) {
+  const raw = String(getValueByAliases(row, ['Criticality', 'criticality', 'SW_Criticality']) || '').trim().toUpperCase();
+  if (raw === 'Y') return 3;
+  const numeric = parseNumberValue(getValueByAliases(row, ['Criticality Score', 'Critical_Score', 'Score', 'score']));
+  if (Number.isFinite(numeric)) return Math.max(0, Math.min(5, numeric));
+  return 0;
+}
+
 function resolveReliningSuburb(row, suburbCol) {
   return formatSuburbName(getRowSuburb(row, suburbCol)) || getRowSuburb(row, suburbCol) || resolveCctvSuburb(row) || 'Unknown';
 }
@@ -4427,6 +4444,7 @@ function normaliseReliningCandidateRow(row, index, options, suburbCol) {
   const pipeCost = Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM) ? rateInfo.rate * lengthM : null;
   const coord = resolveReliningCoordinate(row);
   const assetId = String(getValueByAliases(row, ['Asset', 'Asset Number', 'Asset_Number', 'OBJECTID', 'MAPKEY', 'CATLG_ID']) || `asset-${index + 1}`).trim();
+  const criticalityScore = resolveReliningCriticalityScore(row);
   return {
     assetId,
     suburb: resolveReliningSuburb(row, suburbCol),
@@ -4443,6 +4461,7 @@ function normaliseReliningCandidateRow(row, index, options, suburbCol) {
     lat: coord?.lat ?? null,
     lon: coord?.lon ?? null,
     coordinateSource: coord?.source || '',
+    criticalityScore,
     raw: row
   };
 }
@@ -4470,7 +4489,7 @@ function buildReliningPackagingPreview(assetRows, options) {
 }
 
 function getReliningDiamSizeKey(diameterMm, customSizeGroups) {
-  if (!customSizeGroups || !customSizeGroups.length) return `solo_${Math.round(diameterMm ?? 0)}`;
+  if (!customSizeGroups || !customSizeGroups.length) return '__anysize__'; // no groups = mix freely
   const diam = Math.round(diameterMm ?? 0);
   for (let i = 0; i < customSizeGroups.length; i++) {
     if (customSizeGroups[i].includes(diam)) return `sizegroup_${i}`;
@@ -4642,6 +4661,8 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
       distance_warning: maxSpanM > (options.proximityM ? options.proximityM * 2 : 2000) ? 'Check package spread or coordinate quality' : '',
       coordinate_sources: packageCoordinateSourceSummary(items),
       asset_ids: items.map(item => item.assetId),
+      criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
+      critical_pipe_count: items.filter(item => (Number(item.criticalityScore) || 0) > 0).length,
       lat: center?.lat ?? null,
       lon: center?.lon ?? null,
       assets: items.map(item => ({
@@ -4655,7 +4676,71 @@ function buildReliningPackageObjects(packagedItems, options = {}) {
   });
 }
 
+function topupReliningPackages(packages, allCostedItems, options) {
+  if (options.topupMode === 'none' || options.method === 'count') return packages;
+  const allDiams = [...new Set(allCostedItems.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
+  const packagedIds = new Set(packages.flatMap(pkg => pkg.asset_ids || []));
+  const pool = allCostedItems.filter(i => !packagedIds.has(i.assetId) && Number.isFinite(i.pipeCost));
+  const usedIds = new Set();
+  const result = packages.map(pkg => {
+    let remaining = options.maxPackageValue - pkg.total_cost;
+    if (remaining <= 0) return pkg;
+    const dominantCondition = (pkg.condition_8_count || 0) >= (pkg.condition_7_count || 0) ? 8 : 7;
+    const pkgDiams = (pkg.diameters_mm || []).map(Number);
+    const adjacentDiams = new Set();
+    pkgDiams.forEach(d => {
+      const idx = allDiams.indexOf(d);
+      if (idx === -1) return;
+      for (let offset = -2; offset <= 2; offset++) {
+        const adj = allDiams[idx + offset];
+        if (adj != null) adjacentDiams.add(adj);
+      }
+    });
+    const pkgSuburb = pkg.primary_suburb || pkg.suburb || '';
+    let candidates = pool.filter(i => !usedIds.has(i.assetId) && (i.suburb || '') === pkgSuburb);
+    if (options.topupMode === 'same_size') {
+      candidates = candidates.filter(i => i.condition === dominantCondition && adjacentDiams.has(i.diameterMm));
+    }
+    candidates.sort((a, b) =>
+      (Number(b.criticalityScore) || 0) - (Number(a.criticalityScore) || 0) ||
+      (a.pipeCost || 0) - (b.pipeCost || 0)
+    );
+    if (!candidates.length) return pkg;
+    const addedItems = [];
+    for (const candidate of candidates) {
+      if (remaining <= 0) break;
+      if ((candidate.pipeCost || 0) <= remaining) {
+        addedItems.push({ ...candidate, topup: true });
+        usedIds.add(candidate.assetId);
+        remaining -= candidate.pipeCost;
+      }
+    }
+    if (!addedItems.length) return pkg;
+    const newAssets = [...(pkg.assets || []), ...addedItems];
+    const newCost = newAssets.reduce((s, i) => s + (Number(i.pipeCost) || 0), 0);
+    const newLength = newAssets.reduce((s, i) => s + (Number(i.lengthM) || 0), 0);
+    const newDiams = [...new Set(newAssets.map(i => i.diameterMm).filter(Number.isFinite))].sort((a, b) => a - b);
+    return {
+      ...pkg,
+      assets: newAssets,
+      asset_ids: newAssets.map(i => i.assetId),
+      pipe_count: newAssets.length,
+      condition_7_count: newAssets.filter(i => i.condition === 7).length,
+      condition_8_count: newAssets.filter(i => i.condition === 8).length,
+      total_length_m: Number(newLength.toFixed(1)),
+      total_cost: Number(newCost.toFixed(2)),
+      diameters_mm: newDiams,
+      criticality_score: newAssets.reduce((s, i) => s + (Number(i.criticalityScore) || 0), 0),
+      critical_pipe_count: newAssets.filter(i => (Number(i.criticalityScore) || 0) > 0).length,
+      topup_count: addedItems.length
+    };
+  });
+  return result;
+}
+
 function reliningPackagePriorityCompare(a, b) {
+  const critDiff = (Number(b?.criticality_score) || 0) - (Number(a?.criticality_score) || 0);
+  if (critDiff !== 0) return critDiff;
   const valueDiff = (Number(b?.total_cost) || 0) - (Number(a?.total_cost) || 0);
   if (valueDiff !== 0) return valueDiff;
   const lengthDiff = (Number(b?.total_length_m) || 0) - (Number(a?.total_length_m) || 0);
@@ -4860,7 +4945,8 @@ function renderReliningPackagingReasoning(options, preview = null) {
       <li>${options.proximityM ? `Pipes are grouped by spatial proximity — anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.` : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.')}</li>
       <li>${options.customSizeGroups && options.customSizeGroups.length ? `Size groups active — ${options.customSizeGroups.map((g, i) => `Group ${i + 1}: ${g.join(', ')} mm`).join('; ')}. Diameters in the same group share packages.` : 'No size groups set — each diameter is packaged separately.'}</li>
       <li>Packages with a spatial span exceeding <strong>${(options.proximityM ? options.proximityM * 2 : 2000).toLocaleString()} m</strong> are flagged in the table for review.</li>
-      <li>Generated packages are prioritised and renumbered by estimated value first, then length, then Condition 8 count.</li>
+      <li>${options.topupMode === 'same_size' ? 'Top-up active — underfilled packages pull in same-condition pipes within ±2 adjacent sizes, critical pipes first.' : options.topupMode === 'any_condition' ? 'Top-up active — underfilled packages pull in any pipe from the current condition selection, critical pipes first.' : 'No top-up — packages are not filled beyond their initial split.'}</li>
+      <li>Packages are prioritised by criticality score first, then value, then length, then Condition 8 count.</li>
       <li>Packages with usable coordinates are drawn on the map.</li>
     </ul>
   `;
@@ -5558,6 +5644,11 @@ async function generateReliningPackages() {
     setLoadTxt('Building relining packages...');
     await waitForPaint();
     let packages = buildReliningPackageObjects(packagedItems, options);
+    if (options.topupMode !== 'none') {
+      setLoadTxt('Topping up underfilled packages...');
+      await waitForPaint();
+      packages = topupReliningPackages(packages, preview.costed, options);
+    }
     setLoadTxt('Prioritising and renumbering packages...');
     await waitForPaint();
     packages = prioritiseAndRenumberReliningPackages(packages);
@@ -9506,4 +9597,3 @@ priCalc();
 </script>
 </body>
 </html>
-          
