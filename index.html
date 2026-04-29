@@ -5794,134 +5794,182 @@ async function downloadReliningPackagesZip() {
     return;
   }
 
-  function diamWeight(d) {
-    if (!Number.isFinite(d)) return 1.0;
-    if (d < 225) return 1.0;
-    if (d < 300) return 1.2;
-    if (d < 375) return 1.5;
-    if (d < 525) return 1.8;
-    return 2.2;
-  }
-
-  function fmtCurrency(v) {
-    if (!Number.isFinite(v)) return '';
-    return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function csvCell(v) {
-    const s = String(v ?? '');
-    if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-      return '"' + s.replace(/"/g, '""') + '"';
+  try {
+    function diamWeight(d) {
+      if (!Number.isFinite(d)) return 1.0;
+      if (d < 225) return 1.0;
+      if (d < 300) return 1.2;
+      if (d < 375) return 1.5;
+      if (d < 525) return 1.8;
+      return 2.2;
     }
-    return s;
-  }
 
-  function csvRow(arr) {
-    return arr.map(csvCell).join(',');
-  }
+    function fmtCurrency(v) {
+      if (!Number.isFinite(v)) return '';
+      return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
 
-  function modeDiameter(assets) {
-    const counts = {};
-    assets.forEach(a => {
-      const d = Math.round(a.diameterMm ?? 0);
-      counts[d] = (counts[d] || 0) + 1;
-    });
-    let best = null, bestCount = 0;
-    Object.entries(counts).forEach(([d, c]) => {
-      if (c > bestCount || (c === bestCount && Number(d) > Number(best))) {
-        best = d; bestCount = c;
+    function csvCell(v) {
+      const s = String(v ?? '');
+      if (s.includes(',') || s.includes('"') || s.includes('
+')) {
+        return '"' + s.replace(/"/g, '""') + '"';
       }
+      return s;
+    }
+
+    function csvRow(arr) { return arr.map(csvCell).join(','); }
+
+    function modeDiameter(assets) {
+      const counts = {};
+      assets.forEach(a => {
+        const d = Math.round(a.diameterMm ?? 0);
+        counts[d] = (counts[d] || 0) + 1;
+      });
+      let best = null, bestCount = 0;
+      Object.entries(counts).forEach(([d, c]) => {
+        if (c > bestCount || (c === bestCount && Number(d) > Number(best))) {
+          best = d; bestCount = c;
+        }
+      });
+      return best || '0';
+    }
+
+    function pkgFilename(idx, pkg) {
+      const num = String(idx + 1).padStart(3, '0');
+      const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
+        .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
+        .filter(Boolean)
+        .join('_');
+      const dominant = modeDiameter(pkg.assets || []);
+      return `RLN_${num}_${suburbs}_D${dominant}mm.csv`;
+    }
+
+    const HEADERS = [
+      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
+      'condition_score', 'pipe_priority_score',
+      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
+      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
+      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
+    ];
+
+    const zip = new JSZip();
+    const csvFilenames = [];
+
+    // ── Per-package CSVs ───────────────────────────────────────────────────
+    packages.forEach((pkg, pkgIdx) => {
+      const assets = pkg.assets || [];
+      const diametersArr = pkg.diameters_mm || pkg.diameters || [];
+      const diametersStr = diametersArr.map(d => '⌀' + d).join(', ');
+      const maxSpanKm = Number.isFinite(pkg.max_span_m)
+        ? (pkg.max_span_m / 1000).toFixed(1) + ' km'
+        : '';
+      const numPipes = assets.length;
+
+      const lines = [csvRow(HEADERS)];
+      let totalLengthM = 0;
+      let totalCost = 0;
+
+      assets.forEach(item => {
+        const raw = item.raw || {};
+        const diam = Math.round(item.diameterMm ?? 0);
+        const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
+        const condNum = Number.isFinite(item.condition) ? item.condition : 0;
+        const dw = diamWeight(item.diameterMm);
+        const cs = condNum;
+        const critW = 1 + Math.round(crit * 10) / 10;
+        const pps = cs * dw * critW;
+        const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
+        const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
+        totalLengthM += lenM;
+        totalCost += cost;
+
+        const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
+        const rawLga   = raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
+        const rawUp    = raw['SW_Upstream Node']  ?? raw['Upstream Node']   ?? '';
+        const rawDown  = raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
+        const rawAddr  = raw['Pipe_Start_Address'] ?? raw['Start Address']  ?? '';
+
+        lines.push(csvRow([
+          pkg.package_id,
+          item.assetId,
+          diam ? diam + 'mm' : '',
+          lenM ? lenM.toFixed(1) + ' m' : '',
+          condNum || '',
+          rawScore,
+          crit.toFixed(1),
+          dw.toFixed(1),
+          cs,
+          pps.toFixed(4),
+          rawLga, rawUp, rawDown,
+          Number.isFinite(item.ratePerM) ? item.ratePerM.toFixed(2) : '',
+          cost ? fmtCurrency(cost) : '',
+          rawAddr,
+          item.suburb || '',
+          diametersStr,
+          maxSpanKm,
+          ''   // Number of Pipes blank on data rows
+        ]));
+      });
+
+      // Totals row
+      const totalsRow = HEADERS.map(() => '');
+      totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
+      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2);
+      totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
+      totalsRow[HEADERS.indexOf('Number of Pipes')]    = numPipes;
+      lines.push(csvRow(totalsRow));
+
+      const csvContent = lines.join('
+');
+      const filename = pkgFilename(pkgIdx, pkg);
+      csvFilenames.push(filename);
+      zip.file(filename, csvContent);
     });
-    return best || '0';
-  }
 
-  function pkgFilename(idx, pkg) {
-    const num = String(idx + 1).padStart(3, '0');
-    const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
-      .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
-      .filter(Boolean)
-      .join('_');
-    const dominant = modeDiameter(pkg.assets || []);
-    return `RLN_${num}_${suburbs}_D${dominant}mm.csv`;
-  }
-
-  const HEADERS = [
-    'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
-    'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
-    'condition_score', 'pipe_priority_score',
-    'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
-    'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
-    'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
-  ];
-
-  const zip = new JSZip();
-
-  packages.forEach((pkg, pkgIdx) => {
-    const assets = pkg.assets || [];
-    const diametersStr = (pkg.diameters || [])
-      .map(d => `⌀${d}`)
-      .join(', ');
-    const maxSpanKm = Number.isFinite(pkg.max_span_m)
-      ? (pkg.max_span_m / 1000).toFixed(1) + ' km'
-      : '';
-    const numPipes = assets.length;
-
-    const lines = [csvRow(HEADERS)];
-
-    assets.forEach((item, itemIdx) => {
-      const raw = item.raw || {};
-      const diam = Math.round(item.diameterMm ?? 0);
-      const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
-      const condNum = Number.isFinite(item.condition) ? item.condition : 0;
-      const dw = diamWeight(item.diameterMm);
-      const cs = condNum;
-      const critW = 1 + Math.round(crit * 10) / 10;
-      const pps = cs * dw * critW;
-
-      const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
-      const rawLga = raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
-      const rawUp = raw['SW_Upstream Node'] ?? raw['Upstream Node'] ?? '';
-      const rawDown = raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
-      const rawAddr = raw['Pipe_Start_Address'] ?? raw['Start Address'] ?? '';
-
-      const row = [
-        pkg.package_id,
-        item.assetId,
-        diam ? diam + 'mm' : '',
-        Number.isFinite(item.lengthM) ? item.lengthM.toFixed(1) + ' m' : '',
-        condNum || '',
-        rawScore,
-        crit.toFixed(1),
-        dw.toFixed(1),
-        cs,
-        pps.toFixed(4),
-        rawLga,
-        rawUp,
-        rawDown,
-        Number.isFinite(item.ratePerM) ? item.ratePerM.toFixed(2) : '',
-        Number.isFinite(item.pipeCost) ? fmtCurrency(item.pipeCost) : '',
-        rawAddr,
-        item.suburb || '',
-        diametersStr,
-        maxSpanKm,
-        itemIdx === 0 ? numPipes : ''
-      ];
-      lines.push(csvRow(row));
+    // ── package_summary.txt ────────────────────────────────────────────────
+    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60)];
+    packages.forEach(pkg => {
+      const assets = pkg.assets || [];
+      const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
+      const diams = (pkg.diameters_mm || pkg.diameters || []).join(', ');
+      const totalLen = assets.reduce((s, i) => s + (Number.isFinite(i.lengthM) ? i.lengthM : 0), 0);
+      const totalCost = assets.reduce((s, i) => s + (Number.isFinite(i.pipeCost) ? i.pipeCost : 0), 0);
+      const assetIds = assets.map(i => i.assetId).join(', ');
+      summaryLines.push('');
+      summaryLines.push(`Package:    ${pkg.package_id}`);
+      if (suburbs)   summaryLines.push(`Suburb:     ${suburbs}`);
+      if (diams)     summaryLines.push(`Diameters:  ${diams}mm`);
+      summaryLines.push(`Pipes:      ${assets.length}`);
+      summaryLines.push(`Length:     ${totalLen.toLocaleString('en-AU', {minimumFractionDigits:1, maximumFractionDigits:1})}m`);
+      summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
+      summaryLines.push(`Assets:     ${assetIds}`);
+      summaryLines.push('-'.repeat(60));
     });
+    zip.file('package_summary.txt', summaryLines.join('
+'));
 
-    const csvContent = lines.join('\r\n');
-    const filename = pkgFilename(pkgIdx, pkg);
-    zip.file(filename, csvContent);
-  });
+    // ── file_list.txt ──────────────────────────────────────────────────────
+    const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
+    csvFilenames.slice().sort().forEach(n => fileListLines.push(n));
+    zip.file('file_list.txt', fileListLines.join('
+'));
 
-  const blob = await zip.generateAsync({ type: 'blob' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `relining_packages_${new Date().toISOString().slice(0, 10)}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    // ── Generate and download ──────────────────────────────────────────────
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relining_packages_${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+
+  } catch (err) {
+    console.error('ZIP export error:', err);
+    alert('ZIP export failed: ' + err.message);
+  }
 }
 
 const RELINING_PACKAGE_COLORS = [
