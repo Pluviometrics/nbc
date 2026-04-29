@@ -942,23 +942,39 @@ window.addEventListener('keydown', (event) => {
         </div>
       </div>
       <div id="pkgSizeGroupsRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Ctrl+click to select multiple.</div>
+        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Earlier groups win if they overlap.</div>
         <div class="pkg-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
           <div class="fg">
-            <label for="pkgSizeGroup1">Group 1</label>
-            <select id="pkgSizeGroup1" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+            <label for="size-group-1-select">Group 1</label>
+            <div style="display:flex;gap:6px">
+              <select id="size-group-1-select" style="font-size:12px;min-width:0;flex:1"></select>
+              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(0)">Add</button>
+            </div>
+            <div class="size-pill-row" id="size-group-1-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
           <div class="fg">
-            <label for="pkgSizeGroup2">Group 2</label>
-            <select id="pkgSizeGroup2" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+            <label for="size-group-2-select">Group 2</label>
+            <div style="display:flex;gap:6px">
+              <select id="size-group-2-select" style="font-size:12px;min-width:0;flex:1"></select>
+              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(1)">Add</button>
+            </div>
+            <div class="size-pill-row" id="size-group-2-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
           <div class="fg">
-            <label for="pkgSizeGroup3">Group 3</label>
-            <select id="pkgSizeGroup3" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+            <label for="size-group-3-select">Group 3</label>
+            <div style="display:flex;gap:6px">
+              <select id="size-group-3-select" style="font-size:12px;min-width:0;flex:1"></select>
+              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(2)">Add</button>
+            </div>
+            <div class="size-pill-row" id="size-group-3-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
           <div class="fg">
-            <label for="pkgSizeGroup4">Group 4</label>
-            <select id="pkgSizeGroup4" multiple style="height:90px;font-size:12px" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"></select>
+            <label for="size-group-4-select">Group 4</label>
+            <div style="display:flex;gap:6px">
+              <select id="size-group-4-select" style="font-size:12px;min-width:0;flex:1"></select>
+              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(3)">Add</button>
+            </div>
+            <div class="size-pill-row" id="size-group-4-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
         </div>
       </div>
@@ -1558,6 +1574,7 @@ const DIAMETER_COMPATIBLE_PAIRS = [
   [900, 1050]
 ];
 const DIAMETER_LARGE_THRESHOLD = 1050;
+let reliningSizeGroups = [[], [], [], []];
 let reliningPackagesMap = null;
 let reliningPackagesLayer = null;
 let reliningPackageFocusLayers = new Map();
@@ -4451,17 +4468,7 @@ function getReliningPackagingOptions() {
     groupingMethod,
     proximityM,
     topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up'),
-    customSizeGroups: (() => {
-      const seen = new Set();
-      return [1, 2, 3, 4].map(i => {
-        const el = document.getElementById(`pkgSizeGroup${i}`);
-        if (!el) return [];
-        return Array.from(el.selectedOptions).map(o => parseInt(o.value, 10)).filter(d => {
-          if (seen.has(d)) return false;
-          seen.add(d); return true;
-        });
-      }).filter(g => g.length > 0);
-    })()
+    customSizeGroups: getReliningSizeGroups()
   };
 }
 
@@ -4584,30 +4591,73 @@ function getReliningDiamSizeKey(diameterMm, customSizeGroups) {
   return `solo_${diam}`;
 }
 
+function getReliningSizeGroups() {
+  const seen = new Set();
+  return reliningSizeGroups
+    .map(group => group.map(value => Number(value)).filter(value => {
+      if (!Number.isFinite(value) || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    }).sort((a, b) => a - b))
+    .filter(group => group.length > 0);
+}
+
+function renderReliningSizeGroup(groupIndex) {
+  const container = document.getElementById(`size-group-${groupIndex + 1}-pills`);
+  if (!container) return;
+  const values = reliningSizeGroups[groupIndex] || [];
+  container.innerHTML = '';
+  if (!values.length) {
+    container.textContent = 'No pipe sizes selected.';
+    return;
+  }
+  values.forEach(value => {
+    const pill = document.createElement('span');
+    pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--text)';
+    pill.innerHTML = `${escapeHtml(value)} mm <button type="button" aria-label="Remove ${escapeHtml(value)} mm" onclick="removeReliningSizeFromGroup(${groupIndex}, ${Number(value)})" style="border:0;background:transparent;color:var(--text-l);font-weight:800;cursor:pointer;padding:0 1px">x</button>`;
+    container.appendChild(pill);
+  });
+}
+
+function renderAllReliningSizeGroups() {
+  [0, 1, 2, 3].forEach(renderReliningSizeGroup);
+}
+
+function addReliningSizeToGroup(groupIndex) {
+  const select = document.getElementById(`size-group-${groupIndex + 1}-select`);
+  const value = Number(select?.value);
+  if (!Number.isFinite(value)) return;
+  if (!reliningSizeGroups[groupIndex].includes(value)) {
+    reliningSizeGroups[groupIndex].push(value);
+    reliningSizeGroups[groupIndex].sort((a, b) => a - b);
+  }
+  renderReliningSizeGroup(groupIndex);
+  renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
+}
+
+function removeReliningSizeFromGroup(groupIndex, value) {
+  reliningSizeGroups[groupIndex] = (reliningSizeGroups[groupIndex] || []).filter(item => item !== value);
+  renderReliningSizeGroup(groupIndex);
+  renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
+}
+
 function populateReliningDiameterSelects(rows) {
   const diamSet = new Set();
   rows.forEach(row => {
-    const d = Math.round(cleanDiameter(getValueByAliases(row, ['SWP_Pipe Diameter_mm', 'SWP_Pipe_Diameter_mm', 'Pipe Diameter', 'Diameter'])) || 0);
-    if (d > 0) diamSet.add(d);
+    const d = Math.round(getReliningDiameterValue(row) || 0);
+    if (d >= MIN_RELINING_DIAMETER_MM) diamSet.add(d);
   });
-  const diams = [...diamSet].sort((a, b) => a - b);
-  const defaults = [
-    [300, 375, 450, 525],
-    [600, 750],
-    [825, 900],
-    [1050, 1200, 1350, 1500, 1800]
-  ];
+  const diams = (diamSet.size ? [...diamSet] : DEFAULT_RELINING_DIAMETERS).sort((a, b) => a - b);
+  const row = document.getElementById('pkgSizeGroupsRow');
+  if (row) row.style.display = '';
   [1, 2, 3, 4].forEach(i => {
-    const el = document.getElementById(`pkgSizeGroup${i}`);
+    const el = document.getElementById(`size-group-${i}-select`);
     if (!el) return;
-    if (!diams.length) {
-      el.innerHTML = '<option disabled>Upload assets to populate</option>';
-      return;
-    }
-    const prev = new Set(Array.from(el.selectedOptions).map(o => o.value));
-    const active = prev.size ? prev : new Set(defaults[i - 1].map(String));
-    el.innerHTML = diams.map(d => `<option value="${d}"${active.has(String(d)) ? ' selected' : ''}>${d} mm</option>`).join('');
+    const previousValue = el.value;
+    el.innerHTML = diams.map(d => `<option value="${d}">${d} mm</option>`).join('');
+    if (previousValue && diams.includes(Number(previousValue))) el.value = previousValue;
   });
+  renderAllReliningSizeGroups();
 }
 
 const MAX_PACKAGE_DISTANCE_METRES = 500;
