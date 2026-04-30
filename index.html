@@ -6477,7 +6477,11 @@ async function downloadReliningPackagesZip() {
 
     console.log('[ZIP-DEBUG] zip.files keys before generateAsync =', Object.keys(zip.files));
 
-    const blob = await zip.generateAsync({ type: 'blob' });
+    const blob = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
     console.log('[ZIP-DEBUG] blob.size =', blob.size, '| blob.type =', blob.type, '| blob.constructor =', blob.constructor && blob.constructor.name);
     try {
       const headBuf = await blob.slice(0, 4).arrayBuffer();
@@ -6501,6 +6505,8 @@ async function downloadReliningPackagesZip() {
       throw new Error('FileSaver (saveAs) is not loaded. Ensure FileSaver.js is included before this script.');
     }
     console.log('[ZIP-DEBUG] using saveAs (FileSaver.js)');
+    console.log('[ZIP-DEBUG] blob instanceof Blob =', blob instanceof Blob);
+    console.log('[ZIP-DEBUG] blob size (post-generate) =', blob.size);
     saveAs(blob, 'relining_packages.zip');
     console.groupEnd();
 
