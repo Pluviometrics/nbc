@@ -6361,13 +6361,11 @@ async function downloadReliningPackagesZip() {
     const zip = new JSZip();
     const csvFilenames = [];
     const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60)];
-    const summaryRows = [];
 
     packages.forEach(pkg => {
       const assets = pkg.assets || [];
       const diametersArr = pkg.diameters_mm || pkg.diameters || [];
       const diametersStr = diametersArr.map(d => '⌀' + d).join(', ');
-      const diametersPlain = diametersArr.map(d => String(d)).join(', ');
       const maxSpanKm = Number.isFinite(pkg.max_span_m) ? (pkg.max_span_m / 1000).toFixed(1) + ' km' : '';
       const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
 
@@ -6441,49 +6439,13 @@ async function downloadReliningPackagesZip() {
       summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
       summaryLines.push(`Assets:     ${assets.map(i => i.assetId).join(', ')}`);
       summaryLines.push('-'.repeat(60));
-
-      summaryRows.push({
-        'Package ID': pkg.package_id,
-        'Suburb': suburbs,
-        'Diameters (mm)': diametersPlain,
-        'Pipes': assets.length,
-        'Length (m)': Number(totalLengthM.toFixed(1)),
-        'Cost ($)': Math.round(totalCost),
-        'Asset IDs': assets.map(i => i.assetId).join(', ')
-      });
     });
 
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
     const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
-    const sortedFilenames = csvFilenames.slice().sort();
-    sortedFilenames.forEach(n => fileListLines.push(n));
+    csvFilenames.slice().sort().forEach(n => fileListLines.push(n));
     zip.file('file_list.txt', fileListLines.join('\n'));
-
-    if (typeof XLSX === 'undefined') {
-      throw new Error('XLSX library not loaded. Refresh the page and try again.');
-    }
-
-    const SUMMARY_HEADERS = ['Package ID', 'Suburb', 'Diameters (mm)', 'Pipes', 'Length (m)', 'Cost ($)', 'Asset IDs'];
-    const wbSummary = XLSX.utils.book_new();
-    const wsSummary = XLSX.utils.json_to_sheet(summaryRows, { header: SUMMARY_HEADERS });
-    wsSummary['!cols'] = SUMMARY_HEADERS.map(h => {
-      const maxLen = Math.max(h.length, ...summaryRows.map(r => String(r[h] ?? '').length));
-      return { wch: Math.min(maxLen + 4, 60) };
-    });
-    XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'Package Summary');
-    const summaryXlsxBytes = XLSX.write(wbSummary, { bookType: 'xlsx', type: 'array' });
-    zip.file('package_summary.xlsx', summaryXlsxBytes);
-
-    const wbFiles = XLSX.utils.book_new();
-    const wsFiles = XLSX.utils.json_to_sheet(
-      sortedFilenames.map(name => ({ Filename: name })),
-      { header: ['Filename'] }
-    );
-    wsFiles['!cols'] = [{ wch: 80 }];
-    XLSX.utils.book_append_sheet(wbFiles, wsFiles, 'File List');
-    const fileListXlsxBytes = XLSX.write(wbFiles, { bookType: 'xlsx', type: 'array' });
-    zip.file('file_list.xlsx', fileListXlsxBytes);
 
     const blob = await zip.generateAsync({
       type: 'blob',
