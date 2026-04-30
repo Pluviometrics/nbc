@@ -986,37 +986,6 @@ window.addEventListener('keydown', (event) => {
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
         </div>
       </div>
-      <div id="pkgCostingRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Costing</div>
-        <div class="pkg-grid" style="grid-template-columns:1fr 1.4fr 1fr 1fr">
-          <div class="fg">
-            <label for="pkgCostMode">Cost mode</label>
-            <select id="pkgCostMode" onchange="onReliningCostModeChange()">
-              <option value="median" selected>Median</option>
-              <option value="lowest">Lowest</option>
-              <option value="contractor">Contractor</option>
-            </select>
-          </div>
-          <div class="fg" id="pkgContractorWrap" style="display:none">
-            <label for="pkgContractor">Contractor</label>
-            <select id="pkgContractor" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              <option value="">No contractors loaded</option>
-            </select>
-          </div>
-          <div class="fg" style="align-self:end">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600">
-              <input type="checkbox" id="pkgTrafficControl" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              Provisional traffic control ($2,000/pipe)
-            </label>
-          </div>
-          <div class="fg" style="align-self:end">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600">
-              <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              Project initiation multiplier (×1.15)
-            </label>
-          </div>
-        </div>
-      </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
@@ -4486,20 +4455,15 @@ function getReliningPackagingOptions() {
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
-  const costMode = (document.getElementById('pkgCostMode')?.value || 'median').toLowerCase();
-  const contractorEl = document.getElementById('pkgContractor');
-  const contractor = costMode === 'contractor' ? (contractorEl?.value || '').trim() : '';
-  const trafficControlEl = document.getElementById('pkgTrafficControl');
-  const initiationEl = document.getElementById('pkgInitiation');
   return {
     reliningMode,
     method,
     maxPackageValue: Math.max(Number.isFinite(maxPackageValue) ? maxPackageValue : 500000, 1),
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
-    costMode,
-    contractor: contractor || null,
-    trafficControl: trafficControlEl ? !!trafficControlEl.checked : true,
-    projectInitiation: initiationEl ? !!initiationEl.checked : true,
+    costMode: 'median',
+    contractor: null,
+    trafficControl: false,
+    projectInitiation: false,
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
@@ -4674,44 +4638,6 @@ function addReliningSizeToGroup(groupIndex) {
 function removeReliningSizeFromGroup(groupIndex, value) {
   reliningSizeGroups[groupIndex] = (reliningSizeGroups[groupIndex] || []).filter(item => item !== value);
   renderReliningSizeGroup(groupIndex);
-  renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
-}
-
-function getReliningContractors(rateRows) {
-  if (!rateRows?.length) return [];
-  const excludeNames = ['mean', 'average', 'median', 'stormwater mean'];
-  const excludeItems = ['establishment', 'modifier', 'traffic control'];
-  const contractors = new Set();
-  rateRows.forEach(row => {
-    const rate = normaliseNumeric(row?.['Unit Rate']);
-    if (!Number.isFinite(rate) || rate <= 0) return;
-    const item = String(row?.Item || '').toLowerCase();
-    if (excludeItems.some(ex => item.includes(ex))) return;
-    const candidate = String(row?.Component ?? row?.['Origin of Average/Mean Price'] ?? '').trim();
-    if (!candidate) return;
-    if (excludeNames.some(ex => candidate.toLowerCase().includes(ex))) return;
-    contractors.add(candidate);
-  });
-  return [...contractors].sort((a, b) => a.localeCompare(b));
-}
-
-function populateReliningContractorSelect(rateRows) {
-  const select = document.getElementById('pkgContractor');
-  if (!select) return;
-  const previousValue = select.value;
-  const contractors = getReliningContractors(rateRows);
-  if (!contractors.length) {
-    select.innerHTML = '<option value="">No contractors loaded</option>';
-    return;
-  }
-  select.innerHTML = contractors.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  if (previousValue && contractors.includes(previousValue)) select.value = previousValue;
-}
-
-function onReliningCostModeChange() {
-  const mode = (document.getElementById('pkgCostMode')?.value || 'median').toLowerCase();
-  const wrap = document.getElementById('pkgContractorWrap');
-  if (wrap) wrap.style.display = mode === 'contractor' ? '' : 'none';
   renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
 }
 
@@ -6124,7 +6050,6 @@ async function loadReliningRatesFile(event) {
     clearReliningPackagingOutputs();
     const statusEl = document.getElementById('pkgRatesStatus');
     if (statusEl) statusEl.textContent = `Rates: ${escapeHtml(file.name)} (${rows.length.toLocaleString()} relining rates)`;
-    populateReliningContractorSelect(rows);
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: reliningAssetsRows.length, suburb_column: resolveSuburbColumn(reliningAssetsRows) });
     setPackagingStatus(reliningAssetsRows.length > 0, reliningAssetsRows.length > 0 ? 'Required files loaded' : 'Upload assets file to continue');
@@ -6132,7 +6057,6 @@ async function loadReliningRatesFile(event) {
     reliningRatesRows = [];
     reliningRatesData = null;
     reliningRatesFileName = '';
-    populateReliningContractorSelect([]);
     setPackagingStatus(false, 'Rates upload failed');
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: reliningAssetsRows.length, suburb_column: resolveSuburbColumn(reliningAssetsRows) });
@@ -6344,7 +6268,7 @@ async function downloadReliningPackagesZip() {
         .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
         .filter(Boolean).join('_') || 'UNKNOWN';
       const dominant = modeDiameter(pkg.assets || []);
-      return `${pkg.package_id}_${suburbs}_D${dominant}.csv`;
+      return `${pkg.package_id}_${suburbs}_D${dominant}mm.csv`;
     }
 
     const HEADERS = [
@@ -6353,7 +6277,6 @@ async function downloadReliningPackagesZip() {
       'condition_score', 'pipe_priority_score',
       'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
       'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
-      'topup',
       'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
     ];
 
@@ -6408,7 +6331,6 @@ async function downloadReliningPackagesZip() {
           cost ? fmtCurrency(cost) : '',
           rawAddr,
           item.suburb || '',
-          item.topup ? 'TRUE' : 'FALSE',
           diametersStr,
           maxSpanKm,
           ''
@@ -6450,7 +6372,7 @@ async function downloadReliningPackagesZip() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'relining_packages.zip';
+    a.download = `relining_packages_${new Date().toISOString().slice(0, 10)}.zip`;
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
