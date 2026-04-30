@@ -6300,13 +6300,35 @@ document.addEventListener('click', (event) => {
 });
 
 async function downloadReliningPackagesZip() {
+  console.group('[ZIP-DEBUG] downloadReliningPackagesZip');
+  console.log('[ZIP-DEBUG] entry: timestamp =', new Date().toISOString());
   const packages = lastPackagingGeneration?.packages || [];
+  console.log('[ZIP-DEBUG] packages.length =', packages.length);
+  if (packages[0]) {
+    const p = packages[0];
+    console.log('[ZIP-DEBUG] first package keys =', Object.keys(p));
+    console.log('[ZIP-DEBUG] first package shape =', {
+      package_id: p.package_id,
+      suburbs: p.suburbs,
+      suburb: p.suburb,
+      diameters_mm: p.diameters_mm,
+      diameters: p.diameters,
+      max_span_m: p.max_span_m,
+      assets_length: (p.assets || []).length,
+      assets_first_keys: p.assets && p.assets[0] ? Object.keys(p.assets[0]) : null
+    });
+  }
+  console.log('[ZIP-DEBUG] typeof JSZip =', typeof JSZip);
+  console.log('[ZIP-DEBUG] typeof saveAs =', typeof saveAs);
+  console.log('[ZIP-DEBUG] typeof URL.createObjectURL =', typeof URL.createObjectURL);
   if (!packages.length) {
     alert('Generate relining packages before downloading.');
+    console.groupEnd();
     return;
   }
   if (typeof JSZip === 'undefined') {
     alert('JSZip library not loaded. Please refresh the page and try again.');
+    console.groupEnd();
     return;
   }
 
@@ -6426,7 +6448,9 @@ async function downloadReliningPackagesZip() {
 
       const filename = pkgFilename(pkg);
       csvFilenames.push(filename);
-      zip.file(filename, lines.join('\n'));
+      const csvBody = lines.join('\n');
+      console.log('[ZIP-DEBUG] zip.file CSV:', filename, '| bytes:', csvBody.length, '| rows:', lines.length);
+      zip.file(filename, csvBody);
 
       summaryLines.push('');
       summaryLines.push(`Package:    ${pkg.package_id}`);
@@ -6440,24 +6464,58 @@ async function downloadReliningPackagesZip() {
       summaryLines.push('-'.repeat(60));
     });
 
-    zip.file('package_summary.txt', summaryLines.join('\n'));
+    const summaryText = summaryLines.join('\n');
+    console.log('[ZIP-DEBUG] zip.file: package_summary.txt | bytes:', summaryText.length);
+    zip.file('package_summary.txt', summaryText);
 
     const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
     csvFilenames.slice().sort().forEach(n => fileListLines.push(n));
-    zip.file('file_list.txt', fileListLines.join('\n'));
+    const fileListText = fileListLines.join('\n');
+    console.log('[ZIP-DEBUG] zip.file: file_list.txt | bytes:', fileListText.length, '| entries:', csvFilenames.length);
+    zip.file('file_list.txt', fileListText);
+
+    console.log('[ZIP-DEBUG] zip.files keys before generateAsync =', Object.keys(zip.files));
 
     const blob = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'relining_packages.zip';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    console.log('[ZIP-DEBUG] blob.size =', blob.size, '| blob.type =', blob.type, '| blob.constructor =', blob.constructor && blob.constructor.name);
+    try {
+      const headBuf = await blob.slice(0, 4).arrayBuffer();
+      const headBytes = Array.from(new Uint8Array(headBuf));
+      const headHex = headBytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const isPK = headBytes[0] === 0x50 && headBytes[1] === 0x4B;
+      console.log('[ZIP-DEBUG] blob first 4 bytes (hex) =', headHex, '| starts with PK =', isPK);
+    } catch (sliceErr) {
+      console.error('[ZIP-DEBUG] blob.slice/arrayBuffer failed:', sliceErr);
+    }
+
+    const btn = document.querySelector('[onclick*="downloadReliningPackagesZip"]');
+    if (btn) {
+      console.log('[ZIP-DEBUG] export btn outerHTML (first 200ch) =', btn.outerHTML.slice(0, 200));
+      console.log('[ZIP-DEBUG] export btn has onclick attr =', btn.hasAttribute('onclick'));
+    } else {
+      console.log('[ZIP-DEBUG] export btn not found via querySelector');
+    }
+
+    const usingSaveAs = typeof saveAs === 'function';
+    console.log('[ZIP-DEBUG] using saveAs =', usingSaveAs, '| else fallback to URL.createObjectURL + a.click');
+    if (usingSaveAs) {
+      saveAs(blob, 'relining_packages.zip');
+    } else {
+      const url = URL.createObjectURL(blob);
+      console.log('[ZIP-DEBUG] objectURL =', url);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'relining_packages.zip';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    }
+    console.groupEnd();
 
   } catch (err) {
-    console.error('ZIP export error:', err);
+    console.error('[ZIP-DEBUG] ZIP export error:', err);
     alert('ZIP export failed: ' + err.message);
+    console.groupEnd();
   }
 }
 
