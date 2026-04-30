@@ -6479,8 +6479,7 @@ async function downloadReliningPackagesZip() {
 
     const blob = await zip.generateAsync({
       type: 'blob',
-      compression: 'DEFLATE',
-      compressionOptions: { level: 6 }
+      compression: 'STORE'
     });
     console.log('[ZIP-DEBUG] blob.size =', blob.size, '| blob.type =', blob.type, '| blob.constructor =', blob.constructor && blob.constructor.name);
     try {
