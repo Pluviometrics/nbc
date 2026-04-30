@@ -14,7 +14,6 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
@@ -985,37 +984,6 @@ window.addEventListener('keydown', (event) => {
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
-        </div>
-      </div>
-      <div id="pkgCostingRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Costing</div>
-        <div class="pkg-grid" style="grid-template-columns:1fr 1.4fr 1fr 1fr">
-          <div class="fg">
-            <label for="pkgCostMode">Cost mode</label>
-            <select id="pkgCostMode" onchange="onReliningCostModeChange()">
-              <option value="median" selected>Median</option>
-              <option value="lowest">Lowest</option>
-              <option value="contractor">Contractor</option>
-            </select>
-          </div>
-          <div class="fg" id="pkgContractorWrap" style="display:none">
-            <label for="pkgContractor">Contractor</label>
-            <select id="pkgContractor" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              <option value="">No contractors loaded</option>
-            </select>
-          </div>
-          <div class="fg" style="align-self:end">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600">
-              <input type="checkbox" id="pkgTrafficControl" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              Provisional traffic control ($2,000/pipe)
-            </label>
-          </div>
-          <div class="fg" style="align-self:end">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600">
-              <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-              Project initiation multiplier (×1.15)
-            </label>
-          </div>
         </div>
       </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
@@ -4487,20 +4455,15 @@ function getReliningPackagingOptions() {
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
-  const costMode = (document.getElementById('pkgCostMode')?.value || 'median').toLowerCase();
-  const contractorEl = document.getElementById('pkgContractor');
-  const contractor = costMode === 'contractor' ? (contractorEl?.value || '').trim() : '';
-  const trafficControlEl = document.getElementById('pkgTrafficControl');
-  const initiationEl = document.getElementById('pkgInitiation');
   return {
     reliningMode,
     method,
     maxPackageValue: Math.max(Number.isFinite(maxPackageValue) ? maxPackageValue : 500000, 1),
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
-    costMode,
-    contractor: contractor || null,
-    trafficControl: trafficControlEl ? !!trafficControlEl.checked : true,
-    projectInitiation: initiationEl ? !!initiationEl.checked : true,
+    costMode: 'median',
+    contractor: null,
+    trafficControl: false,
+    projectInitiation: false,
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
@@ -4675,44 +4638,6 @@ function addReliningSizeToGroup(groupIndex) {
 function removeReliningSizeFromGroup(groupIndex, value) {
   reliningSizeGroups[groupIndex] = (reliningSizeGroups[groupIndex] || []).filter(item => item !== value);
   renderReliningSizeGroup(groupIndex);
-  renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
-}
-
-function getReliningContractors(rateRows) {
-  if (!rateRows?.length) return [];
-  const excludeNames = ['mean', 'average', 'median', 'stormwater mean'];
-  const excludeItems = ['establishment', 'modifier', 'traffic control'];
-  const contractors = new Set();
-  rateRows.forEach(row => {
-    const rate = normaliseNumeric(row?.['Unit Rate']);
-    if (!Number.isFinite(rate) || rate <= 0) return;
-    const item = String(row?.Item || '').toLowerCase();
-    if (excludeItems.some(ex => item.includes(ex))) return;
-    const candidate = String(row?.Component ?? row?.['Origin of Average/Mean Price'] ?? '').trim();
-    if (!candidate) return;
-    if (excludeNames.some(ex => candidate.toLowerCase().includes(ex))) return;
-    contractors.add(candidate);
-  });
-  return [...contractors].sort((a, b) => a.localeCompare(b));
-}
-
-function populateReliningContractorSelect(rateRows) {
-  const select = document.getElementById('pkgContractor');
-  if (!select) return;
-  const previousValue = select.value;
-  const contractors = getReliningContractors(rateRows);
-  if (!contractors.length) {
-    select.innerHTML = '<option value="">No contractors loaded</option>';
-    return;
-  }
-  select.innerHTML = contractors.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
-  if (previousValue && contractors.includes(previousValue)) select.value = previousValue;
-}
-
-function onReliningCostModeChange() {
-  const mode = (document.getElementById('pkgCostMode')?.value || 'median').toLowerCase();
-  const wrap = document.getElementById('pkgContractorWrap');
-  if (wrap) wrap.style.display = mode === 'contractor' ? '' : 'none';
   renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
 }
 
@@ -5252,7 +5177,8 @@ function addPackagePriority(packages) {
   return (packages || []).map(pkg => {
     const assets = (pkg.assets || []).map(asset => {
       const criticality_1dp = Number((Number(asset.criticalityScore ?? asset.Score) || 0).toFixed(1));
-      const condition_score = Math.max(Number(asset.condition) || 0, 0);
+      const rawConditionForPriority = getValueByAliases(asset.raw || {}, ['SW_Condition']);
+      const condition_score = Math.max(cleanNumber(rawConditionForPriority) || 0, 0);
       const diameter_weight = reliningDiameterWeight(asset.diameterMm);
       const pipe_priority_score = condition_score * diameter_weight * (1 + criticality_1dp);
       return {
@@ -5637,6 +5563,7 @@ function renderGeneratedPackages(data) {
       </div>
       <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="export-btn" onclick="downloadReliningPackagesZip()">Download ZIP</button>
+        <button class="export-btn" onclick="exportReliningPackagesCsv()">Export ESRI CSV</button>
         <button class="export-btn" onclick="loadFutureWorksFromRelining(true)">Load Into Future Works Plan</button>
       </div>
     </div>
@@ -6125,7 +6052,6 @@ async function loadReliningRatesFile(event) {
     clearReliningPackagingOutputs();
     const statusEl = document.getElementById('pkgRatesStatus');
     if (statusEl) statusEl.textContent = `Rates: ${escapeHtml(file.name)} (${rows.length.toLocaleString()} relining rates)`;
-    populateReliningContractorSelect(rows);
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: reliningAssetsRows.length, suburb_column: resolveSuburbColumn(reliningAssetsRows) });
     setPackagingStatus(reliningAssetsRows.length > 0, reliningAssetsRows.length > 0 ? 'Required files loaded' : 'Upload assets file to continue');
@@ -6133,7 +6059,6 @@ async function loadReliningRatesFile(event) {
     reliningRatesRows = [];
     reliningRatesData = null;
     reliningRatesFileName = '';
-    populateReliningContractorSelect([]);
     setPackagingStatus(false, 'Rates upload failed');
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: reliningAssetsRows.length, suburb_column: resolveSuburbColumn(reliningAssetsRows) });
@@ -6300,6 +6225,68 @@ document.addEventListener('click', (event) => {
   focusReliningPackageOnMap(decodeURIComponent(link.getAttribute('data-relining-package-id') || ''));
 });
 
+function exportReliningPackagesCsv() {
+  const packages = lastPackagingGeneration?.packages || [];
+  if (!packages.length) {
+    alert('Generate relining packages before exporting.');
+    return;
+  }
+  const rows = [[
+    'package_id',
+    'original_package_id',
+    'asset_id_text',
+    'primary_suburb',
+    'package_suburbs',
+    'suburb',
+    'condition',
+    'diameter_mm',
+    'length_m',
+    'rate_per_m',
+    'pipe_cost',
+    'package_total_length_m',
+    'package_total_cost',
+    'package_max_span_m',
+    'distance_warning',
+    'coordinate_sources',
+    'latitude',
+    'longitude',
+    'coordinate_source',
+    'centre_distance_m',
+    'cost_status',
+    'cost_reason'
+  ]];
+  packages.forEach(pkg => {
+    (pkg.assets || []).forEach(item => {
+      rows.push([
+        pkg.package_id,
+        pkg.original_package_id || '',
+        item.asset_id_text || item.assetId,
+        pkg.primary_suburb || pkg.suburb || '',
+        (pkg.suburbs || [pkg.suburb]).join(', '),
+        item.suburb || pkg.suburb || '',
+        item.conditionLabel || item.condition || '',
+        item.diameterMm ?? '',
+        Number(item.lengthM || 0).toFixed(1),
+        Number.isFinite(item.ratePerM) ? Number(item.ratePerM).toFixed(2) : '',
+        Number.isFinite(item.pipeCost) ? Number(item.pipeCost).toFixed(2) : '',
+        Number(pkg.total_length_m || 0).toFixed(1),
+        Number(pkg.total_cost || 0).toFixed(2),
+        Number(pkg.max_span_m || 0).toFixed(0),
+        pkg.distance_warning || '',
+        pkg.coordinate_sources || '',
+        item.lat ?? '',
+        item.lon ?? '',
+        item.coordinateSource || '',
+        item.package_center_distance_m != null ? item.package_center_distance_m.toFixed(0) : '',
+        item.costStatus || '',
+        item.costReason || ''
+      ]);
+    });
+  });
+  const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  origPriDownload(`relining_packages_esri_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
 async function downloadReliningPackagesZip() {
   const packages = lastPackagingGeneration?.packages || [];
   if (!packages.length) {
@@ -6312,9 +6299,22 @@ async function downloadReliningPackagesZip() {
   }
 
   try {
-    function fmtCurrency(v) {
+    const HEADERS = [
+      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
+      'condition_score', 'pipe_priority_score',
+      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
+      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
+      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
+    ];
+    const expectedHeader = HEADERS.join(',');
+
+    function fmtCurrency(v, cents = true) {
       if (!Number.isFinite(v)) return '';
-      return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return '$' + v.toLocaleString('en-AU', {
+        minimumFractionDigits: cents ? 2 : 0,
+        maximumFractionDigits: cents ? 2 : 0
+      });
     }
 
     function csvCell(v) {
@@ -6327,49 +6327,57 @@ async function downloadReliningPackagesZip() {
 
     function csvRow(arr) { return arr.map(csvCell).join(','); }
 
-    function modeDiameter(assets) {
-      const counts = {};
-      assets.forEach(a => {
-        const d = Math.round(a.diameterMm ?? 0);
-        counts[d] = (counts[d] || 0) + 1;
-      });
-      let best = null, bestCount = 0;
-      Object.entries(counts).forEach(([d, c]) => {
-        if (c > bestCount || (c === bestCount && Number(d) > Number(best))) { best = d; bestCount = c; }
-      });
-      return best || '0';
+    function packageDiameters(pkg) {
+      const values = (pkg.diameters_mm || pkg.diameters || [])
+        .map(d => Math.round(Number(d) || 0))
+        .filter(d => d > 0);
+      if (values.length) return [...new Set(values)].sort((a, b) => a - b);
+      return [...new Set((pkg.assets || []).map(a => Math.round(Number(a.diameterMm) || 0)).filter(d => d > 0))]
+        .sort((a, b) => a - b);
+    }
+
+    function packageDiametersText(pkg) {
+      return packageDiameters(pkg).map(d => `⌀${d}`).join(', ');
+    }
+
+    function primaryFilenameDiameter(pkg) {
+      const first = Math.round(Number(pkg.assets?.[0]?.diameterMm) || 0);
+      if (first > 0) return first;
+      return packageDiameters(pkg)[0] || 0;
+    }
+
+    function packageSuburbs(pkg) {
+      return (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
+        .map(s => String(s || '').trim().toUpperCase())
+        .filter(Boolean);
     }
 
     function pkgFilename(pkg) {
-      const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
-        .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
-        .filter(Boolean).join('_') || 'UNKNOWN';
-      const dominant = modeDiameter(pkg.assets || []);
-      return `${pkg.package_id}_${suburbs}_D${dominant}.csv`;
+      const suburbs = packageSuburbs(pkg)
+        .map(s => s.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
+        .filter(Boolean)
+        .join('_') || 'UNKNOWN';
+      return `${pkg.package_id}_${suburbs}_D${primaryFilenameDiameter(pkg) || 'UNKNOWN'}mm.csv`;
     }
 
-    const HEADERS = [
-      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
-      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
-      'condition_score', 'pipe_priority_score',
-      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
-      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
-      'topup',
-      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
-    ];
+    function maxDistanceText(pkg) {
+      return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
+    }
+
+    function score1dp(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? (Math.floor(num * 10) / 10).toFixed(1) : '';
+    }
 
     const zip = new JSZip();
-    const csvFilenames = [];
-    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60)];
-    const summaryRows = [];
+    const csvNames = [];
+    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60), ''];
 
-    packages.forEach(pkg => {
+    packages.forEach((pkg, index) => {
       const assets = pkg.assets || [];
-      const diametersArr = pkg.diameters_mm || pkg.diameters || [];
-      const diametersStr = diametersArr.map(d => '⌀' + d).join(', ');
-      const diametersPlain = diametersArr.map(d => String(d)).join(', ');
-      const maxSpanKm = Number.isFinite(pkg.max_span_m) ? (pkg.max_span_m / 1000).toFixed(1) + ' km' : '';
-      const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
+      const diametersStr = packageDiametersText(pkg);
+      const maxDist = maxDistanceText(pkg);
+      const suburbs = packageSuburbs(pkg).join(', ');
 
       const lines = [csvRow(HEADERS)];
       let totalLengthM = 0;
@@ -6379,11 +6387,9 @@ async function downloadReliningPackagesZip() {
         const raw = item.raw || {};
         const diam = Math.round(item.diameterMm ?? 0);
         const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
-        const condNum = Number.isFinite(item.condition) ? item.condition : 0;
-        const dw = reliningDiameterWeight(item.diameterMm);
-        const cs = condNum;
-        const critW = 1 + Math.round(crit * 10) / 10;
-        const pps = cs * dw * critW;
+        const dw = Number(item.diameter_weight ?? reliningDiameterWeight(item.diameterMm));
+        const cs = Number(item.condition_score ?? 0);
+        const pps = Number(item.pipe_priority_score ?? 0);
         const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
         const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
         totalLengthM += lenM;
@@ -6400,100 +6406,75 @@ async function downloadReliningPackagesZip() {
           item.assetId,
           diam ? diam + 'mm' : '',
           lenM ? lenM.toFixed(1) + ' m' : '',
-          condNum || '',
+          raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
           rawScore,
-          crit.toFixed(1),
+          score1dp(rawScore || crit),
           dw.toFixed(1),
-          cs,
-          pps.toFixed(4),
+          cs.toFixed(1),
+          pps.toFixed(1),
           rawLga, rawUp, rawDown,
-          Number.isFinite(item.ratePerM) ? item.ratePerM.toFixed(2) : '',
+          Number.isFinite(item.ratePerM) ? item.ratePerM : '',
           cost ? fmtCurrency(cost) : '',
           rawAddr,
-          item.suburb || '',
-          item.topup ? 'TRUE' : 'FALSE',
+          String(item.suburb || '').toUpperCase(),
           diametersStr,
-          maxSpanKm,
-          ''
+          maxDist,
+          ''   // Number of Pipes blank on data rows
         ]));
       });
 
+      // Totals row
       const totalsRow = HEADERS.map(() => '');
-      totalsRow[HEADERS.indexOf('package_id')]       = 'Totals';
-      totalsRow[HEADERS.indexOf('Spatial Length_m')] = totalLengthM.toFixed(2);
-      totalsRow[HEADERS.indexOf('pipe_cost')]        = fmtCurrency(totalCost);
-      totalsRow[HEADERS.indexOf('Diameters (mm)')]   = diametersStr;
-      totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxSpanKm;
-      totalsRow[HEADERS.indexOf('Number of Pipes')]  = assets.length;
+      totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
+      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
+      totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
+      totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
+      totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
+      totalsRow[HEADERS.indexOf('Number of Pipes')]    = assets.length;
       lines.push(csvRow(totalsRow));
 
+      const csvContent = lines.join('\n');
       const filename = pkgFilename(pkg);
-      csvFilenames.push(filename);
-      zip.file(filename, lines.join('\n'));
+      if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
+        throw new Error(`ZIP validation failed: ${filename} has the wrong header.`);
+      }
+      csvNames.push(filename);
+      zip.file(filename, csvContent);
 
-      summaryLines.push('');
       summaryLines.push(`Package:    ${pkg.package_id}`);
-      if (suburbs)      summaryLines.push(`Suburb:     ${suburbs}`);
-      if (diametersStr) summaryLines.push(`Diameters:  ${diametersStr}`);
+      summaryLines.push(`Suburb:     ${suburbs}`);
+      summaryLines.push(`Diameters:  ${diametersStr}`);
       summaryLines.push(`Pipes:      ${assets.length}`);
-      summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', {minimumFractionDigits:1, maximumFractionDigits:1})}m`);
-      summaryLines.push(`Max Dist:   ${maxSpanKm}`);
+      summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}m`);
+      summaryLines.push(`Max Dist:   ${maxDist}`);
       summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
-      summaryLines.push(`Assets:     ${assets.map(i => i.assetId).join(', ')}`);
       summaryLines.push('-'.repeat(60));
-
-      summaryRows.push({
-        'Package ID': pkg.package_id,
-        'Suburb': suburbs,
-        'Diameters (mm)': diametersPlain,
-        'Pipes': assets.length,
-        'Length (m)': Number(totalLengthM.toFixed(1)),
-        'Cost ($)': Math.round(totalCost),
-        'Asset IDs': assets.map(i => i.assetId).join(', ')
-      });
+      if (index < packages.length - 1) summaryLines.push('');
     });
 
+    if (!csvNames.length) {
+      throw new Error('ZIP validation failed: no package CSV files were generated.');
+    }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
-    const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
-    const sortedFilenames = csvFilenames.slice().sort();
-    sortedFilenames.forEach(n => fileListLines.push(n));
-    zip.file('file_list.txt', fileListLines.join('\n'));
-
-    if (typeof XLSX === 'undefined') {
-      throw new Error('XLSX library not loaded. Refresh the page and try again.');
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const checkZip = await JSZip.loadAsync(blob);
+    const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
+    const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
+    if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
+    if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
+    for (const name of zipCsvNames) {
+      const csvText = await checkZip.file(name).async('string');
+      if (csvText.split(/\r?\n/)[0] !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
     }
 
-    const SUMMARY_HEADERS = ['Package ID', 'Suburb', 'Diameters (mm)', 'Pipes', 'Length (m)', 'Cost ($)', 'Asset IDs'];
-    const wbSummary = XLSX.utils.book_new();
-    const wsSummary = XLSX.utils.json_to_sheet(summaryRows, { header: SUMMARY_HEADERS });
-    wsSummary['!cols'] = SUMMARY_HEADERS.map(h => {
-      const maxLen = Math.max(h.length, ...summaryRows.map(r => String(r[h] ?? '').length));
-      return { wch: Math.min(maxLen + 4, 60) };
-    });
-    XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'Package Summary');
-    const summaryXlsxBytes = XLSX.write(wbSummary, { bookType: 'xlsx', type: 'array' });
-    zip.file('package_summary.xlsx', summaryXlsxBytes);
-
-    const wbFiles = XLSX.utils.book_new();
-    const wsFiles = XLSX.utils.json_to_sheet(
-      sortedFilenames.map(name => ({ Filename: name })),
-      { header: ['Filename'] }
-    );
-    wsFiles['!cols'] = [{ wch: 80 }];
-    XLSX.utils.book_append_sheet(wbFiles, wsFiles, 'File List');
-    const fileListXlsxBytes = XLSX.write(wbFiles, { bookType: 'xlsx', type: 'array' });
-    zip.file('file_list.xlsx', fileListXlsxBytes);
-
-    const blob = await zip.generateAsync({
-      type: 'blob',
-      compression: 'STORE'
-    });
-
-    if (typeof saveAs !== 'function') {
-      throw new Error('FileSaver (saveAs) is not loaded. Ensure FileSaver.js is included before this script.');
-    }
-    saveAs(blob, 'relining_packages.zip');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relining_packages_${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
 
   } catch (err) {
     console.error('ZIP export error:', err);
