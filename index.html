@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
@@ -6496,20 +6497,11 @@ async function downloadReliningPackagesZip() {
       console.log('[ZIP-DEBUG] export btn not found via querySelector');
     }
 
-    const usingSaveAs = typeof saveAs === 'function';
-    console.log('[ZIP-DEBUG] using saveAs =', usingSaveAs, '| else fallback to URL.createObjectURL + a.click');
-    if (usingSaveAs) {
-      saveAs(blob, 'relining_packages.zip');
-    } else {
-      const url = URL.createObjectURL(blob);
-      console.log('[ZIP-DEBUG] objectURL =', url);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'relining_packages.zip';
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+    if (typeof saveAs !== 'function') {
+      throw new Error('FileSaver (saveAs) is not loaded. Ensure FileSaver.js is included before this script.');
     }
+    console.log('[ZIP-DEBUG] using saveAs (FileSaver.js)');
+    saveAs(blob, 'relining_packages.zip');
     console.groupEnd();
 
   } catch (err) {
