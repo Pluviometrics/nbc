@@ -6235,9 +6235,22 @@ async function downloadReliningPackagesZip() {
   }
 
   try {
-    function fmtCurrency(v) {
+    const HEADERS = [
+      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
+      'condition_score', 'pipe_priority_score',
+      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
+      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
+      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
+    ];
+    const expectedHeader = HEADERS.join(',');
+
+    function fmtCurrency(v, cents = true) {
       if (!Number.isFinite(v)) return '';
-      return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return '$' + v.toLocaleString('en-AU', {
+        minimumFractionDigits: cents ? 2 : 0,
+        maximumFractionDigits: cents ? 2 : 0
+      });
     }
 
     function csvCell(v) {
@@ -6250,46 +6263,57 @@ async function downloadReliningPackagesZip() {
 
     function csvRow(arr) { return arr.map(csvCell).join(','); }
 
-    function modeDiameter(assets) {
-      const counts = {};
-      assets.forEach(a => {
-        const d = Math.round(a.diameterMm ?? 0);
-        counts[d] = (counts[d] || 0) + 1;
-      });
-      let best = null, bestCount = 0;
-      Object.entries(counts).forEach(([d, c]) => {
-        if (c > bestCount || (c === bestCount && Number(d) > Number(best))) { best = d; bestCount = c; }
-      });
-      return best || '0';
+    function packageDiameters(pkg) {
+      const values = (pkg.diameters_mm || pkg.diameters || [])
+        .map(d => Math.round(Number(d) || 0))
+        .filter(d => d > 0);
+      if (values.length) return [...new Set(values)].sort((a, b) => a - b);
+      return [...new Set((pkg.assets || []).map(a => Math.round(Number(a.diameterMm) || 0)).filter(d => d > 0))]
+        .sort((a, b) => a - b);
+    }
+
+    function packageDiametersText(pkg) {
+      return packageDiameters(pkg).map(d => `⌀${d}`).join(', ');
+    }
+
+    function primaryFilenameDiameter(pkg) {
+      const first = Math.round(Number(pkg.assets?.[0]?.diameterMm) || 0);
+      if (first > 0) return first;
+      return packageDiameters(pkg)[0] || 0;
+    }
+
+    function packageSuburbs(pkg) {
+      return (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
+        .map(s => String(s || '').trim().toUpperCase())
+        .filter(Boolean);
     }
 
     function pkgFilename(pkg) {
-      const suburbs = (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
-        .map(s => String(s).toUpperCase().replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
-        .filter(Boolean).join('_') || 'UNKNOWN';
-      const dominant = modeDiameter(pkg.assets || []);
-      return `${pkg.package_id}_${suburbs}_D${dominant}mm.csv`;
+      const suburbs = packageSuburbs(pkg)
+        .map(s => s.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
+        .filter(Boolean)
+        .join('_') || 'UNKNOWN';
+      return `${pkg.package_id}_${suburbs}_D${primaryFilenameDiameter(pkg) || 'UNKNOWN'}mm.csv`;
     }
 
-    const HEADERS = [
-      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
-      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
-      'condition_score', 'pipe_priority_score',
-      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
-      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
-      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
-    ];
+    function maxDistanceText(pkg) {
+      return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
+    }
+
+    function score1dp(value) {
+      const num = Number(value);
+      return Number.isFinite(num) ? (Math.floor(num * 10) / 10).toFixed(1) : '';
+    }
 
     const zip = new JSZip();
-    const csvFilenames = [];
-    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60)];
+    const csvNames = [];
+    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60), ''];
 
-    packages.forEach(pkg => {
+    packages.forEach((pkg, index) => {
       const assets = pkg.assets || [];
-      const diametersArr = pkg.diameters_mm || pkg.diameters || [];
-      const diametersStr = diametersArr.map(d => '⌀' + d).join(', ');
-      const maxSpanKm = Number.isFinite(pkg.max_span_m) ? (pkg.max_span_m / 1000).toFixed(1) + ' km' : '';
-      const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
+      const diametersStr = packageDiametersText(pkg);
+      const maxDist = maxDistanceText(pkg);
+      const suburbs = packageSuburbs(pkg).join(', ');
 
       const lines = [csvRow(HEADERS)];
       let totalLengthM = 0;
@@ -6299,11 +6323,9 @@ async function downloadReliningPackagesZip() {
         const raw = item.raw || {};
         const diam = Math.round(item.diameterMm ?? 0);
         const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
-        const condNum = Number.isFinite(item.condition) ? item.condition : 0;
-        const dw = reliningDiameterWeight(item.diameterMm);
-        const cs = condNum;
-        const critW = 1 + Math.round(crit * 10) / 10;
-        const pps = cs * dw * critW;
+        const dw = Number(item.diameter_weight ?? reliningDiameterWeight(item.diameterMm));
+        const cs = Number(item.condition_score ?? 0);
+        const pps = Number(item.pipe_priority_score ?? 0);
         const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
         const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
         totalLengthM += lenM;
@@ -6320,55 +6342,67 @@ async function downloadReliningPackagesZip() {
           item.assetId,
           diam ? diam + 'mm' : '',
           lenM ? lenM.toFixed(1) + ' m' : '',
-          condNum || '',
+          raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
           rawScore,
-          crit.toFixed(1),
+          score1dp(rawScore || crit),
           dw.toFixed(1),
-          cs,
-          pps.toFixed(4),
+          cs.toFixed(1),
+          pps.toFixed(1),
           rawLga, rawUp, rawDown,
-          Number.isFinite(item.ratePerM) ? item.ratePerM.toFixed(2) : '',
+          Number.isFinite(item.ratePerM) ? item.ratePerM : '',
           cost ? fmtCurrency(cost) : '',
           rawAddr,
-          item.suburb || '',
+          String(item.suburb || '').toUpperCase(),
           diametersStr,
-          maxSpanKm,
+          maxDist,
           ''
         ]));
       });
 
       const totalsRow = HEADERS.map(() => '');
-      totalsRow[HEADERS.indexOf('package_id')]       = 'Totals';
-      totalsRow[HEADERS.indexOf('Spatial Length_m')] = totalLengthM.toFixed(2);
-      totalsRow[HEADERS.indexOf('pipe_cost')]        = fmtCurrency(totalCost);
-      totalsRow[HEADERS.indexOf('Diameters (mm)')]   = diametersStr;
-      totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxSpanKm;
-      totalsRow[HEADERS.indexOf('Number of Pipes')]  = assets.length;
+      totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
+      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
+      totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
+      totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
+      totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
+      totalsRow[HEADERS.indexOf('Number of Pipes')]    = assets.length;
       lines.push(csvRow(totalsRow));
 
+      const csvContent = lines.join('\n');
       const filename = pkgFilename(pkg);
-      csvFilenames.push(filename);
-      zip.file(filename, lines.join('\n'));
+      if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
+        throw new Error(`ZIP validation failed: ${filename} has the wrong header.`);
+      }
+      csvNames.push(filename);
+      zip.file(filename, csvContent);
 
-      summaryLines.push('');
       summaryLines.push(`Package:    ${pkg.package_id}`);
-      if (suburbs)      summaryLines.push(`Suburb:     ${suburbs}`);
-      if (diametersStr) summaryLines.push(`Diameters:  ${diametersStr}`);
+      summaryLines.push(`Suburb:     ${suburbs}`);
+      summaryLines.push(`Diameters:  ${diametersStr}`);
       summaryLines.push(`Pipes:      ${assets.length}`);
-      summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', {minimumFractionDigits:1, maximumFractionDigits:1})}m`);
-      summaryLines.push(`Max Dist:   ${maxSpanKm}`);
+      summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}m`);
+      summaryLines.push(`Max Dist:   ${maxDist}`);
       summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
-      summaryLines.push(`Assets:     ${assets.map(i => i.assetId).join(', ')}`);
       summaryLines.push('-'.repeat(60));
+      if (index < packages.length - 1) summaryLines.push('');
     });
 
+    if (!csvNames.length) {
+      throw new Error('ZIP validation failed: no package CSV files were generated.');
+    }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
-    const fileListLines = ['PACKAGE FILE LIST', '='.repeat(60), ''];
-    csvFilenames.slice().sort().forEach(n => fileListLines.push(n));
-    zip.file('file_list.txt', fileListLines.join('\n'));
-
     const blob = await zip.generateAsync({ type: 'blob' });
+    const checkZip = await JSZip.loadAsync(blob);
+    const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
+    const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
+    if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
+    if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
+    for (const name of zipCsvNames) {
+      const csvText = await checkZip.file(name).async('string');
+      if (csvText.split(/\r?\n/)[0] !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
