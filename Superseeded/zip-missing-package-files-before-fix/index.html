@@ -6436,17 +6436,9 @@ async function downloadReliningPackagesZip() {
       lines.push(csvRow(totalsRow));
 
       const csvContent = lines.join('\n');
-      const baseFilename = pkgFilename(pkg);
+      const filename = pkgFilename(pkg);
       if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
-        throw new Error(`ZIP validation failed: ${baseFilename} has the wrong header.`);
-      }
-      let filename = baseFilename;
-      if (csvNames.includes(filename)) {
-        const stem = baseFilename.replace(/\.csv$/i, '');
-        let suffix = 2;
-        while (csvNames.includes(`${stem}_${suffix}.csv`)) suffix++;
-        filename = `${stem}_${suffix}.csv`;
-        console.warn(`[ZIP] Filename collision for "${baseFilename}" (pkg ${pkg.package_id}); writing as "${filename}" to keep both entries.`);
+        throw new Error(`ZIP validation failed: ${filename} has the wrong header.`);
       }
       csvNames.push(filename);
       zip.file(filename, csvContent);
@@ -6498,16 +6490,7 @@ async function downloadReliningPackagesZip() {
     const checkZip = await JSZip.loadAsync(blob);
     const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
     const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
-    console.info(`[ZIP] Package CSVs assembled: ${csvNames.length}; CSVs in generated ZIP: ${zipCsvNames.length}.`);
-    if (!csvNames.length) console.warn('[ZIP] No package CSV files were assembled — ZIP will contain no RLN_*.csv entries.');
-    const zipCsvSet = new Set(zipCsvNames);
-    const csvNamesSet = new Set(csvNames);
-    const missingFromZip = csvNames.filter(name => !zipCsvSet.has(name));
-    const extraInZip = zipCsvNames.filter(name => !csvNamesSet.has(name));
-    if (missingFromZip.length) console.warn('[ZIP] file_list.txt entries missing from generated ZIP:', missingFromZip);
-    if (extraInZip.length) console.warn('[ZIP] CSVs present in generated ZIP but absent from file_list.txt:', extraInZip);
     if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
-    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package CSV file(s) listed in file_list.txt are missing from the generated ZIP.`);
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     for (const name of zipCsvNames) {
