@@ -6290,47 +6290,8 @@ function exportReliningPackagesCsv() {
 
 function buildReliningPackageReportHtml(packages, packagedAssets, options, summary) {
   packages = packages || [];
-  options = options || {};
-  function haversineM(lat1, lon1, lat2, lon2) {
-    const R = 6371000;
-    const toRad = d => d * Math.PI / 180;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return 2 * R * Math.asin(Math.sqrt(a));
-  }
   const reportPackages = packages.map(pkg => {
     const assets = pkg.assets || [];
-    const coordAssets = assets.filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon));
-    const coords = coordAssets.map(a => [a.lat, a.lon]);
-    let centroid = null;
-    if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
-      centroid = [Number(pkg.lat), Number(pkg.lon)];
-    } else if (coords.length) {
-      centroid = [
-        coords.reduce((s, c) => s + c[0], 0) / coords.length,
-        coords.reduce((s, c) => s + c[1], 0) / coords.length
-      ];
-    }
-    let max_from_centroid_m = 0;
-    if (centroid && coords.length) {
-      coords.forEach(c => {
-        const d = haversineM(centroid[0], centroid[1], c[0], c[1]);
-        if (d > max_from_centroid_m) max_from_centroid_m = d;
-      });
-    }
-    const conditionMix = {};
-    const diameterMix = {};
-    const materialMix = {};
-    assets.forEach(a => {
-      const raw = a.raw || {};
-      const cond = a.conditionLabel || a.condition || raw['SW_Condition'] || 'Unknown';
-      conditionMix[cond] = (conditionMix[cond] || 0) + 1;
-      const diam = Math.round(Number(a.diameterMm) || 0) || 'Unknown';
-      diameterMix[diam] = (diameterMix[diam] || 0) + 1;
-      const mat = raw['SW_Material'] || raw['Material'] || raw['Pipe Material'] || 'Unknown';
-      materialMix[mat] = (materialMix[mat] || 0) + 1;
-    });
     return {
       id: pkg.package_id,
       suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
@@ -6340,15 +6301,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       total_cost: Number(pkg.total_cost || 0),
       max_span_m: Number(pkg.max_span_m || 0),
       distance_warning: pkg.distance_warning || '',
-      coordinate_sources: pkg.coordinate_sources || '',
-      condition_7_count: pkg.condition_7_count || 0,
-      condition_8_count: pkg.condition_8_count || 0,
-      asset_ids: (pkg.asset_ids && pkg.asset_ids.length ? pkg.asset_ids : assets.map(a => a.assetId)).filter(Boolean),
-      centroid,
-      max_from_centroid_m: Math.round(max_from_centroid_m),
-      conditionMix,
-      diameterMix,
-      materialMix
+      coordinate_sources: pkg.coordinate_sources || ''
     };
   });
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
@@ -6368,7 +6321,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }));
   const reportData = {
     generated_at: new Date().toISOString(),
-    options: options,
+    options: options || {},
     summary: {
       package_count: reportPackages.length,
       pipe_count: reportPipes.length,
@@ -6389,8 +6342,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     document.body.innerHTML = '<div style="padding:40px;color:#b91c1c;font-family:sans-serif">Report data could not be parsed: ' + (err && err.message || '') + '</div>';
     return;
   }
-  var options = data.options || {};
-  var pipes = data.pipes || [];
   var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
   var pkgIndex = {};
   data.packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
@@ -6419,6 +6370,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     groupBySuburb: 'Group by suburb', groupingMethod: 'Grouping method', proximityM: 'Proximity (m)',
     topupMode: 'Top-up mode', sizeGroups: 'Size groups', maxSpanWarningKm: 'Max span warning (km)'
   };
+  var options = data.options || {};
   var optHtml = Object.keys(optionLabels).map(function(key) {
     if (!(key in options)) return '';
     var v = options[key];
@@ -6430,65 +6382,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }).filter(Boolean).join('');
   document.getElementById('optionsList').innerHTML = optHtml || '<dd style="color:#94a3b8;font-style:italic">No options recorded.</dd>';
 
-  function reasoningFor(pkg) {
-    var bullets = [];
-    var notRec = 'Not recorded in export data';
-    if (options.proximityM) {
-      bullets.push('Spatial grouping: anchor-radius clustering within ' + options.proximityM + ' m. Suburb boundaries ignored.');
-    } else if (options.groupBySuburb) {
-      var sub = (pkg.suburbs || []).join(', ') || notRec;
-      bullets.push('Spatial grouping: kept within suburb (' + sub + ') before splitting.');
-    } else {
-      bullets.push('Spatial grouping: suburb constraint disabled — grouped across the full dataset.');
-    }
-    if (pkg.centroid) {
-      bullets.push('Package centroid: ' + pkg.centroid[0].toFixed(5) + ', ' + pkg.centroid[1].toFixed(5) + '.');
-    } else {
-      bullets.push('Package centroid: ' + notRec + '.');
-    }
-    if (options.proximityM) {
-      bullets.push('Search radius used: ' + options.proximityM + ' m.');
-    } else {
-      bullets.push('Search radius used: not applicable (suburb-based grouping).');
-    }
-    if (pkg.max_from_centroid_m) {
-      bullets.push('Distance spread: max ' + pkg.max_from_centroid_m + ' m from centroid; max span between any two pipes ' + Math.round(pkg.max_span_m) + ' m.');
-    } else if (pkg.max_span_m) {
-      bullets.push('Distance spread: max span ' + Math.round(pkg.max_span_m) + ' m. Centroid-distance ' + notRec + '.');
-    } else {
-      bullets.push('Distance spread: ' + notRec + '.');
-    }
-    var diamKeys = Object.keys(pkg.diameterMix);
-    if (diamKeys.length === 1) {
-      bullets.push('Diameter grouping: single diameter ' + diamKeys[0] + ' mm — pipes share size.');
-    } else if (Array.isArray(options.customSizeGroups) && options.customSizeGroups.length) {
-      bullets.push('Diameter grouping: mixed diameters allowed by configured size group — ' + diamKeys.map(function(k){ return k + ' mm × ' + pkg.diameterMix[k]; }).join(', ') + '.');
-    } else {
-      bullets.push('Diameter grouping: mixed diameters via top-up — ' + diamKeys.map(function(k){ return k + ' mm × ' + pkg.diameterMix[k]; }).join(', ') + '.');
-    }
-    var condList = Object.keys(pkg.conditionMix).map(function(k){ return k + ' × ' + pkg.conditionMix[k]; }).join(', ');
-    bullets.push('Condition eligibility: relining-eligible mix — ' + (condList || notRec) + '.');
-    if (options.method === 'count') {
-      bullets.push('Length/value target: ~' + (options.pipesPerPackage || notRec) + ' pipes per package (this package: ' + pkg.pipe_count + ' pipes, ' + Number(pkg.total_length_m).toFixed(1) + ' m).');
-    } else {
-      var cap = options.maxPackageValue ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : notRec;
-      var spent = pkg.total_cost ? '$' + Math.round(pkg.total_cost).toLocaleString('en-AU') : notRec;
-      bullets.push('Length/value target: capped at ' + cap + ' value (this package: ' + spent + ', ' + Number(pkg.total_length_m).toFixed(1) + ' m).');
-    }
-    if (options.topupMode && options.topupMode !== 'No top up') {
-      bullets.push('Top-up rule: ' + options.topupMode + '.');
-    } else {
-      bullets.push('Top-up rule: none — package not filled beyond initial split.');
-    }
-    if (pkg.distance_warning) bullets.push('Flag: ' + pkg.distance_warning + '.');
-    if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') bullets.push('Coordinate sources: ' + pkg.coordinate_sources + '.');
-    if (!pkg.centroid) bullets.push('Assumption: package mapped without coordinates — map view will be limited.');
-    return bullets;
-  }
-
-  var packagesTbl = document.getElementById('packagesTable');
-  packagesTbl.innerHTML =
-    '<thead><tr><th style="width:24px"></th><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="num">Pipes</th>' +
+  document.getElementById('packagesTable').innerHTML =
+    '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="num">Pipes</th>' +
     '<th class="num">Length (m)</th><th class="num">Max span (km)</th><th class="num">Cost</th><th>Notes</th></tr></thead>' +
     '<tbody>' + data.packages.map(function(pkg) {
       var notes = [];
@@ -6496,9 +6391,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') notes.push('coords: ' + pkg.coordinate_sources);
       var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
       var maxSpanKm = pkg.max_span_m ? (pkg.max_span_m / 1000).toFixed(2) : '';
-      var bullets = reasoningFor(pkg).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
       return '<tr class="package-row" data-package-id="' + esc(pkg.id) + '">' +
-        '<td class="expand-cell">▸</td>' +
         '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
         '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
         '<td>' + esc(diam) + '</td>' +
@@ -6506,12 +6399,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<td class="num">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
         '<td class="num">' + esc(maxSpanKm) + '</td>' +
         '<td class="num">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
-        '<td>' + esc(notes.join('; ')) + '</td></tr>' +
-        '<tr class="package-details" data-package-id="' + esc(pkg.id) + '" style="display:none"><td colspan="9">' +
-        '<div class="reasoning"><div class="label">Reasoning</div><ul>' + bullets + '</ul></div>' +
-        '</td></tr>';
+        '<td>' + esc(notes.join('; ')) + '</td></tr>';
     }).join('') + '</tbody>';
 
+  var pipes = data.pipes || [];
   function fillSelect(id, values, fmt) {
     var sel = document.getElementById(id);
     values.forEach(function(v) {
@@ -6549,7 +6440,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="num">Diameter</th>' +
       '<th>Material</th><th>Condition</th><th class="num">Length (m)</th><th class="num">Cost</th></tr></thead><tbody>' +
       filtered.map(function(p) {
-        return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
+        return '<tr data-asset="' + esc(p.asset_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
           '<td><span class="pipe-color" style="background:' + colorFor(p.package_id) + '"></span>' + esc(p.package_id) + '</td>' +
           '<td>' + esc(p.suburb) + '</td>' +
@@ -6567,115 +6458,11 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   });
   renderPipes();
 
-  var map = null;
-  var assetMarkers = {};
-  var markersByPackage = {};
-  var polylinesByPackage = {};
-  var centroidsByPackage = {};
-  var connectorsByPackage = {};
-  var packageBounds = {};
-  var selectedPackageId = null;
-
-  function packagePopupHtml(pkg) {
-    var assetList = (pkg.asset_ids || []).slice(0, 10).join(', ');
-    var more = (pkg.asset_ids || []).length > 10 ? ' …' : '';
-    var html = '';
-    html += '<div style="min-width:220px;max-width:280px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">';
-    html += '<div style="font-weight:800;color:#0f1d3a;margin-bottom:6px;font-size:14px">' + esc(pkg.id) + '</div>';
-    html += '<div style="font-size:12px;color:#475569;line-height:1.55">';
-    html += '<div><strong>Suburbs:</strong> ' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>';
-    html += '<div><strong>Pipes:</strong> ' + pkg.pipe_count + '</div>';
-    html += '<div><strong>Length:</strong> ' + Number(pkg.total_length_m).toFixed(1) + ' m</div>';
-    html += '<div><strong>Max span:</strong> ' + Math.round(pkg.max_span_m) + ' m</div>';
-    if (pkg.max_from_centroid_m) html += '<div><strong>Max from centre:</strong> ' + pkg.max_from_centroid_m + ' m</div>';
-    if (options.proximityM) html += '<div><strong>Search radius:</strong> ' + options.proximityM + ' m</div>';
-    var diamKeys = Object.keys(pkg.diameterMix || {});
-    if (diamKeys.length) html += '<div><strong>Diameters:</strong> ' + esc(diamKeys.map(function(k){ return k + 'mm × ' + pkg.diameterMix[k]; }).join(', ')) + '</div>';
-    if (pkg.distance_warning) html += '<div style="color:#b91c1c"><strong>Warning:</strong> ' + esc(pkg.distance_warning) + '</div>';
-    html += '<div><strong>Cost:</strong> ' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>';
-    html += '<div><strong>Assets:</strong> ' + esc(assetList || 'None') + more + '</div>';
-    html += '</div>';
-    html += '<details style="margin-top:8px"><summary style="font-size:11px;font-weight:600;cursor:pointer;color:#0f1d3a">Reasoning</summary>';
-    html += '<ul style="margin:6px 0 0 16px;padding:0;font-size:11px;line-height:1.5;color:#475569">';
-    reasoningFor(pkg).forEach(function(b) { html += '<li>' + esc(b) + '</li>'; });
-    html += '</ul></details>';
-    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="margin-top:8px;padding:5px 10px;font-size:11px;background:#0f1d3a;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight package</button>';
-    html += '</div>';
-    return html;
-  }
-
-  function setSelection(id, opts) {
-    opts = opts || {};
-    selectedPackageId = id || null;
-    Object.keys(polylinesByPackage).forEach(function(pid) {
-      var pl = polylinesByPackage[pid];
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({
-        weight: sel ? 7 : 3,
-        opacity: sel ? 1 : (dim ? 0.18 : 0.7),
-        dashArray: sel ? '' : '6 6'
-      });
-      if (sel && pl.bringToFront) pl.bringToFront();
-    });
-    Object.keys(markersByPackage).forEach(function(pid) {
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      markersByPackage[pid].forEach(function(m) {
-        m.setStyle({
-          radius: sel ? 9 : 5,
-          opacity: sel ? 1 : (dim ? 0.25 : 1),
-          fillOpacity: sel ? 1 : (dim ? 0.18 : 0.78),
-          weight: sel ? 2.5 : 1.5,
-          color: sel ? '#111827' : '#fff'
-        });
-      });
-    });
-    Object.keys(centroidsByPackage).forEach(function(pid) {
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      var cm = centroidsByPackage[pid];
-      cm.setStyle({
-        radius: sel ? 14 : 9,
-        weight: sel ? 5 : 2.5,
-        opacity: dim ? 0.3 : 1,
-        fillOpacity: dim ? 0.25 : 0.85,
-        color: sel ? '#111827' : cm.options.colorOriginal,
-        fillColor: sel ? '#FFD166' : cm.options.colorOriginal
-      });
-      if (sel && cm.bringToFront) cm.bringToFront();
-    });
-    Object.keys(connectorsByPackage).forEach(function(pid) {
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      connectorsByPackage[pid].forEach(function(c) {
-        c.setStyle({ opacity: sel ? 0.55 : (dim ? 0.06 : 0.3), weight: sel ? 2 : 1 });
-      });
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('#packagesTable tr.package-row'), function(tr) {
-      tr.classList.toggle('selected', tr.getAttribute('data-package-id') === selectedPackageId);
-    });
-    var info = document.getElementById('selectedInfo');
-    var clearBtn = document.getElementById('clearBtn');
-    if (selectedPackageId) {
-      var pkg = data.packages[pkgIndex[selectedPackageId]];
-      info.innerHTML = '<strong>Selected:</strong> ' + esc(selectedPackageId) +
-        ' &middot; ' + pkg.pipe_count + ' pipes &middot; ' + Number(pkg.total_length_m).toFixed(1) + ' m' +
-        (pkg.max_span_m ? ' &middot; span ' + Math.round(pkg.max_span_m) + ' m' : '');
-      if (clearBtn) clearBtn.disabled = false;
-    } else {
-      info.innerHTML = '<span style="color:#94a3b8">No package selected</span>';
-      if (clearBtn) clearBtn.disabled = true;
-    }
-    if (selectedPackageId && opts.zoom !== false && map && packageBounds[selectedPackageId]) {
-      map.flyToBounds(packageBounds[selectedPackageId], { duration: 0.5 });
-    }
-  }
-
+  var map = null, assetMarkers = {}, packageBounds = {};
   function initMap() {
     var mapEl = document.getElementById('map');
     if (typeof L === 'undefined') {
-      document.getElementById('mapWrap').innerHTML = '<div class="map-warning">Leaflet failed to load (offline or CDN blocked) &mdash; map disabled. Tables and reasoning remain functional.</div>';
+      document.getElementById('mapWrap').innerHTML = '<div class="map-warning">Leaflet failed to load (offline or CDN blocked) &mdash; map disabled. Tables remain functional.</div>';
       return;
     }
     map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
@@ -6686,7 +6473,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     tileLayer.on('tileerror', function() {
       if (tileFailedNoticed) return; tileFailedNoticed = true;
       var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
-      n.textContent = 'Map tiles could not be loaded (offline?). Markers and connectors remain visible.';
+      n.textContent = 'Map tiles could not be loaded (offline?). Markers remain visible.';
       mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
     });
     tileLayer.addTo(map);
@@ -6695,27 +6482,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     data.packages.forEach(function(pkg) {
       var color = colorFor(pkg.id);
       var pkgPoints = [];
-      var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
-      pkgPipes.forEach(function(p) { pkgPoints.push([p.lat, p.lon]); allPoints.push([p.lat, p.lon]); });
-      if (pkgPoints.length > 1) {
-        var pl = L.polyline(pkgPoints, { color: color, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(map);
-        pl.on('click', function(e) { L.DomEvent.stop(e); setSelection(pkg.id); });
-        polylinesByPackage[pkg.id] = pl;
-      }
-      var centroidLatLng = pkg.centroid && pkg.centroid.length === 2 ? [pkg.centroid[0], pkg.centroid[1]] : null;
-      if (centroidLatLng) pkgPoints.push(centroidLatLng);
-      if (centroidLatLng && pkgPipes.length) {
-        var connectors = [];
-        pkgPipes.forEach(function(p) {
-          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: color, weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false });
-          line.addTo(map);
-          connectors.push(line);
-        });
-        connectorsByPackage[pkg.id] = connectors;
-      }
-      var pipeMarkers = [];
-      pkgPipes.forEach(function(p) {
-        var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
+      pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; }).forEach(function(p) {
+        var marker = L.circleMarker([p.lat, p.lon], { radius: 6, color: color, weight: 2, fillColor: color, fillOpacity: 0.7 });
         marker.bindPopup(
           '<strong>' + esc(p.asset_id) + '</strong><br>' +
           'Package: ' + esc(p.package_id) + '<br>' +
@@ -6726,21 +6494,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           'Length: ' + fmtNum(p.length_m, 1) + ' m' +
           (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '')
         );
-        marker.on('click', function(e) { L.DomEvent.stopPropagation(e); setSelection(pkg.id, { zoom: false }); });
         marker.addTo(map);
         assetMarkers[p.asset_id] = marker;
-        pipeMarkers.push(marker);
+        pkgPoints.push([p.lat, p.lon]);
+        allPoints.push([p.lat, p.lon]);
       });
-      markersByPackage[pkg.id] = pipeMarkers;
-      if (centroidLatLng) {
-        var cm = L.circleMarker(centroidLatLng, { radius: 9, color: color, weight: 2.5, fillColor: color, fillOpacity: 0.85, colorOriginal: color });
-        cm.bindPopup(packagePopupHtml(pkg));
-        cm.bindTooltip(pkg.id, { direction: 'top' });
-        cm.on('click', function(e) { L.DomEvent.stopPropagation(e); setSelection(pkg.id, { zoom: false }); });
-        cm.addTo(map);
-        centroidsByPackage[pkg.id] = cm;
-      }
-      if (pkgPoints.length) packageBounds[pkg.id] = L.latLngBounds(pkgPoints).pad(0.25);
+      if (pkgPoints.length) packageBounds[pkg.id] = L.latLngBounds(pkgPoints).pad(0.2);
     });
 
     if (allPoints.length) {
@@ -6754,39 +6513,20 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   initMap();
 
-  document.getElementById('clearBtn').addEventListener('click', function() { setSelection(null); });
-
   document.getElementById('packagesTable').addEventListener('click', function(e) {
     var tr = e.target.closest && e.target.closest('tr.package-row');
     if (!tr) return;
     var id = tr.getAttribute('data-package-id');
-    var details = document.querySelector('#packagesTable tr.package-details[data-package-id="' + (id || '').replace(/"/g, '\\"') + '"]');
-    if (details) {
-      var open = details.style.display !== 'none';
-      details.style.display = open ? 'none' : 'table-row';
-      var cell = tr.querySelector('.expand-cell');
-      if (cell) cell.textContent = open ? '▸' : '▾';
-    }
-    setSelection(id);
+    if (map && packageBounds[id]) map.flyToBounds(packageBounds[id]);
   });
-
   document.getElementById('pipesTable').addEventListener('click', function(e) {
     var tr = e.target.closest && e.target.closest('tr[data-asset]');
     if (!tr) return;
     Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
     tr.classList.add('selected');
     var asset = tr.getAttribute('data-asset');
-    var pkgId = tr.getAttribute('data-package-id');
     var marker = assetMarkers[asset];
-    if (pkgId) setSelection(pkgId, { zoom: false });
     if (marker && map) { map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 16)); marker.openPopup(); }
-  });
-
-  document.body.addEventListener('click', function(e) {
-    var btn = e.target.closest && e.target.closest('.select-pkg-btn');
-    if (!btn) return;
-    var id = btn.getAttribute('data-package-id');
-    if (id) setSelection(id);
   });
 })();
 `;
@@ -6819,13 +6559,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.options-card dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 16px; }',
     '.options-card dt { font-weight: 600; color: #475569; font-size: 12px; }',
     '.options-card dd { margin: 0 0 6px 0; color: #1f2937; font-size: 13px; }',
-    '#map { height: 520px; border: 1px solid #e5e7eb; border-radius: 8px; background: #e3edf7; }',
+    '#map { height: 480px; border: 1px solid #e5e7eb; border-radius: 8px; background: #e3edf7; }',
     '.map-warning { padding: 14px 16px; background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; border-radius: 8px; font-size: 13px; }',
-    '.selection-bar { display: flex; gap: 12px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }',
-    '.selection-bar .info { font-size: 13px; color: #1f2937; flex: 1; }',
-    '.clear-btn { padding: 6px 12px; background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700; }',
-    '.clear-btn:hover:not(:disabled) { background: #fde68a; }',
-    '.clear-btn:disabled { opacity: 0.4; cursor: not-allowed; }',
     'table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }',
     'thead { background: #f1f5f9; position: sticky; top: 0; z-index: 1; }',
     'th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; }',
@@ -6833,18 +6568,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     'tbody tr:hover { background: #f8fafc; }',
     'tbody tr.selected { background: #fef3c7 !important; }',
     'tbody tr.package-row, tbody tr[data-asset] { cursor: pointer; }',
-    '.package-row .expand-cell { color: #94a3b8; user-select: none; width: 24px; text-align: center; }',
-    '.package-details td { background: #fafbfc; padding: 14px 18px; }',
-    '.reasoning .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #94a3b8; font-weight: 700; margin-bottom: 6px; }',
-    '.reasoning ul { margin: 0 0 0 18px; padding: 0; }',
-    '.reasoning li { font-size: 12.5px; line-height: 1.65; color: #475569; margin: 0 0 2px 0; }',
     '.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; align-items: center; }',
     '.filter-bar select, .filter-bar input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; min-width: 140px; }',
     '.filter-bar input[type="search"] { min-width: 220px; flex: 1; }',
     '.filter-bar label { font-size: 12px; color: #475569; font-weight: 600; }',
     '.pipe-color { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }',
     '.num { text-align: right; font-variant-numeric: tabular-nums; }',
-    '.scroll-table { max-height: 580px; overflow: auto; border-radius: 8px; }',
+    '.scroll-table { max-height: 560px; overflow: auto; border-radius: 8px; }',
     'footer { text-align: center; padding: 18px; color: #94a3b8; font-size: 11px; }',
     '.empty { padding: 20px; text-align: center; color: #94a3b8; font-style: italic; }',
     '</style>',
@@ -6858,12 +6588,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<main>',
     '<section><h2>Summary</h2><div class="stat-grid" id="statGrid"></div>',
     '<div class="options-card"><div class="label">Packaging options</div><dl id="optionsList"></dl></div></section>',
-    '<section><h2>Package map</h2>',
-    '<div class="selection-bar">',
-    '<div class="info" id="selectedInfo"><span style="color:#94a3b8">No package selected</span></div>',
-    '<button type="button" class="clear-btn" id="clearBtn" disabled>Clear selection</button>',
-    '</div>',
-    '<div id="mapWrap"><div id="map"></div></div></section>',
+    '<section><h2>Package map</h2><div id="mapWrap"><div id="map"></div></div></section>',
     '<section><h2>Packages</h2><div class="scroll-table"><table id="packagesTable"></table></div></section>',
     '<section><h2>Pipes</h2>',
     '<div class="filter-bar">',
