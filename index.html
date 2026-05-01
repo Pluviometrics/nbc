@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
@@ -6372,6 +6373,7 @@ async function downloadReliningPackagesZip() {
     const zip = new JSZip();
     const csvNames = [];
     const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60), ''];
+    const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Length (m)', 'Cost ($)', 'Asset IDs']];
 
     packages.forEach((pkg, index) => {
       const assets = pkg.assets || [];
@@ -6450,6 +6452,16 @@ async function downloadReliningPackagesZip() {
       summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
       summaryLines.push('-'.repeat(60));
       if (index < packages.length - 1) summaryLines.push('');
+      summaryRows.push([
+        pkg.package_id,
+        suburbs,
+        packageDiametersText(pkg),
+        maxDist,
+        assets.length,
+        Math.round(totalLengthM * 10) / 10,
+        Math.round(totalCost),
+        assets.map(a => a.assetId).join(', ')
+      ]);
     });
 
     if (!csvNames.length) {
@@ -6457,12 +6469,30 @@ async function downloadReliningPackagesZip() {
     }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
+    // file_list.txt
+    const sortedCsvNames = csvNames.slice().sort();
+    zip.file('file_list.txt', ['PACKAGE FILE LIST', '='.repeat(60), '', ...sortedCsvNames].join('\n'));
+
+    // xlsx files
+    if (typeof XLSX !== 'undefined') {
+      const wbSummary = XLSX.utils.book_new();
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+      XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'Package Summary');
+      zip.file('package_summary.xlsx', XLSX.write(wbSummary, { type: 'array', bookType: 'xlsx' }));
+
+      const wbFileList = XLSX.utils.book_new();
+      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedCsvNames.map(n => [n])]);
+      XLSX.utils.book_append_sheet(wbFileList, wsFileList, 'File List');
+      zip.file('file_list.xlsx', XLSX.write(wbFileList, { type: 'array', bookType: 'xlsx' }));
+    }
+
     const blob = await zip.generateAsync({ type: 'blob' });
     const checkZip = await JSZip.loadAsync(blob);
     const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
     const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
     if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
+    if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
       if (csvText.split(/\r?\n/)[0] !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
