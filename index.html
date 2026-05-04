@@ -6365,9 +6365,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
       address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
-      lga: raw['SW_LGA_20%_H1-H6'] || raw['SW LGA 20% H1-H6'] || raw['LGA'] || '',
-      upstream: raw['SW_Upstream_Node'] || raw['SW_Upstream Node'] || raw['Upstream Node'] || '',
-      downstream: raw['SW_Downstream_Node'] || raw['SW_Downstream Node'] || raw['Downstream Node'] || '',
+      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
+      upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
+      downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
       lon: Number.isFinite(item.lon) ? item.lon : null
     };
@@ -7112,9 +7112,9 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
       address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
-      lga: raw['SW_LGA_20%_H1-H6'] || raw['SW LGA 20% H1-H6'] || raw['LGA'] || '',
-      upstream: raw['SW_Upstream_Node'] || raw['SW_Upstream Node'] || raw['Upstream Node'] || '',
-      downstream: raw['SW_Downstream_Node'] || raw['SW_Downstream Node'] || raw['Downstream Node'] || '',
+      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
+      upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
+      downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
       lon: Number.isFinite(item.lon) ? item.lon : null
     };
@@ -7463,7 +7463,7 @@ async function downloadReliningPackagesZip() {
     }
 
     function packageDiametersText(pkg) {
-      return packageDiameters(pkg).map(d => `⌀${d}`).join(', ');
+      return packageDiameters(pkg).join(', ');
     }
 
     function primaryFilenameDiameter(pkg) {
@@ -7523,15 +7523,15 @@ async function downloadReliningPackagesZip() {
         totalCost += cost;
 
         const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
-        const rawLga   = raw['SW_LGA_20%_H1-H6'] ?? raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
-        const rawUp    = raw['SW_Upstream_Node']  ?? raw['SW_Upstream Node']  ?? raw['Upstream Node']   ?? '';
-        const rawDown  = raw['SW_Downstream_Node'] ?? raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
+        const rawLga   = raw['SW LGA 20% H1-H6'] ?? raw['SW_LGA_20%_H1-H6'] ?? raw['LGA'] ?? '';
+        const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
+        const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
         const rawAddr  = raw['Pipe_Start_Address'] ?? raw['Start Address']  ?? '';
 
         lines.push(csvRow([
           pkg.package_id,
           item.assetId,
-          diam ? diam + 'mm' : '',
+          diam || '',
           lenM ? lenM.toFixed(1) + ' m' : '',
           raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
           rawScore,
@@ -7574,7 +7574,8 @@ async function downloadReliningPackagesZip() {
         console.warn(`[ZIP] Filename collision for "${baseFilename}" (pkg ${pkg.package_id}); writing as "${filename}" to keep both entries.`);
       }
       csvNames.push(filename);
-      zip.file(filename, csvContent);
+      // Prepend UTF-8 BOM so Excel renders the file as UTF-8 (avoids mojibake on cp1252 systems)
+      zip.file(filename, '﻿' + csvContent);
 
       summaryLines.push(`Package:    ${pkg.package_id}`);
       summaryLines.push(`Suburb:     ${suburbs}`);
@@ -7674,7 +7675,8 @@ async function downloadReliningPackagesZip() {
     if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
-      if (csvText.split(/\r?\n/)[0] !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
+      const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
+      if (firstLine !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
     }
 
     const url = URL.createObjectURL(blob);
