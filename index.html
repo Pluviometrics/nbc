@@ -6331,6 +6331,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       const mat = raw['SW_Material'] || raw['Material'] || raw['Pipe Material'] || 'Unknown';
       materialMix[mat] = (materialMix[mat] || 0) + 1;
     });
+    const safeId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
     return {
       id: pkg.package_id,
       suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
@@ -6348,7 +6349,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       max_from_centroid_m: Math.round(max_from_centroid_m),
       conditionMix,
       diameterMix,
-      materialMix
+      materialMix,
+      dedicated_map_url: `./package_maps/${safeId}_map.html`
     };
   });
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
@@ -6362,6 +6364,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
+      address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
+      lga: raw['SW_LGA_20%_H1-H6'] || raw['SW LGA 20% H1-H6'] || raw['LGA'] || '',
+      upstream: raw['SW_Upstream_Node'] || raw['SW_Upstream Node'] || raw['Upstream Node'] || '',
+      downstream: raw['SW_Downstream_Node'] || raw['SW_Downstream Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
       lon: Number.isFinite(item.lon) ? item.lon : null
     };
@@ -6560,8 +6566,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '</dl>' +
       (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
       '<div class="pkg-card-actions">' +
-        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">View on map ↓</a>' +
-        '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">View report ↓</a>' +
+        '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
+        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
+        '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
       '</div>' +
       '</div>';
   }).join('');
@@ -6588,7 +6595,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<td class="r">' + esc(maxSpanKm) + '</td>' +
         '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
         '<td>' + esc(notes.join('; ')) + '</td>' +
-        '<td><a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Map ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+        '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
         '</tr>';
     }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
 
@@ -6602,7 +6609,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '<header class="pkg-report-head">' +
         '<span class="pipe-color" style="background:' + color + '"></span>' +
         '<h3>' + esc(pkg.id) + '</h3>' +
-        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">View on map ↓</a>' +
+        '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
+        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
       '</header>' +
       '<div class="pkg-report-meta">' +
         '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
@@ -6654,9 +6662,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="8">No pipes match the current filters.</td></tr></tbody>'; return; }
+    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="11">No pipes match the current filters.</td></tr></tbody>'; return; }
     tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
-      '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th></tr></thead><tbody>' +
+      '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>' +
+      '<th>LGA H1-H6</th><th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
@@ -6666,7 +6675,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td>' + esc(p.material) + '</td>' +
           '<td>' + esc(p.condition) + '</td>' +
           '<td class="r">' + fmtNum(p.length_m, 1) + '</td>' +
-          '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td></tr>';
+          '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>' +
+          '<td>' + esc(p.lga || '') + '</td>' +
+          '<td>' + esc(p.upstream || '') + '</td>' +
+          '<td>' + esc(p.downstream || '') + '</td></tr>';
       }).join('') + '</tbody>';
   }
   ['filterPackage','filterSuburb','filterDiameter','filterCondition','filterSearch'].forEach(function(id) {
@@ -6706,8 +6718,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     html += '<div><strong>Assets:</strong> ' + esc(assetList || 'None') + more + '</div>';
     html += '</div>';
     html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">';
-    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#1A2B3C;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight</button>';
+    html += '<a class="select-pkg-map-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" style="padding:5px 10px;font-size:11px;background:#005F5B;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open map ↗</a>';
     html += '<a class="select-pkg-link" href="#' + pkgAnchor(pkg.id) + '" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#00847F;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open report ↓</a>';
+    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#1A2B3C;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight</button>';
     html += '</div>';
     html += '</div>';
     return html;
@@ -7084,6 +7097,322 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ].join('\n');
 }
 
+function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
+  options = options || {};
+  packageColor = packageColor || '#00847F';
+  const assets = pkg.assets || [];
+  const reportPipes = assets.map(item => {
+    const raw = item.raw || {};
+    return {
+      asset_id: item.assetId || '',
+      suburb: String(item.suburb || pkg.suburb || '').toUpperCase(),
+      diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
+      material: raw['SW_Material'] || raw['Material'] || raw['Pipe Material'] || '',
+      condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
+      length_m: Number(item.lengthM) || 0,
+      pipe_cost: Number(item.pipeCost) || 0,
+      address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
+      lga: raw['SW_LGA_20%_H1-H6'] || raw['SW LGA 20% H1-H6'] || raw['LGA'] || '',
+      upstream: raw['SW_Upstream_Node'] || raw['SW_Upstream Node'] || raw['Upstream Node'] || '',
+      downstream: raw['SW_Downstream_Node'] || raw['SW_Downstream Node'] || raw['Downstream Node'] || '',
+      lat: Number.isFinite(item.lat) ? item.lat : null,
+      lon: Number.isFinite(item.lon) ? item.lon : null
+    };
+  });
+  const coordPipes = reportPipes.filter(p => p.lat != null && p.lon != null);
+  let centroid = null;
+  if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
+    centroid = [Number(pkg.lat), Number(pkg.lon)];
+  } else if (coordPipes.length) {
+    centroid = [
+      coordPipes.reduce((s, p) => s + p.lat, 0) / coordPipes.length,
+      coordPipes.reduce((s, p) => s + p.lon, 0) / coordPipes.length
+    ];
+  }
+  const data = {
+    generated_at: generatedAt || new Date().toISOString(),
+    package: {
+      id: pkg.package_id,
+      suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
+      diameters_mm: pkg.diameters_mm || pkg.diameters || [],
+      pipe_count: assets.length,
+      total_length_m: Number(pkg.total_length_m || 0),
+      total_cost: Number(pkg.total_cost || 0),
+      max_span_m: Number(pkg.max_span_m || 0),
+      distance_warning: pkg.distance_warning || '',
+      coordinate_sources: pkg.coordinate_sources || '',
+      condition_7_count: pkg.condition_7_count || 0,
+      condition_8_count: pkg.condition_8_count || 0,
+      centroid: centroid,
+      color: packageColor
+    },
+    pipes: reportPipes,
+    options: options
+  };
+  const json = JSON.stringify(data).replace(/<\/script/gi, '<\\/script');
+
+  const runtimeJs = `
+(function(){
+  'use strict';
+  var data;
+  try { data = JSON.parse(document.getElementById('pkg-data').textContent); }
+  catch (err) {
+    document.body.innerHTML = '<div style="padding:40px;color:#b91c1c;font-family:Segoe UI,system-ui,sans-serif">Map data could not be parsed: ' + (err && err.message || '') + '</div>';
+    return;
+  }
+  var pkg = data.package || {};
+  var pipes = data.pipes || [];
+  var options = data.options || {};
+  var color = pkg.color || '#00847F';
+
+  function fmtNum(n, dp) { if (n == null || !isFinite(n)) return ''; return Number(n).toLocaleString('en-AU', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
+  function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+  document.getElementById('mapTitle').textContent = pkg.id + ' — Pipe Relining Map';
+  document.title = pkg.id + ' — Pipe Relining Map';
+  document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
+  document.getElementById('subtitle').textContent = (pkg.suburbs||[]).join(', ') || '—';
+
+  var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ') || '—';
+  var meta = [
+    { label: 'Pipes', value: fmtNum(pkg.pipe_count, 0) },
+    { label: 'Length', value: fmtNum(pkg.total_length_m, 1) + ' m' },
+    { label: 'Cost', value: fmtCurrency(pkg.total_cost) || '—' },
+    { label: 'Diameters', value: diam },
+    { label: 'Max span', value: pkg.max_span_m ? (pkg.max_span_m/1000).toFixed(2) + ' km' : '—' },
+    { label: 'Cond 7 / 8', value: (pkg.condition_7_count||0) + ' / ' + (pkg.condition_8_count||0) }
+  ];
+  document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
+    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+  }).join('');
+
+  if (pkg.distance_warning) {
+    var warnEl = document.getElementById('warnBanner');
+    warnEl.textContent = pkg.distance_warning;
+    warnEl.style.display = 'block';
+  }
+
+  // PIPES TABLE
+  var lgaCol = pipes.some(function(p){ return p.lga; });
+  var upCol = pipes.some(function(p){ return p.upstream; });
+  var dnCol = pipes.some(function(p){ return p.downstream; });
+  var addrCol = pipes.some(function(p){ return p.address; });
+  var headers = '<thead><tr><th>Asset</th><th>Suburb</th><th class="r">Diameter</th><th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>';
+  if (addrCol) headers += '<th>Start Address</th>';
+  if (lgaCol) headers += '<th>LGA H1-H6</th>';
+  if (upCol) headers += '<th>Upstream</th>';
+  if (dnCol) headers += '<th>Downstream</th>';
+  headers += '</tr></thead>';
+  var rows = pipes.map(function(p) {
+    var r = '<tr>';
+    r += '<td>' + esc(p.asset_id) + '</td>';
+    r += '<td>' + esc(p.suburb) + '</td>';
+    r += '<td class="r">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>';
+    r += '<td>' + esc(p.material) + '</td>';
+    r += '<td>' + esc(p.condition) + '</td>';
+    r += '<td class="r">' + fmtNum(p.length_m, 1) + '</td>';
+    r += '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>';
+    if (addrCol) r += '<td>' + esc(p.address) + '</td>';
+    if (lgaCol) r += '<td>' + esc(p.lga) + '</td>';
+    if (upCol) r += '<td>' + esc(p.upstream) + '</td>';
+    if (dnCol) r += '<td>' + esc(p.downstream) + '</td>';
+    r += '</tr>';
+    return r;
+  }).join('');
+  document.getElementById('pipesTable').innerHTML = headers + '<tbody>' + (rows || '<tr><td colspan="11" class="pkg-empty-cell">No pipes in this package.</td></tr>') + '</tbody>';
+
+  // MAP
+  var map = null;
+  var bounds = null;
+  function initMap() {
+    var mapEl = document.getElementById('map');
+    if (typeof L === 'undefined') {
+      var w = document.createElement('div');
+      w.className = 'map-warning';
+      w.textContent = 'Leaflet failed to load (offline or CDN blocked) — map disabled. Pipe table remains functional.';
+      mapEl.parentNode.appendChild(w);
+      return;
+    }
+    map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
+    var tileFailed = false;
+    var tile = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap, &copy; CARTO', subdomains: 'abcd', maxZoom: 19
+    });
+    tile.on('tileerror', function() {
+      if (tileFailed) return; tileFailed = true;
+      var n = document.createElement('div');
+      n.className = 'map-warning';
+      n.textContent = 'Map tiles could not be loaded (offline?). Markers and connectors remain visible.';
+      mapEl.parentNode.appendChild(n);
+    });
+    tile.addTo(map);
+
+    var pts = [];
+    var coordPipes = pipes.filter(function(p){ return p.lat != null && p.lon != null; });
+    coordPipes.forEach(function(p){ pts.push([p.lat, p.lon]); });
+    if (coordPipes.length > 1) {
+      L.polyline(coordPipes.map(function(p){ return [p.lat, p.lon]; }), {
+        color: color, weight: 3, opacity: 0.7, dashArray: '6 6'
+      }).addTo(map);
+    }
+    var centroid = pkg.centroid && pkg.centroid.length === 2 ? [pkg.centroid[0], pkg.centroid[1]] : null;
+    if (centroid && coordPipes.length) {
+      coordPipes.forEach(function(p){
+        L.polyline([centroid, [p.lat, p.lon]], {
+          color: color, weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false
+        }).addTo(map);
+      });
+    }
+    coordPipes.forEach(function(p){
+      var marker = L.circleMarker([p.lat, p.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+      marker.bindPopup(
+        '<strong>' + esc(p.asset_id) + '</strong><br>' +
+        'Suburb: ' + esc(p.suburb) + '<br>' +
+        'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
+        (p.material ? 'Material: ' + esc(p.material) + '<br>' : '') +
+        'Condition: ' + esc(p.condition || '—') + '<br>' +
+        'Length: ' + fmtNum(p.length_m, 1) + ' m' +
+        (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
+        (p.address ? '<br>Address: ' + esc(p.address) : '') +
+        (p.lga ? '<br>LGA: ' + esc(p.lga) : '') +
+        (p.upstream ? '<br>Upstream: ' + esc(p.upstream) : '') +
+        (p.downstream ? '<br>Downstream: ' + esc(p.downstream) : '')
+      );
+      marker.addTo(map);
+    });
+    if (centroid) {
+      L.circleMarker(centroid, { radius: 11, color: color, weight: 3, fillColor: color, fillOpacity: 0.6 })
+        .bindTooltip(pkg.id + ' (centroid)', { direction: 'top' })
+        .addTo(map);
+      pts.push(centroid);
+    }
+    if (pts.length) {
+      bounds = L.latLngBounds(pts).pad(0.2);
+      map.fitBounds(bounds);
+    } else {
+      map.setView([-33.75, 151.27], 11);
+      var n = document.createElement('div');
+      n.className = 'map-warning';
+      n.textContent = 'No pipe coordinates available — map shows default extent only.';
+      mapEl.parentNode.appendChild(n);
+    }
+  }
+  initMap();
+
+  document.getElementById('fitBtn').addEventListener('click', function(){
+    if (map && bounds) map.fitBounds(bounds);
+  });
+})();
+`;
+
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="UTF-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+    '<title>Pipe Relining Map</title>',
+    '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous">',
+    '<style>',
+    '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }',
+    ':root { --teal:#00847F; --teal-l:#00A89D; --teal-d:#005F5B; --navy:#1A2B3C; --navy-l:#243447; --panel:#F7F9FA; --border:#DDE3E8; --text:#1A2B3C; --text-l:#5A6B7A; --r:8px; }',
+    'html, body { margin:0; padding:0; }',
+    "body { font-family:'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background:var(--panel); color:var(--text); font-size:13px; line-height:1.5; }",
+    '.report-app-header { background:var(--navy); color:#fff; height:52px; padding:0 16px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,.3); }',
+    '.report-app-left { display:flex; align-items:center; gap:12px; }',
+    '.report-logo { width:34px; height:34px; background:var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }',
+    '.report-app-title { font-size:15px; font-weight:700; line-height:1.2; }',
+    '.report-app-sub { font-size:10px; color:#6B8A99; text-transform:uppercase; letter-spacing:.06em; }',
+    '.report-app-right { font-size:11px; color:#6B8A99; }',
+    'main.pkg-shell { max-width:1200px; margin:0 auto; padding:20px; display:flex; flex-direction:column; gap:16px; }',
+    '.lbl { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text-l); margin-bottom:8px; }',
+    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:22px 24px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }',
+    '.pkg-title { font-size:22px; font-weight:800; margin-bottom:4px; }',
+    '.pkg-sub { font-size:12px; color:rgba(255,255,255,.72); line-height:1.5; max-width:780px; }',
+    '.pkg-status-chip { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }',
+    '.pkg-dot { width:8px; height:8px; border-radius:50%; }',
+    '.pkg-panel { background:#fff; border:1px solid var(--border); border-radius:var(--r); padding:16px; }',
+    '.pkg-meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:10px; }',
+    '.pkg-meta-item { background:var(--panel); border:1px solid var(--border); border-radius:var(--r); padding:12px; }',
+    '.pkg-meta-lbl { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-l); margin-bottom:4px; }',
+    '.pkg-meta-val { font-size:13px; font-weight:700; color:var(--navy); word-break:break-word; }',
+    '.warn-banner { display:none; font-size:12px; color:#b91c1c; background:#fef2f2; border:1px solid #fee2e2; border-radius:var(--r); padding:8px 12px; }',
+    '.cctv-map-wrap { height:600px; background:#fff; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; display:flex; flex-direction:column; }',
+    '.cctv-map-toolbar { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px; background:#F8FAFB; }',
+    '.cctv-map-title { font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-l); }',
+    '.cctv-map-sub { font-size:11px; color:var(--text-l); margin-top:3px; }',
+    '.ca-actions { display:flex; gap:10px; flex-wrap:wrap; }',
+    '.export-btn { padding:7px 14px; background:var(--teal); color:#fff; border:none; border-radius:var(--r); font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; text-decoration:none; }',
+    '.export-btn:hover { background:var(--teal-d); }',
+    '#map { flex:1; min-height:0; background:#e3edf7; }',
+    '.map-warning { padding:14px 16px; background:#FEF3C7; border:1px solid #F59E0B; color:#78350F; font-size:12px; margin:12px; border-radius:6px; }',
+    '.pkg-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--r); background:#fff; }',
+    'table { width:100%; border-collapse:collapse; font-size:12px; }',
+    'th { padding:8px 12px; background:var(--navy); color:#fff; font-weight:600; text-align:left; white-space:nowrap; position:sticky; top:0; z-index:1; }',
+    'th.r { text-align:right; }',
+    'td { padding:7px 12px; border-bottom:1px solid var(--border); vertical-align:top; }',
+    'td.r { text-align:right; font-variant-numeric:tabular-nums; }',
+    'tr:nth-child(even) td { background:var(--panel); }',
+    '.pkg-empty-cell { padding:20px; text-align:center; color:var(--text-l); font-style:italic; }',
+    '.report-footer { text-align:center; padding:18px; color:var(--text-l); font-size:11px; }',
+    '.back-link { text-align:center; padding:10px; }',
+    '.back-link a { color:var(--teal-d); text-decoration:none; font-size:12px; font-weight:700; }',
+    '.back-link a:hover { text-decoration:underline; }',
+    '@media print { .cctv-map-wrap { height:380px; page-break-inside:avoid; } .back-link { display:none; } body { background:#fff; } }',
+    '</style>',
+    '</head>',
+    '<body>',
+    '<header class="report-app-header">',
+    '<div class="report-app-left">',
+    '<div class="report-logo">NBC</div>',
+    '<div>',
+    '<div class="report-app-title">NBC Stormwater Tools</div>',
+    '<div class="report-app-sub">Northern Beaches Council · Stormwater</div>',
+    '</div>',
+    '</div>',
+    '<div class="report-app-right" id="generatedMeta"></div>',
+    '</header>',
+    '<main class="pkg-shell">',
+    '<div class="pkg-hero">',
+    '<div>',
+    '<div class="pkg-title" id="mapTitle">Pipe Relining Map</div>',
+    '<div class="pkg-sub">Standalone map view for a single package — assets, costs, conditions, and reasoning at the time the report was produced.</div>',
+    '</div>',
+    '<div class="pkg-status-chip"><span class="pkg-dot" style="background:' + packageColor + '"></span><span id="subtitle">—</span></div>',
+    '</div>',
+    '<div class="warn-banner" id="warnBanner"></div>',
+    '<div class="pkg-panel"><div class="lbl">Package Summary</div><div class="pkg-meta" id="metaStrip"></div></div>',
+    '<div class="pkg-panel">',
+    '<div class="lbl">Map</div>',
+    '<div class="cctv-map-wrap">',
+    '<div class="cctv-map-toolbar">',
+    '<div>',
+    '<div class="cctv-map-title">Package Pipes</div>',
+    '<div class="cctv-map-sub">Pipes, centroid, and connector lines for this package only.</div>',
+    '</div>',
+    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button></div>',
+    '</div>',
+    '<div id="map"></div>',
+    '</div>',
+    '</div>',
+    '<div class="pkg-panel"><div class="lbl">Pipes in this package</div><div class="pkg-table-wrap"><table id="pipesTable"></table></div></div>',
+    '<div class="back-link"><a href="../package_report.html">← Back to overview report</a></div>',
+    '</main>',
+    '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Map — read-only.</footer>',
+    '<script id="pkg-data" type="application/json">' + json + '<\\/script>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\\/script>',
+    '<script>' + runtimeJs + '<\\/script>',
+    '</body>',
+    '</html>'
+  ].join('\n');
+}
+
+function reliningPackageMapFilename(pkg) {
+  const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+  return `package_maps/${safe}_map.html`;
+}
+
 async function downloadReliningPackagesZip() {
   const packages = lastPackagingGeneration?.packages || [];
   if (!packages.length) {
@@ -7194,9 +7523,9 @@ async function downloadReliningPackagesZip() {
         totalCost += cost;
 
         const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
-        const rawLga   = raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
-        const rawUp    = raw['SW_Upstream Node']  ?? raw['Upstream Node']   ?? '';
-        const rawDown  = raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
+        const rawLga   = raw['SW_LGA_20%_H1-H6'] ?? raw['SW LGA 20% H1-H6'] ?? raw['LGA'] ?? '';
+        const rawUp    = raw['SW_Upstream_Node']  ?? raw['SW_Upstream Node']  ?? raw['Upstream Node']   ?? '';
+        const rawDown  = raw['SW_Downstream_Node'] ?? raw['SW_Downstream Node'] ?? raw['Downstream Node'] ?? '';
         const rawAddr  = raw['Pipe_Start_Address'] ?? raw['Start Address']  ?? '';
 
         lines.push(csvRow([
@@ -7294,6 +7623,23 @@ async function downloadReliningPackagesZip() {
       throw new Error('package_report.html could not be built: ' + (reportErr && reportErr.message || reportErr));
     }
 
+    // per-package dedicated map HTML files — colours mirror the overview report's palette so they line up
+    const PKG_MAP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
+    const expectedMapNames = [];
+    const generatedAtIso = new Date().toISOString();
+    packages.forEach((pkg, i) => {
+      const color = PKG_MAP_PALETTE[i % PKG_MAP_PALETTE.length];
+      const mapFilename = reliningPackageMapFilename(pkg);
+      try {
+        const mapHtml = buildSinglePackageMapHtml(pkg, lastPackagingGeneration?.options || null, generatedAtIso, color);
+        zip.file(mapFilename, mapHtml);
+        expectedMapNames.push(mapFilename);
+      } catch (mapErr) {
+        console.error('[ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
+        throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
+      }
+    });
+
     // xlsx files
     if (typeof XLSX !== 'undefined') {
       const wbSummary = XLSX.utils.book_new();
@@ -7324,6 +7670,8 @@ async function downloadReliningPackagesZip() {
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
+    const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
+    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
       if (csvText.split(/\r?\n/)[0] !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
