@@ -6350,7 +6350,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       conditionMix,
       diameterMix,
       materialMix,
-      dedicated_map_url: `./package_maps/${safeId}_map.html`
+      dedicated_map_url: `./package_maps/${safeId}_map.html`,
+      dedicated_kml_url: `./package_maps/${safeId}.kml`
     };
   });
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
@@ -6567,6 +6568,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
       '<div class="pkg-card-actions">' +
         '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
+        (pkg.dedicated_kml_url ? '<a class="pkg-card-link-btn" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') +
         '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
         '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
       '</div>' +
@@ -6595,7 +6597,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<td class="r">' + esc(maxSpanKm) + '</td>' +
         '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
         '<td>' + esc(notes.join('; ')) + '</td>' +
-        '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+        '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a>' + (pkg.dedicated_kml_url ? ' · <a class="pkg-row-link" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') + ' · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
         '</tr>';
     }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
 
@@ -6610,6 +6612,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<span class="pipe-color" style="background:' + color + '"></span>' +
         '<h3>' + esc(pkg.id) + '</h3>' +
         '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
+        (pkg.dedicated_kml_url ? '<a class="pkg-card-link-btn" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') +
         '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
       '</header>' +
       '<div class="pkg-report-meta">' +
@@ -6922,6 +6925,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   document.body.addEventListener('click', function(e) {
     var a = e.target.closest && e.target.closest('a.pkg-card-link-btn, a.pkg-row-link, a.select-pkg-link');
     if (!a) return;
+    if (a.getAttribute('data-link-kind') === 'kml') return; // KML download — let browser handle, no map side-effect
     var id = a.getAttribute('data-package-id');
     if (id && pkgIndex[id] != null) setSelection(id, { zoom: true });
     if (a.getAttribute('href') === '#mapPanel') {
@@ -7391,7 +7395,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
     '<div class="cctv-map-title">Package Pipes</div>',
     '<div class="cctv-map-sub">Pipes, centroid, and connector lines for this package only.</div>',
     '</div>',
-    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button></div>',
+    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + (String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE') + '.kml" download>Open in Google Earth ↗</a></div>',
     '</div>',
     '<div id="map"></div>',
     '</div>',
@@ -7411,6 +7415,75 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
 function reliningPackageMapFilename(pkg) {
   const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
   return `package_maps/${safe}_map.html`;
+}
+
+function buildSinglePackageKml(pkg) {
+  const pkgId = pkg.package_id || 'PACKAGE';
+  const xmlEsc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  const cdataEsc = s => String(s == null ? '' : s).replace(/]]>/g, ']]]]><![CDATA[>');
+  const fmtCurrencyKml = n => Number.isFinite(n) && Number(n) !== 0
+    ? '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+    : '';
+  const placemarks = (pkg.assets || []).map(item => {
+    const raw = item.raw || {};
+    const assetId = item.assetId || '';
+    const diameterRaw = raw['SWP_Pipe Diameter_mm'] ?? raw['SWP_Pipe_Diameter_mm'] ?? item.diameterMm;
+    const diameter = Number.isFinite(Number(diameterRaw)) && Number(diameterRaw) > 0
+      ? Math.round(Number(diameterRaw)) + ' mm' : '';
+    const upstream = raw['SW_Upstream Node'] ?? raw['SW_Upstream_Node'] ?? raw['Upstream Node'] ?? '';
+    const downstream = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
+    const lga = raw['SW LGA 20% H1-H6'] ?? raw['SW_LGA_20%_H1-H6'] ?? raw['LGA'] ?? '';
+    const condition = item.conditionLabel || raw['SW_Condition'] || item.condition || '';
+    const lengthM = Number.isFinite(item.lengthM) && item.lengthM > 0 ? item.lengthM.toFixed(1) + ' m' : '';
+    const cost = fmtCurrencyKml(item.pipeCost);
+
+    const start = resolveLineCoordinatePair(raw, true);
+    const end = resolveLineCoordinatePair(raw, false);
+    const hasLine = start && end
+      && Number.isFinite(start.lat) && Number.isFinite(start.lon)
+      && Number.isFinite(end.lat) && Number.isFinite(end.lon);
+    let geometry = '';
+    let styleId = 'pipePoint';
+    if (hasLine) {
+      geometry = `<LineString><tessellate>1</tessellate><coordinates>${start.lon},${start.lat},0 ${end.lon},${end.lat},0</coordinates></LineString>`;
+      styleId = 'pipeLine';
+    } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+      geometry = `<Point><coordinates>${item.lon},${item.lat},0</coordinates></Point>`;
+    } else {
+      return null;
+    }
+    const desc = '<![CDATA[<b>Diameter:</b> ' + cdataEsc(diameter || '—') + '<br>'
+      + '<b>Upstream:</b> ' + cdataEsc(upstream || '—') + '<br>'
+      + '<b>Downstream:</b> ' + cdataEsc(downstream || '—') + '<br>'
+      + '<b>Length:</b> ' + cdataEsc(lengthM || '—') + '<br>'
+      + '<b>Cost:</b> ' + cdataEsc(cost || '—') + '<br>'
+      + '<b>Condition:</b> ' + cdataEsc(condition || '—') + '<br>'
+      + '<b>LGA H1-H6:</b> ' + cdataEsc(lga || '—') + ']]>';
+    return '<Placemark>'
+      + '<name>' + xmlEsc(pkgId + ' — ' + assetId) + '</name>'
+      + '<description>' + desc + '</description>'
+      + '<styleUrl>#' + styleId + '</styleUrl>'
+      + geometry
+      + '</Placemark>';
+  }).filter(Boolean).join('\n  ');
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
+    + '<Document>\n'
+    + '  <name>' + xmlEsc(pkgId) + ' — Pipe Relining Package</name>\n'
+    + '  <description>' + xmlEsc('Per-pipe export of relining package ' + pkgId + '. ' + ((pkg.assets || []).length) + ' pipe' + ((pkg.assets || []).length === 1 ? '' : 's') + '.') + '</description>\n'
+    + '  <Style id="pipeLine"><LineStyle><color>ff897c00</color><width>4</width></LineStyle></Style>\n'
+    + '  <Style id="pipePoint"><IconStyle><scale>1.0</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle></Style>\n'
+    + '  ' + placemarks + '\n'
+    + '</Document>\n'
+    + '</kml>\n';
+}
+
+function reliningPackageKmlFilename(pkg) {
+  const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+  return `package_maps/${safe}.kml`;
 }
 
 async function downloadReliningPackagesZip() {
@@ -7599,17 +7672,25 @@ async function downloadReliningPackagesZip() {
 
       const mapHtml = buildSinglePackageMapHtml(pkg);
       const mapFilename = `package_maps/${pkg.package_id}_map.html`;
-      console.log("Adding map:", mapFilename);
       zip.file(mapFilename, mapHtml);
+
+      const kmlContent = buildSinglePackageKml(pkg);
+      const kmlFilename = `package_maps/${pkg.package_id}.kml`;
+      zip.file(kmlFilename, kmlContent);
     });
 
     if (!packages.length) {
       throw new Error("No packages found");
     }
-    const expectedMapCount = packages.length;
-    const actualMapCount = Object.keys(zip.files).filter(f => f.startsWith("package_maps/") && !zip.files[f].dir).length;
-    if (actualMapCount !== expectedMapCount) {
-      throw new Error(`Missing package maps: expected ${expectedMapCount}, got ${actualMapCount}`);
+    const expectedPackageCount = packages.length;
+    const pkgFolderEntries = Object.keys(zip.files).filter(f => f.startsWith("package_maps/") && !zip.files[f].dir);
+    const actualMapCount = pkgFolderEntries.filter(f => f.endsWith("_map.html")).length;
+    const actualKmlCount = pkgFolderEntries.filter(f => f.endsWith(".kml")).length;
+    if (actualMapCount !== expectedPackageCount) {
+      throw new Error(`Missing package maps: expected ${expectedPackageCount}, got ${actualMapCount}`);
+    }
+    if (actualKmlCount !== expectedPackageCount) {
+      throw new Error(`Missing package KMLs: expected ${expectedPackageCount}, got ${actualKmlCount}`);
     }
 
     if (!csvNames.length) {
