@@ -6386,50 +6386,101 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var data;
   try { data = JSON.parse(document.getElementById('report-data').textContent); }
   catch (err) {
-    document.body.innerHTML = '<div style="padding:40px;color:#b91c1c;font-family:sans-serif">Report data could not be parsed: ' + (err && err.message || '') + '</div>';
+    document.body.innerHTML = '<div style="padding:40px;color:#b91c1c;font-family:Segoe UI,system-ui,sans-serif">Report data could not be parsed: ' + (err && err.message || '') + '</div>';
     return;
   }
   var options = data.options || {};
   var pipes = data.pipes || [];
+  var packages = data.packages || [];
+  var summary = data.summary || {};
   var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
   var pkgIndex = {};
-  data.packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+  packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+
   function colorFor(id) { var i = pkgIndex[id]; if (i == null) i = 0; return PALETTE[i % PALETTE.length]; }
   function fmtNum(n, dp) { if (n == null || !isFinite(n)) return ''; return Number(n).toLocaleString('en-AU', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
   function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function uniq(arr) { var seen = Object.create(null); var out = []; arr.forEach(function(v) { if (v === '' || v == null) return; var k = String(v); if (seen[k]) return; seen[k] = 1; out.push(v); }); return out; }
+  function pkgAnchor(id) { return 'pkg-' + String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
 
   document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
+  document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
 
-  var summary = data.summary || {};
-  var stats = [
-    { label: 'Total packages', value: fmtNum(summary.package_count, 0) },
-    { label: 'Total pipes', value: fmtNum(summary.pipe_count, 0) },
-    { label: 'Total length (m)', value: fmtNum(summary.total_length_m, 1) },
-    { label: 'Estimated cost', value: fmtCurrency(summary.total_cost) }
+  // META STRIP
+  var meta = [
+    { label: 'Total Packages', value: fmtNum(summary.package_count, 0) || String(packages.length) },
+    { label: 'Total Pipes', value: fmtNum(summary.pipe_count, 0) || String(pipes.length) },
+    { label: 'Total Length', value: (fmtNum(summary.total_length_m, 1) || '0') + ' m' },
+    { label: 'Estimated Cost', value: fmtCurrency(summary.total_cost) || '$0' }
   ];
-  document.getElementById('statGrid').innerHTML = stats.filter(function(s){ return s.value !== ''; }).map(function(s){
-    return '<div class="stat-card"><div class="label">' + esc(s.label) + '</div><div class="value">' + esc(s.value) + '</div></div>';
+  document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
+    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
   }).join('');
 
-  var optionLabels = {
-    reliningMode: 'Mode', method: 'Method', maxPackageValue: 'Max package value', pipesPerPackage: 'Pipes per package',
-    costMode: 'Cost mode', contractor: 'Contractor', trafficControl: 'Traffic control', projectInitiation: 'Project initiation',
-    groupBySuburb: 'Group by suburb', groupingMethod: 'Grouping method', proximityM: 'Proximity (m)',
-    topupMode: 'Top-up mode', sizeGroups: 'Size groups', maxSpanWarningKm: 'Max span warning (km)'
-  };
-  var optHtml = Object.keys(optionLabels).map(function(key) {
-    if (!(key in options)) return '';
-    var v = options[key];
-    if (v === null || v === undefined || v === '') return '';
-    if (typeof v === 'boolean') v = v ? 'Yes' : 'No';
-    if (Array.isArray(v)) v = v.length ? v.map(function(x){ return Array.isArray(x) ? x.join(', ') : x; }).join(' | ') : '';
-    if (key === 'maxPackageValue' && isFinite(Number(v))) v = '$' + Number(v).toLocaleString('en-AU');
-    return v === '' ? '' : '<dt>' + esc(optionLabels[key]) + '</dt><dd>' + esc(String(v)) + '</dd>';
-  }).filter(Boolean).join('');
-  document.getElementById('optionsList').innerHTML = optHtml || '<dd style="color:#94a3b8;font-style:italic">No options recorded.</dd>';
+  // OPTIONS STRIP — read-only display of the packaging rules used
+  function fmtSizeGroups(g) {
+    if (!g || !g.length || !g.some(function(x){ return Array.isArray(x) && x.length; })) return 'None configured';
+    return g.map(function(arr, i) { return 'Group ' + (i+1) + ': ' + (Array.isArray(arr) && arr.length ? arr.join(', ') + ' mm' : '—'); }).filter(function(s){ return s.indexOf(': —') === -1; }).join(' · ') || 'None configured';
+  }
+  function fmtGroupingMethod(o) {
+    if (o.proximityM) return 'Spatial — ' + o.proximityM.toLocaleString() + ' m radius';
+    if (o.groupBySuburb) return 'Suburb';
+    return 'No grouping';
+  }
+  var opt = [
+    { label: 'Pipe Condition Selection', value: options.reliningMode || '—' },
+    { label: 'Packaging Method', value: options.method === 'count' ? 'Pipe count based' : 'Value based' },
+    { label: options.method === 'count' ? 'Pipes Per Package' : 'Max Package Value', value: options.method === 'count' ? (options.pipesPerPackage != null ? options.pipesPerPackage.toLocaleString() : '—') : (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') },
+    { label: 'Grouping', value: fmtGroupingMethod(options) },
+    { label: 'Top-up Mode', value: options.topupMode || 'No top up' },
+    { label: 'Cost Mode', value: options.costMode || 'median' },
+    { label: 'Size Groups', value: fmtSizeGroups(options.customSizeGroups) }
+  ];
+  document.getElementById('optionsStrip').innerHTML = opt.map(function(s) {
+    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+  }).join('');
 
+  // OVERALL REASONING — narrative bullets matching the live page
+  function reliningModeLabel(mode) {
+    if (mode === 'Condition 8 only') return 'Condition 8';
+    if (mode === 'Condition 7 only') return 'Condition 7';
+    return 'Condition 7 and Condition 8';
+  }
+  var ovBullets = [];
+  ovBullets.push('Only <strong>' + esc(reliningModeLabel(options.reliningMode)) + '</strong> pipes are considered for relining.');
+  ovBullets.push('Relining rates are matched by pipe diameter first, then by the length band in <code>Size/Descriptor</code>.');
+  ovBullets.push('Median/Panel rate rows are preferred where available, then the median numeric unit rate is applied per metre.');
+  if (options.method === 'count') {
+    ovBullets.push('Packages are split after about <strong>' + (options.pipesPerPackage != null ? Number(options.pipesPerPackage).toLocaleString() : '—') + '</strong> pipes.');
+  } else {
+    ovBullets.push('Packages are split when the next pipe would push the package above <strong>' + (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') + '</strong>.');
+  }
+  if (options.proximityM) {
+    ovBullets.push('Pipes are grouped by spatial proximity using anchor-radius clustering within <strong>' + options.proximityM.toLocaleString() + ' m</strong>. Suburb boundaries are ignored.');
+  } else if (options.groupBySuburb) {
+    ovBullets.push('Packages are kept within suburb groups before value or count splitting.');
+  } else {
+    ovBullets.push('Suburb grouping is switched off — pipes are packaged together across the full dataset.');
+  }
+  if (options.customSizeGroups && options.customSizeGroups.length && options.customSizeGroups.some(function(g){ return g && g.length; })) {
+    ovBullets.push('Size groups active — ' + options.customSizeGroups.map(function(g, i) { return 'Group ' + (i+1) + ': ' + ((g||[]).join(', ') || '—') + ' mm'; }).filter(function(s){ return s.indexOf(': —') === -1; }).join('; ') + '. Diameters in the same group share packages.');
+  } else {
+    ovBullets.push('Diameter is the primary grouping factor — packages are built per diameter, then top-up adds adjacent sizes to reach the target value.');
+  }
+  ovBullets.push('Packages with a spatial span exceeding <strong>' + (options.proximityM ? options.proximityM * 2 : 2000).toLocaleString() + ' m</strong> are flagged for review.');
+  if (options.topupMode === 'Same condition only') {
+    ovBullets.push('Top-up active — underfilled packages pull cheapest fitting pipes from the same suburb or cluster and compatible size group.');
+  } else if (options.topupMode === 'Same condition first, lower condition if needed') {
+    ovBullets.push('Top-up active — same-condition pipes are tried first, then the lower-condition fallback is used for single-condition modes.');
+  } else {
+    ovBullets.push('No top-up — packages are not filled beyond their initial split.');
+  }
+  ovBullets.push('Packages are prioritised by the condition, diameter, and criticality scoring model, then renumbered by priority.');
+  ovBullets.push('Packages with usable coordinates are drawn on the map.');
+  document.getElementById('overallReasoning').innerHTML = '<ul>' + ovBullets.map(function(b){ return '<li>' + b + '</li>'; }).join('') + '</ul>';
+
+  // PER-PACKAGE REASONING (used by cards, written reports, popups)
   function reasoningFor(pkg) {
     var bullets = [];
     var notRec = 'Not recorded in export data';
@@ -6458,7 +6509,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     } else {
       bullets.push('Distance spread: ' + notRec + '.');
     }
-    var diamKeys = Object.keys(pkg.diameterMix);
+    var diamKeys = Object.keys(pkg.diameterMix || {});
     if (diamKeys.length === 1) {
       bullets.push('Diameter grouping: single diameter ' + diamKeys[0] + ' mm — pipes share size.');
     } else if (Array.isArray(options.customSizeGroups) && options.customSizeGroups.length) {
@@ -6466,7 +6517,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     } else {
       bullets.push('Diameter grouping: mixed diameters via top-up — ' + diamKeys.map(function(k){ return k + ' mm × ' + pkg.diameterMix[k]; }).join(', ') + '.');
     }
-    var condList = Object.keys(pkg.conditionMix).map(function(k){ return k + ' × ' + pkg.conditionMix[k]; }).join(', ');
+    var condList = Object.keys(pkg.conditionMix || {}).map(function(k){ return k + ' × ' + pkg.conditionMix[k]; }).join(', ');
     bullets.push('Condition eligibility: relining-eligible mix — ' + (condList || notRec) + '.');
     if (options.method === 'count') {
       bullets.push('Length/value target: ~' + (options.pipesPerPackage || notRec) + ' pipes per package (this package: ' + pkg.pipe_count + ' pipes, ' + Number(pkg.total_length_m).toFixed(1) + ' m).');
@@ -6486,32 +6537,90 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return bullets;
   }
 
+  // PACKAGE CARDS
+  var cardsHtml = packages.map(function(pkg) {
+    var color = colorFor(pkg.id);
+    var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
+    var notes = [];
+    if (pkg.distance_warning) notes.push(pkg.distance_warning);
+    if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') notes.push('coords: ' + pkg.coordinate_sources);
+    var anchor = '#' + pkgAnchor(pkg.id);
+    return '<div class="pkg-card pkg-card-link" data-package-id="' + esc(pkg.id) + '">' +
+      '<div class="pkg-card-head">' +
+        '<span class="pipe-color" style="background:' + color + '"></span>' +
+        '<div class="pkg-card-title">' + esc(pkg.id) + '</div>' +
+      '</div>' +
+      '<div class="pkg-card-val">' + fmtNum(pkg.pipe_count, 0) + '<span class="pkg-card-val-unit"> pipes</span></div>' +
+      '<div class="pkg-card-sub">' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
+      '<dl class="pkg-card-dl">' +
+        '<dt>Length</dt><dd>' + esc(fmtNum(pkg.total_length_m, 1)) + ' m</dd>' +
+        '<dt>Cost</dt><dd>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</dd>' +
+        '<dt>Diameters</dt><dd>' + esc(diam || '—') + '</dd>' +
+        '<dt>Max span</dt><dd>' + (pkg.max_span_m ? esc((pkg.max_span_m / 1000).toFixed(2)) + ' km' : '—') + '</dd>' +
+      '</dl>' +
+      (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
+      '<div class="pkg-card-actions">' +
+        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">View on map ↓</a>' +
+        '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">View report ↓</a>' +
+      '</div>' +
+      '</div>';
+  }).join('');
+  document.getElementById('packageCards').innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
+
+  // PACKAGES TABLE
   var packagesTbl = document.getElementById('packagesTable');
   packagesTbl.innerHTML =
-    '<thead><tr><th style="width:24px"></th><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="num">Pipes</th>' +
-    '<th class="num">Length (m)</th><th class="num">Max span (km)</th><th class="num">Cost</th><th>Notes</th></tr></thead>' +
-    '<tbody>' + data.packages.map(function(pkg) {
+    '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="r">Pipes</th>' +
+    '<th class="r">Length (m)</th><th class="r">Max span (km)</th><th class="r">Cost</th><th>Notes</th><th>Map</th></tr></thead>' +
+    '<tbody>' + (packages.length ? packages.map(function(pkg) {
       var notes = [];
       if (pkg.distance_warning) notes.push(pkg.distance_warning);
       if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') notes.push('coords: ' + pkg.coordinate_sources);
       var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
       var maxSpanKm = pkg.max_span_m ? (pkg.max_span_m / 1000).toFixed(2) : '';
-      var bullets = reasoningFor(pkg).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
+      var anchor = '#' + pkgAnchor(pkg.id);
       return '<tr class="package-row" data-package-id="' + esc(pkg.id) + '">' +
-        '<td class="expand-cell">▸</td>' +
         '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
         '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
         '<td>' + esc(diam) + '</td>' +
-        '<td class="num">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
-        '<td class="num">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
-        '<td class="num">' + esc(maxSpanKm) + '</td>' +
-        '<td class="num">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
-        '<td>' + esc(notes.join('; ')) + '</td></tr>' +
-        '<tr class="package-details" data-package-id="' + esc(pkg.id) + '" style="display:none"><td colspan="9">' +
-        '<div class="reasoning"><div class="label">Reasoning</div><ul>' + bullets + '</ul></div>' +
-        '</td></tr>';
-    }).join('') + '</tbody>';
+        '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
+        '<td class="r">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
+        '<td class="r">' + esc(maxSpanKm) + '</td>' +
+        '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
+        '<td>' + esc(notes.join('; ')) + '</td>' +
+        '<td><a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Map ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+        '</tr>';
+    }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
 
+  // PER-PACKAGE WRITTEN REPORTS
+  document.getElementById('packageReports').innerHTML = packages.map(function(pkg) {
+    var color = colorFor(pkg.id);
+    var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ') || '—';
+    var bullets = reasoningFor(pkg).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
+    var anchor = pkgAnchor(pkg.id);
+    return '<section class="pkg-report" id="' + anchor + '" data-package-id="' + esc(pkg.id) + '">' +
+      '<header class="pkg-report-head">' +
+        '<span class="pipe-color" style="background:' + color + '"></span>' +
+        '<h3>' + esc(pkg.id) + '</h3>' +
+        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">View on map ↓</a>' +
+      '</header>' +
+      '<div class="pkg-report-meta">' +
+        '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
+        '<div><span class="lbl-mini">Pipes</span>' + fmtNum(pkg.pipe_count, 0) + '</div>' +
+        '<div><span class="lbl-mini">Length</span>' + fmtNum(pkg.total_length_m, 1) + ' m</div>' +
+        '<div><span class="lbl-mini">Cost</span>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>' +
+        '<div><span class="lbl-mini">Diameters</span>' + esc(diam) + '</div>' +
+        '<div><span class="lbl-mini">Max span</span>' + (pkg.max_span_m ? esc((pkg.max_span_m/1000).toFixed(2)) + ' km' : '—') + '</div>' +
+        ((pkg.condition_7_count || pkg.condition_8_count) ? '<div><span class="lbl-mini">Condition 7 / 8</span>' + (pkg.condition_7_count||0) + ' / ' + (pkg.condition_8_count||0) + '</div>' : '') +
+        (pkg.max_from_centroid_m ? '<div><span class="lbl-mini">Max from centre</span>' + pkg.max_from_centroid_m + ' m</div>' : '') +
+      '</div>' +
+      (pkg.distance_warning ? '<div class="pkg-report-warn">' + esc(pkg.distance_warning) + '</div>' : '') +
+      '<div class="pkg-report-bullets"><div class="lbl-mini">Reasoning</div><ul>' + bullets + '</ul></div>' +
+      (pkg.asset_ids && pkg.asset_ids.length ? '<div class="pkg-report-assets"><span class="lbl-mini">Assets in this package</span>' + esc(pkg.asset_ids.join(', ')) + '</div>' : '') +
+    '</section>';
+  }).join('') || '<div class="pkg-empty">No packages were generated.</div>';
+
+  // PIPES TABLE (filterable)
   function fillSelect(id, values, fmt) {
     var sel = document.getElementById(id);
     values.forEach(function(v) {
@@ -6521,7 +6630,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       sel.appendChild(opt);
     });
   }
-  fillSelect('filterPackage', data.packages.map(function(p){ return p.id; }));
+  fillSelect('filterPackage', packages.map(function(p){ return p.id; }));
   fillSelect('filterSuburb', uniq(pipes.map(function(p){ return p.suburb; })).sort());
   fillSelect('filterDiameter', uniq(pipes.map(function(p){ return p.diameter_mm; })).sort(function(a,b){ return a-b; }), function(v){ return v + 'mm'; });
   fillSelect('filterCondition', uniq(pipes.map(function(p){ return p.condition; })).sort());
@@ -6545,19 +6654,19 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="empty" colspan="8">No pipes match the current filters.</td></tr></tbody>'; return; }
-    tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="num">Diameter</th>' +
-      '<th>Material</th><th>Condition</th><th class="num">Length (m)</th><th class="num">Cost</th></tr></thead><tbody>' +
+    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="8">No pipes match the current filters.</td></tr></tbody>'; return; }
+    tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
+      '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
           '<td><span class="pipe-color" style="background:' + colorFor(p.package_id) + '"></span>' + esc(p.package_id) + '</td>' +
           '<td>' + esc(p.suburb) + '</td>' +
-          '<td class="num">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>' +
+          '<td class="r">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>' +
           '<td>' + esc(p.material) + '</td>' +
           '<td>' + esc(p.condition) + '</td>' +
-          '<td class="num">' + fmtNum(p.length_m, 1) + '</td>' +
-          '<td class="num">' + esc(fmtCurrency(p.pipe_cost)) + '</td></tr>';
+          '<td class="r">' + fmtNum(p.length_m, 1) + '</td>' +
+          '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td></tr>';
       }).join('') + '</tbody>';
   }
   ['filterPackage','filterSuburb','filterDiameter','filterCondition','filterSearch'].forEach(function(id) {
@@ -6567,6 +6676,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   });
   renderPipes();
 
+  // MAP
   var map = null;
   var assetMarkers = {};
   var markersByPackage = {};
@@ -6580,9 +6690,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var assetList = (pkg.asset_ids || []).slice(0, 10).join(', ');
     var more = (pkg.asset_ids || []).length > 10 ? ' …' : '';
     var html = '';
-    html += '<div style="min-width:220px;max-width:280px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">';
-    html += '<div style="font-weight:800;color:#0f1d3a;margin-bottom:6px;font-size:14px">' + esc(pkg.id) + '</div>';
-    html += '<div style="font-size:12px;color:#475569;line-height:1.55">';
+    html += '<div style="min-width:220px;max-width:280px;font-family:Segoe UI,system-ui,sans-serif">';
+    html += '<div style="font-weight:800;color:#1A2B3C;margin-bottom:6px;font-size:14px">' + esc(pkg.id) + '</div>';
+    html += '<div style="font-size:12px;color:#5A6B7A;line-height:1.55">';
     html += '<div><strong>Suburbs:</strong> ' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>';
     html += '<div><strong>Pipes:</strong> ' + pkg.pipe_count + '</div>';
     html += '<div><strong>Length:</strong> ' + Number(pkg.total_length_m).toFixed(1) + ' m</div>';
@@ -6595,11 +6705,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     html += '<div><strong>Cost:</strong> ' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>';
     html += '<div><strong>Assets:</strong> ' + esc(assetList || 'None') + more + '</div>';
     html += '</div>';
-    html += '<details style="margin-top:8px"><summary style="font-size:11px;font-weight:600;cursor:pointer;color:#0f1d3a">Reasoning</summary>';
-    html += '<ul style="margin:6px 0 0 16px;padding:0;font-size:11px;line-height:1.5;color:#475569">';
-    reasoningFor(pkg).forEach(function(b) { html += '<li>' + esc(b) + '</li>'; });
-    html += '</ul></details>';
-    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="margin-top:8px;padding:5px 10px;font-size:11px;background:#0f1d3a;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight package</button>';
+    html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">';
+    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#1A2B3C;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight</button>';
+    html += '<a class="select-pkg-link" href="#' + pkgAnchor(pkg.id) + '" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#00847F;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open report ↓</a>';
+    html += '</div>';
     html += '</div>';
     return html;
   }
@@ -6611,60 +6720,45 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pl = polylinesByPackage[pid];
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({
-        weight: sel ? 7 : 3,
-        opacity: sel ? 1 : (dim ? 0.18 : 0.7),
-        dashArray: sel ? '' : '6 6'
-      });
+      pl.setStyle({ weight: sel ? 7 : 3, opacity: sel ? 1 : (dim ? 0.18 : 0.7), dashArray: sel ? '' : '6 6' });
       if (sel && pl.bringToFront) pl.bringToFront();
     });
     Object.keys(markersByPackage).forEach(function(pid) {
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
       markersByPackage[pid].forEach(function(m) {
-        m.setStyle({
-          radius: sel ? 9 : 5,
-          opacity: sel ? 1 : (dim ? 0.25 : 1),
-          fillOpacity: sel ? 1 : (dim ? 0.18 : 0.78),
-          weight: sel ? 2.5 : 1.5,
-          color: sel ? '#111827' : '#fff'
-        });
+        m.setStyle({ radius: sel ? 9 : 5, opacity: sel ? 1 : (dim ? 0.25 : 1), fillOpacity: sel ? 1 : (dim ? 0.18 : 0.78), weight: sel ? 2.5 : 1.5, color: sel ? '#111827' : '#fff' });
       });
     });
     Object.keys(centroidsByPackage).forEach(function(pid) {
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
       var cm = centroidsByPackage[pid];
-      cm.setStyle({
-        radius: sel ? 14 : 9,
-        weight: sel ? 5 : 2.5,
-        opacity: dim ? 0.3 : 1,
-        fillOpacity: dim ? 0.25 : 0.85,
-        color: sel ? '#111827' : cm.options.colorOriginal,
-        fillColor: sel ? '#FFD166' : cm.options.colorOriginal
-      });
+      cm.setStyle({ radius: sel ? 14 : 9, weight: sel ? 5 : 2.5, opacity: dim ? 0.3 : 1, fillOpacity: dim ? 0.25 : 0.85, color: sel ? '#111827' : cm.options.colorOriginal, fillColor: sel ? '#FFD166' : cm.options.colorOriginal });
       if (sel && cm.bringToFront) cm.bringToFront();
     });
     Object.keys(connectorsByPackage).forEach(function(pid) {
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      connectorsByPackage[pid].forEach(function(c) {
-        c.setStyle({ opacity: sel ? 0.55 : (dim ? 0.06 : 0.3), weight: sel ? 2 : 1 });
-      });
+      connectorsByPackage[pid].forEach(function(c) { c.setStyle({ opacity: sel ? 0.55 : (dim ? 0.06 : 0.3), weight: sel ? 2 : 1 }); });
     });
     Array.prototype.forEach.call(document.querySelectorAll('#packagesTable tr.package-row'), function(tr) {
       tr.classList.toggle('selected', tr.getAttribute('data-package-id') === selectedPackageId);
     });
-    var info = document.getElementById('selectedInfo');
+    Array.prototype.forEach.call(document.querySelectorAll('.pkg-card[data-package-id]'), function(card) {
+      card.classList.toggle('selected', card.getAttribute('data-package-id') === selectedPackageId);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.pkg-report[data-package-id]'), function(sec) {
+      sec.classList.toggle('selected', sec.getAttribute('data-package-id') === selectedPackageId);
+    });
+    var sub = document.getElementById('mapSubtitle');
     var clearBtn = document.getElementById('clearBtn');
     if (selectedPackageId) {
-      var pkg = data.packages[pkgIndex[selectedPackageId]];
-      info.innerHTML = '<strong>Selected:</strong> ' + esc(selectedPackageId) +
-        ' &middot; ' + pkg.pipe_count + ' pipes &middot; ' + Number(pkg.total_length_m).toFixed(1) + ' m' +
-        (pkg.max_span_m ? ' &middot; span ' + Math.round(pkg.max_span_m) + ' m' : '');
+      var pkg = packages[pkgIndex[selectedPackageId]];
+      sub.innerHTML = '<strong>' + esc(selectedPackageId) + '</strong> · ' + pkg.pipe_count + ' pipes · ' + Number(pkg.total_length_m).toFixed(1) + ' m' + (pkg.max_span_m ? ' · span ' + Math.round(pkg.max_span_m) + ' m' : '');
       if (clearBtn) clearBtn.disabled = false;
     } else {
-      info.innerHTML = '<span style="color:#94a3b8">No package selected</span>';
+      sub.textContent = 'No package selected';
       if (clearBtn) clearBtn.disabled = true;
     }
     if (selectedPackageId && opts.zoom !== false && map && packageBounds[selectedPackageId]) {
@@ -6675,7 +6769,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function initMap() {
     var mapEl = document.getElementById('map');
     if (typeof L === 'undefined') {
-      document.getElementById('mapWrap').innerHTML = '<div class="map-warning">Leaflet failed to load (offline or CDN blocked) &mdash; map disabled. Tables and reasoning remain functional.</div>';
+      document.getElementById('mapPanel').insertAdjacentHTML('beforeend', '<div class="map-warning">Leaflet failed to load (offline or CDN blocked) — map disabled. Tables and reasoning remain functional.</div>');
       return;
     }
     map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
@@ -6692,7 +6786,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     tileLayer.addTo(map);
 
     var allPoints = [];
-    data.packages.forEach(function(pkg) {
+    packages.forEach(function(pkg) {
       var color = colorFor(pkg.id);
       var pkgPoints = [];
       var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
@@ -6754,20 +6848,23 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   initMap();
 
+  // BUTTONS
+  var fitBtn = document.getElementById('fitBtn');
+  if (fitBtn) fitBtn.addEventListener('click', function() {
+    if (!map) return;
+    var pts = [];
+    Object.keys(packageBounds).forEach(function(pid) { var b = packageBounds[pid]; if (b) { pts.push(b.getNorthEast()); pts.push(b.getSouthWest()); } });
+    if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.05));
+  });
   document.getElementById('clearBtn').addEventListener('click', function() { setSelection(null); });
 
+  // PACKAGE / PIPE / CARD INTERACTIONS
   document.getElementById('packagesTable').addEventListener('click', function(e) {
+    var link = e.target.closest && e.target.closest('a.pkg-row-link');
+    if (link) return;
     var tr = e.target.closest && e.target.closest('tr.package-row');
     if (!tr) return;
-    var id = tr.getAttribute('data-package-id');
-    var details = document.querySelector('#packagesTable tr.package-details[data-package-id="' + (id || '').replace(/"/g, '\\"') + '"]');
-    if (details) {
-      var open = details.style.display !== 'none';
-      details.style.display = open ? 'none' : 'table-row';
-      var cell = tr.querySelector('.expand-cell');
-      if (cell) cell.textContent = open ? '▸' : '▾';
-    }
-    setSelection(id);
+    setSelection(tr.getAttribute('data-package-id'));
   });
 
   document.getElementById('pipesTable').addEventListener('click', function(e) {
@@ -6784,9 +6881,40 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
   document.body.addEventListener('click', function(e) {
     var btn = e.target.closest && e.target.closest('.select-pkg-btn');
-    if (!btn) return;
-    var id = btn.getAttribute('data-package-id');
-    if (id) setSelection(id);
+    if (btn) {
+      var id = btn.getAttribute('data-package-id');
+      if (id) setSelection(id);
+      return;
+    }
+    var card = e.target.closest && e.target.closest('.pkg-card[data-package-id]');
+    if (card && !e.target.closest('a')) {
+      setSelection(card.getAttribute('data-package-id'));
+    }
+  });
+
+  // DEEP-LINK HANDLING — #pkg-RLN_007 selects that package; jumping to #mapPanel scrolls to map
+  function handleHash() {
+    var h = (location.hash || '').replace(/^#/, '');
+    if (!h) return;
+    if (h === 'mapPanel') return;
+    if (h.indexOf('pkg-') === 0) {
+      var matched = packages.find(function(p) { return pkgAnchor(p.id) === h; });
+      if (matched) setSelection(matched.id);
+    }
+  }
+  window.addEventListener('hashchange', handleHash);
+  handleHash();
+
+  // Map-link buttons in cards / rows / reports — also select the package and (when going to #mapPanel) smooth-scroll.
+  document.body.addEventListener('click', function(e) {
+    var a = e.target.closest && e.target.closest('a.pkg-card-link-btn, a.pkg-row-link, a.select-pkg-link');
+    if (!a) return;
+    var id = a.getAttribute('data-package-id');
+    if (id && pkgIndex[id] != null) setSelection(id, { zoom: true });
+    if (a.getAttribute('href') === '#mapPanel') {
+      var mp = document.getElementById('mapPanel');
+      if (mp && mp.scrollIntoView) { e.preventDefault(); mp.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    }
   });
 })();
 `;
@@ -6797,90 +6925,160 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<head>',
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-    '<title>Pipe Relining Package Report</title>',
+    '<title>NBC Pipe Relining Package Report</title>',
     '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous">',
     '<style>',
-    '* { box-sizing: border-box; }',
+    '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }',
+    ':root { --teal:#00847F; --teal-l:#00A89D; --teal-d:#005F5B; --navy:#1A2B3C; --navy-l:#243447; --panel:#F7F9FA; --border:#DDE3E8; --text:#1A2B3C; --text-l:#5A6B7A; --r:8px; }',
     'html, body { margin: 0; padding: 0; }',
-    'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f6f8fb; color: #1f2937; font-size: 14px; line-height: 1.5; }',
-    'header.report-header { background: linear-gradient(135deg, #0f1d3a 0%, #103e6e 100%); color: #fff; padding: 22px 28px; }',
-    'header.report-header h1 { margin: 0; font-size: 22px; letter-spacing: 0.4px; }',
-    'header.report-header .kicker { color: #b8d6f0; font-size: 12px; text-transform: uppercase; letter-spacing: 1.2px; margin-bottom: 6px; }',
-    'header.report-header .meta { font-size: 12px; color: #c0d8f0; margin-top: 6px; }',
-    'main { padding: 24px 28px; max-width: 1400px; margin: 0 auto; }',
-    'section { margin-bottom: 28px; }',
-    'h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: #0f1d3a; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin: 0 0 14px 0; }',
-    '.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }',
-    '.stat-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; }',
-    '.stat-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #64748b; }',
-    '.stat-card .value { font-size: 22px; font-weight: 700; color: #0f1d3a; margin-top: 4px; }',
-    '.options-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px 16px; margin-top: 12px; }',
-    '.options-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px; color: #64748b; margin-bottom: 8px; }',
-    '.options-card dl { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 4px 16px; }',
-    '.options-card dt { font-weight: 600; color: #475569; font-size: 12px; }',
-    '.options-card dd { margin: 0 0 6px 0; color: #1f2937; font-size: 13px; }',
-    '#map { height: 520px; border: 1px solid #e5e7eb; border-radius: 8px; background: #e3edf7; }',
-    '.map-warning { padding: 14px 16px; background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; border-radius: 8px; font-size: 13px; }',
-    '.selection-bar { display: flex; gap: 12px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; }',
-    '.selection-bar .info { font-size: 13px; color: #1f2937; flex: 1; }',
-    '.clear-btn { padding: 6px 12px; background: #fef3c7; border: 1px solid #f59e0b; color: #78350f; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 700; }',
-    '.clear-btn:hover:not(:disabled) { background: #fde68a; }',
-    '.clear-btn:disabled { opacity: 0.4; cursor: not-allowed; }',
-    'table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }',
-    'thead { background: #f1f5f9; position: sticky; top: 0; z-index: 1; }',
-    'th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e5e7eb; font-size: 13px; }',
-    'th { font-weight: 600; color: #334155; user-select: none; white-space: nowrap; }',
-    'tbody tr:hover { background: #f8fafc; }',
-    'tbody tr.selected { background: #fef3c7 !important; }',
-    'tbody tr.package-row, tbody tr[data-asset] { cursor: pointer; }',
-    '.package-row .expand-cell { color: #94a3b8; user-select: none; width: 24px; text-align: center; }',
-    '.package-details td { background: #fafbfc; padding: 14px 18px; }',
-    '.reasoning .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px; color: #94a3b8; font-weight: 700; margin-bottom: 6px; }',
-    '.reasoning ul { margin: 0 0 0 18px; padding: 0; }',
-    '.reasoning li { font-size: 12.5px; line-height: 1.65; color: #475569; margin: 0 0 2px 0; }',
-    '.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; align-items: center; }',
-    '.filter-bar select, .filter-bar input { padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 13px; background: #fff; min-width: 140px; }',
-    '.filter-bar input[type="search"] { min-width: 220px; flex: 1; }',
-    '.filter-bar label { font-size: 12px; color: #475569; font-weight: 600; }',
-    '.pipe-color { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }',
-    '.num { text-align: right; font-variant-numeric: tabular-nums; }',
-    '.scroll-table { max-height: 580px; overflow: auto; border-radius: 8px; }',
-    'footer { text-align: center; padding: 18px; color: #94a3b8; font-size: 11px; }',
-    '.empty { padding: 20px; text-align: center; color: #94a3b8; font-style: italic; }',
+    "body { font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.5; }",
+    '.report-app-header { background: var(--navy); color:#fff; height:52px; padding:0 16px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,.3); }',
+    '.report-app-left { display:flex; align-items:center; gap:12px; }',
+    '.report-logo { width:34px; height:34px; background:var(--teal); border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; }',
+    '.report-app-title { font-size:15px; font-weight:700; line-height:1.2; }',
+    '.report-app-sub { font-size:10px; color:#6B8A99; text-transform:uppercase; letter-spacing:.06em; }',
+    '.report-app-right { font-size:11px; color:#6B8A99; }',
+    'main.pkg-shell { max-width:1480px; margin:0 auto; padding:20px; display:flex; flex-direction:column; gap:16px; }',
+    '.lbl { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text-l); margin-bottom:8px; }',
+    '.lbl-mini { display:block; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-l); margin-bottom:2px; }',
+    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:22px 24px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }',
+    '.pkg-title { font-size:24px; font-weight:800; margin-bottom:4px; }',
+    '.pkg-sub { font-size:12px; color:rgba(255,255,255,.72); line-height:1.5; max-width:780px; }',
+    '.pkg-status-chip { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }',
+    '.pkg-dot { width:8px; height:8px; border-radius:50%; background:#27AE60; }',
+    '.pkg-panel { background:#fff; border:1px solid var(--border); border-radius:var(--r); padding:16px; }',
+    '.pkg-meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }',
+    '.pkg-meta-item { background:var(--panel); border:1px solid var(--border); border-radius:var(--r); padding:12px; }',
+    '.pkg-meta-lbl { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-l); margin-bottom:4px; }',
+    '.pkg-meta-val { font-size:13px; font-weight:700; color:var(--navy); word-break:break-word; }',
+    '.pkg-assumptions { font-size:12px; color:var(--text-l); line-height:1.7; }',
+    '.pkg-assumptions ul { margin:0 0 0 18px; padding:0; }',
+    '.pkg-assumptions li { margin:0 0 2px 0; }',
+    '.pkg-assumptions code { background:var(--panel); border:1px solid var(--border); border-radius:4px; padding:1px 4px; font-size:11px; }',
+    '.pkg-assumptions strong { color:var(--navy); }',
+    '.pkg-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; }',
+    '.pkg-card { background:#fff; border:1px solid var(--border); border-radius:var(--r); padding:14px; display:flex; flex-direction:column; gap:8px; transition:border-color .15s, box-shadow .15s; }',
+    '.pkg-card.selected { border-color:var(--teal); box-shadow:0 0 0 2px rgba(0,132,127,.18); }',
+    '.pkg-card.pkg-card-link { cursor:pointer; }',
+    '.pkg-card.pkg-card-link:hover { border-color:var(--teal-l); }',
+    '.pkg-card-head { display:flex; align-items:center; gap:8px; }',
+    '.pkg-card-title { font-size:13px; font-weight:800; letter-spacing:.04em; color:var(--navy); }',
+    '.pkg-card-val { font-size:28px; font-weight:900; color:var(--teal-d); line-height:1; }',
+    '.pkg-card-val-unit { font-size:12px; font-weight:600; color:var(--text-l); margin-left:4px; }',
+    '.pkg-card-sub { font-size:11px; color:var(--text-l); }',
+    '.pkg-card-dl { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; font-size:11.5px; }',
+    '.pkg-card-dl dt { font-weight:600; color:var(--text-l); }',
+    '.pkg-card-dl dd { color:var(--text); margin:0; font-variant-numeric:tabular-nums; }',
+    '.pkg-card-warn { font-size:11px; color:#b91c1c; background:#fef2f2; border:1px solid #fee2e2; border-radius:4px; padding:6px 8px; }',
+    '.pkg-card-actions { margin-top:auto; }',
+    '.pkg-card-link-btn { display:inline-flex; align-items:center; gap:4px; padding:6px 10px; background:var(--panel); color:var(--navy); text-decoration:none; font-size:11px; font-weight:700; border:1px solid var(--border); border-radius:6px; }',
+    '.pkg-card-link-btn:hover { background:#fff; border-color:var(--teal); color:var(--teal-d); }',
+    '.pipe-color { display:inline-block; width:10px; height:10px; border-radius:50%; vertical-align:middle; flex-shrink:0; }',
+    '.pkg-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--r); background:#fff; }',
+    '.pkg-table-wrap.scroll { max-height:560px; }',
+    'table { width:100%; border-collapse:collapse; font-size:12px; }',
+    'th { padding:8px 12px; background:var(--navy); color:#fff; font-weight:600; text-align:left; white-space:nowrap; position:sticky; top:0; z-index:1; }',
+    'th.r { text-align:right; }',
+    'td { padding:7px 12px; border-bottom:1px solid var(--border); vertical-align:top; }',
+    'td.r { text-align:right; font-variant-numeric:tabular-nums; }',
+    'tr:nth-child(even) td { background:var(--panel); }',
+    'tbody tr.package-row { cursor:pointer; }',
+    'tbody tr.package-row:hover td { background:#E8F5F4; }',
+    'tbody tr.package-row.selected td { background:#FEF3C7 !important; }',
+    'tbody tr[data-asset] { cursor:pointer; }',
+    'tbody tr[data-asset].selected td { background:#FEF3C7 !important; }',
+    '.pkg-row-link { color:var(--teal-d); text-decoration:none; font-weight:700; }',
+    '.pkg-row-link:hover { text-decoration:underline; }',
+    '.pkg-empty { font-size:12px; color:var(--text-l); padding:16px; background:#fff; border:1px dashed var(--border); border-radius:var(--r); }',
+    '.pkg-empty-cell { padding:20px; text-align:center; color:var(--text-l); font-style:italic; }',
+    '.cctv-map-wrap { height:720px; background:#fff; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; display:flex; flex-direction:column; }',
+    '.cctv-map-toolbar { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px; background:#F8FAFB; }',
+    '.cctv-map-title { font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-l); }',
+    '.cctv-map-sub { font-size:11px; color:var(--text-l); margin-top:3px; }',
+    '.ca-actions { display:flex; gap:10px; flex-wrap:wrap; }',
+    '.export-btn { padding:7px 14px; background:var(--teal); color:#fff; border:none; border-radius:var(--r); font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }',
+    '.export-btn:hover:not(:disabled) { background:var(--teal-d); }',
+    '.export-btn:disabled { background:var(--border); color:var(--text-l); cursor:not-allowed; }',
+    '#map { flex:1; min-height:0; background:#e3edf7; }',
+    '.map-warning { padding:14px 16px; background:#FEF3C7; border:1px solid #F59E0B; color:#78350F; border-radius:var(--r); font-size:12px; margin:12px; }',
+    '.pkg-report { background:#fff; border:1px solid var(--border); border-radius:var(--r); padding:14px 16px; margin-bottom:12px; }',
+    '.pkg-report:last-child { margin-bottom:0; }',
+    '.pkg-report.selected { border-color:var(--teal); box-shadow:0 0 0 2px rgba(0,132,127,.18); }',
+    '.pkg-report-head { display:flex; align-items:center; gap:10px; margin-bottom:10px; }',
+    '.pkg-report-head h3 { font-size:14px; font-weight:800; color:var(--navy); letter-spacing:.04em; flex:1; }',
+    '.pkg-report-meta { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:8px; margin-bottom:10px; }',
+    '.pkg-report-meta > div { background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:12px; font-weight:700; color:var(--navy); }',
+    '.pkg-report-warn { font-size:11px; color:#b91c1c; background:#FEF2F2; border:1px solid #FEE2E2; border-radius:4px; padding:6px 8px; margin-bottom:10px; }',
+    '.pkg-report-bullets { background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:10px 14px; }',
+    '.pkg-report-bullets ul { margin:6px 0 0 18px; padding:0; font-size:12px; line-height:1.65; color:var(--text); }',
+    '.pkg-report-bullets li { margin:0 0 2px 0; }',
+    '.pkg-report-assets { margin-top:8px; font-size:11px; color:var(--text-l); word-break:break-word; }',
+    '.filter-bar { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px; align-items:center; }',
+    '.filter-bar select, .filter-bar input { padding:6px 8px; border:1.5px solid var(--border); border-radius:6px; font-size:12px; background:#fff; min-width:140px; }',
+    '.filter-bar input[type="search"] { min-width:220px; flex:1; }',
+    '.filter-bar label { font-size:11px; color:var(--text-l); font-weight:600; display:flex; flex-direction:column; gap:3px; }',
+    '.report-footer { text-align:center; padding:18px; color:var(--text-l); font-size:11px; }',
+    '@media print { .cctv-map-wrap { height:380px; page-break-inside:avoid; } .pkg-card-grid, .pkg-report-meta { page-break-inside:avoid; } .filter-bar { display:none; } body { background:#fff; } }',
     '</style>',
     '</head>',
     '<body>',
-    '<header class="report-header">',
-    '<div class="kicker">Pluviometrics</div>',
-    '<h1>Pipe Relining Package Report</h1>',
-    '<div class="meta" id="generatedMeta"></div>',
-    '</header>',
-    '<main>',
-    '<section><h2>Summary</h2><div class="stat-grid" id="statGrid"></div>',
-    '<div class="options-card"><div class="label">Packaging options</div><dl id="optionsList"></dl></div></section>',
-    '<section><h2>Package map</h2>',
-    '<div class="selection-bar">',
-    '<div class="info" id="selectedInfo"><span style="color:#94a3b8">No package selected</span></div>',
-    '<button type="button" class="clear-btn" id="clearBtn" disabled>Clear selection</button>',
+    '<header class="report-app-header">',
+    '<div class="report-app-left">',
+    '<div class="report-logo">NBC</div>',
+    '<div>',
+    '<div class="report-app-title">NBC Stormwater Tools</div>',
+    '<div class="report-app-sub">Northern Beaches Council · Stormwater</div>',
     '</div>',
-    '<div id="mapWrap"><div id="map"></div></div></section>',
-    '<section><h2>Packages</h2><div class="scroll-table"><table id="packagesTable"></table></div></section>',
-    '<section><h2>Pipes</h2>',
+    '</div>',
+    '<div class="report-app-right" id="generatedMeta"></div>',
+    '</header>',
+    '<main class="pkg-shell">',
+    '<div class="pkg-hero">',
+    '<div>',
+    '<div class="pkg-title">Pipe Relining Packaging — Report</div>',
+    '<div class="pkg-sub">Static read-only summary of generated packages. The data, options, costs, and reasoning shown here mirror the live tool at the time the report was produced.</div>',
+    '</div>',
+    '<div class="pkg-status-chip"><span class="pkg-dot"></span><span id="reportStatusText">Report</span></div>',
+    '</div>',
+    '<div class="pkg-panel"><div class="lbl">Run Summary</div><div class="pkg-meta" id="metaStrip"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Packaging Rules Used</div><div class="pkg-meta" id="optionsStrip"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Packaging Reasoning</div><div class="pkg-assumptions" id="overallReasoning"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Package Highlights</div><div class="pkg-card-grid" id="packageCards"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Generated Packages — Detail</div><div class="pkg-table-wrap"><table id="packagesTable"></table></div></div>',
+    '<div class="pkg-panel" id="mapPanel">',
+    '<div class="lbl">Package Map</div>',
+    '<div class="cctv-map-wrap">',
+    '<div class="cctv-map-toolbar">',
+    '<div>',
+    '<div class="cctv-map-title">Relining Package Map</div>',
+    '<div class="cctv-map-sub" id="mapSubtitle">No package selected</div>',
+    '</div>',
+    '<div class="ca-actions">',
+    '<button type="button" class="export-btn" id="fitBtn">Fit Packages</button>',
+    '<button type="button" class="export-btn" id="clearBtn" disabled>Clear Selection</button>',
+    '</div>',
+    '</div>',
+    '<div id="map"></div>',
+    '</div>',
+    '</div>',
+    '<div class="pkg-panel"><div class="lbl">Per-Package Written Reports</div><div id="packageReports"></div></div>',
+    '<div class="pkg-panel">',
+    '<div class="lbl">Pipes</div>',
     '<div class="filter-bar">',
     '<label>Package <select id="filterPackage"><option value="">All</option></select></label>',
     '<label>Suburb <select id="filterSuburb"><option value="">All</option></select></label>',
     '<label>Diameter <select id="filterDiameter"><option value="">All</option></select></label>',
     '<label>Condition <select id="filterCondition"><option value="">All</option></select></label>',
     '<input type="search" id="filterSearch" placeholder="Search asset, suburb, material, condition...">',
-    '<span style="font-size:12px;color:#475569">Showing <strong id="pipeCount">0</strong> pipes</span>',
+    '<span style="font-size:11px;color:var(--text-l)">Showing <strong id="pipeCount">0</strong> pipes</span>',
     '</div>',
-    '<div class="scroll-table"><table id="pipesTable"></table></div>',
-    '</section>',
+    '<div class="pkg-table-wrap scroll"><table id="pipesTable"></table></div>',
+    '</div>',
     '</main>',
-    '<footer>Pluviometrics relining package report &mdash; offline read-only view.</footer>',
-    '<script id="report-data" type="application/json">' + json + '<\/script>',
-    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\/script>',
-    '<script>' + runtimeJs + '<\/script>',
+    '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Report — read-only.</footer>',
+    '<script id="report-data" type="application/json">' + json + '<\\/script>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\\/script>',
+    '<script>' + runtimeJs + '<\\/script>',
     '</body>',
     '</html>'
   ].join('\n');
