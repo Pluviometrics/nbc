@@ -7607,7 +7607,7 @@ async function downloadReliningPackagesZip() {
       throw new Error("No packages found");
     }
     const expectedMapCount = packages.length;
-    const actualMapCount = Object.keys(zip.files).filter(f => f.startsWith("package_maps/")).length;
+    const actualMapCount = Object.keys(zip.files).filter(f => f.startsWith("package_maps/") && !zip.files[f].dir).length;
     if (actualMapCount !== expectedMapCount) {
       throw new Error(`Missing package maps: expected ${expectedMapCount}, got ${actualMapCount}`);
     }
