@@ -7596,7 +7596,21 @@ async function downloadReliningPackagesZip() {
         Math.round(totalCost),
         assets.map(a => a.assetId).join(', ')
       ]);
+
+      const mapHtml = buildSinglePackageMapHtml(pkg);
+      const mapFilename = `package_maps/${pkg.package_id}_map.html`;
+      console.log("Adding map:", mapFilename);
+      zip.file(mapFilename, mapHtml);
     });
+
+    if (!packages.length) {
+      throw new Error("No packages found");
+    }
+    const expectedMapCount = packages.length;
+    const actualMapCount = Object.keys(zip.files).filter(f => f.startsWith("package_maps/")).length;
+    if (actualMapCount !== expectedMapCount) {
+      throw new Error(`Missing package maps: expected ${expectedMapCount}, got ${actualMapCount}`);
+    }
 
     if (!csvNames.length) {
       throw new Error('ZIP validation failed: no package CSV files were generated.');
@@ -7623,23 +7637,6 @@ async function downloadReliningPackagesZip() {
       console.error('[ZIP] Failed to build package_report.html:', reportErr);
       throw new Error('package_report.html could not be built: ' + (reportErr && reportErr.message || reportErr));
     }
-
-    // per-package dedicated map HTML files — colours mirror the overview report's palette so they line up
-    const PKG_MAP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
-    const expectedMapNames = [];
-    const generatedAtIso = new Date().toISOString();
-    packages.forEach((pkg, i) => {
-      const color = PKG_MAP_PALETTE[i % PKG_MAP_PALETTE.length];
-      const mapFilename = reliningPackageMapFilename(pkg);
-      try {
-        const mapHtml = buildSinglePackageMapHtml(pkg, lastPackagingGeneration?.options || null, generatedAtIso, color);
-        zip.file(mapFilename, mapHtml);
-        expectedMapNames.push(mapFilename);
-      } catch (mapErr) {
-        console.error('[ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
-        throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
-      }
-    });
 
     // xlsx files
     if (typeof XLSX !== 'undefined') {
@@ -7671,8 +7668,6 @@ async function downloadReliningPackagesZip() {
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
-    const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
-    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
       const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
