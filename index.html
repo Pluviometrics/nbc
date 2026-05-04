@@ -6366,7 +6366,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
       address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
-      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -6665,10 +6664,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="11">No pipes match the current filters.</td></tr></tbody>'; return; }
+    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="10">No pipes match the current filters.</td></tr></tbody>'; return; }
     tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
       '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>' +
-      '<th>LGA H1-H6</th><th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
+      '<th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
@@ -6679,7 +6678,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td>' + esc(p.condition) + '</td>' +
           '<td class="r">' + fmtNum(p.length_m, 1) + '</td>' +
           '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>' +
-          '<td>' + esc(p.lga || '') + '</td>' +
           '<td>' + esc(p.upstream || '') + '</td>' +
           '<td>' + esc(p.downstream || '') + '</td></tr>';
       }).join('') + '</tbody>';
@@ -7116,7 +7114,6 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
       address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
-      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -7198,18 +7195,16 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   }
 
   // PIPES TABLE
-  var lgaCol = pipes.some(function(p){ return p.lga; });
   var upCol = pipes.some(function(p){ return p.upstream; });
   var dnCol = pipes.some(function(p){ return p.downstream; });
   var addrCol = pipes.some(function(p){ return p.address; });
   var headers = '<thead><tr><th>Asset</th><th>Suburb</th><th class="r">Diameter</th><th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>';
   if (addrCol) headers += '<th>Start Address</th>';
-  if (lgaCol) headers += '<th>LGA H1-H6</th>';
   if (upCol) headers += '<th>Upstream</th>';
   if (dnCol) headers += '<th>Downstream</th>';
   headers += '</tr></thead>';
   var rows = pipes.map(function(p) {
-    var r = '<tr>';
+    var r = '<tr data-asset="' + esc(p.asset_id) + '">';
     r += '<td>' + esc(p.asset_id) + '</td>';
     r += '<td>' + esc(p.suburb) + '</td>';
     r += '<td class="r">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>';
@@ -7218,17 +7213,40 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
     r += '<td class="r">' + fmtNum(p.length_m, 1) + '</td>';
     r += '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>';
     if (addrCol) r += '<td>' + esc(p.address) + '</td>';
-    if (lgaCol) r += '<td>' + esc(p.lga) + '</td>';
     if (upCol) r += '<td>' + esc(p.upstream) + '</td>';
     if (dnCol) r += '<td>' + esc(p.downstream) + '</td>';
     r += '</tr>';
     return r;
   }).join('');
-  document.getElementById('pipesTable').innerHTML = headers + '<tbody>' + (rows || '<tr><td colspan="11" class="pkg-empty-cell">No pipes in this package.</td></tr>') + '</tbody>';
+  document.getElementById('pipesTable').innerHTML = headers + '<tbody>' + (rows || '<tr><td class="pkg-empty-cell" colspan="10">No pipes in this package.</td></tr>') + '</tbody>';
 
   // MAP
   var map = null;
   var bounds = null;
+  var assetMarkers = {};
+  var selectedAsset = null;
+
+  function highlightAsset(asset) {
+    Object.keys(assetMarkers).forEach(function(a) {
+      var m = assetMarkers[a];
+      if (a === asset) {
+        m.setStyle({ radius: 11, color: '#111827', weight: 3, fillColor: '#FFD166', fillOpacity: 1 });
+        if (m.bringToFront) m.bringToFront();
+      } else {
+        m.setStyle({ radius: 6, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+      }
+    });
+    selectedAsset = asset;
+  }
+
+  function focusAsset(asset) {
+    var m = assetMarkers[asset];
+    if (!m || !map) return;
+    highlightAsset(asset);
+    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 17), { duration: 0.5 });
+    setTimeout(function(){ m.openPopup(); }, 350);
+  }
+
   function initMap() {
     var mapEl = document.getElementById('map');
     if (typeof L === 'undefined') {
@@ -7279,10 +7297,10 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
         'Length: ' + fmtNum(p.length_m, 1) + ' m' +
         (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
         (p.address ? '<br>Address: ' + esc(p.address) : '') +
-        (p.lga ? '<br>LGA: ' + esc(p.lga) : '') +
         (p.upstream ? '<br>Upstream: ' + esc(p.upstream) : '') +
         (p.downstream ? '<br>Downstream: ' + esc(p.downstream) : '')
       );
+      if (p.asset_id) assetMarkers[p.asset_id] = marker;
       marker.addTo(map);
     });
     if (centroid) {
@@ -7306,6 +7324,32 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
 
   document.getElementById('fitBtn').addEventListener('click', function(){
     if (map && bounds) map.fitBounds(bounds);
+    Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
+    selectedAsset = null;
+  });
+
+  // Pipe row click → highlight row + zoom map to marker + open popup
+  document.getElementById('pipesTable').addEventListener('click', function(e) {
+    var tr = e.target.closest && e.target.closest('tr[data-asset]');
+    if (!tr) return;
+    var asset = tr.getAttribute('data-asset');
+    if (!asset) return;
+    Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
+    tr.classList.add('selected');
+    focusAsset(asset);
+  });
+
+  // Marker click → also highlight matching row
+  Object.keys(assetMarkers).forEach(function(asset) {
+    assetMarkers[asset].on('click', function() {
+      Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
+      var tr = document.querySelector('#pipesTable tr[data-asset="' + asset.replace(/"/g, '\\"') + '"]');
+      if (tr) {
+        tr.classList.add('selected');
+        if (tr.scrollIntoView) tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      highlightAsset(asset);
+    });
   });
 })();
 `;
@@ -7358,6 +7402,9 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
     'td { padding:7px 12px; border-bottom:1px solid var(--border); vertical-align:top; }',
     'td.r { text-align:right; font-variant-numeric:tabular-nums; }',
     'tr:nth-child(even) td { background:var(--panel); }',
+    'tbody tr[data-asset] { cursor:pointer; }',
+    'tbody tr[data-asset]:hover td { background:#E8F5F4; }',
+    'tbody tr[data-asset].selected td { background:#FEF3C7 !important; }',
     '.pkg-empty-cell { padding:20px; text-align:center; color:var(--text-l); font-style:italic; }',
     '.report-footer { text-align:center; padding:18px; color:var(--text-l); font-size:11px; }',
     '.back-link { text-align:center; padding:10px; }',
@@ -7434,7 +7481,6 @@ function buildSinglePackageKml(pkg) {
       ? Math.round(Number(diameterRaw)) + ' mm' : '';
     const upstream = raw['SW_Upstream Node'] ?? raw['SW_Upstream_Node'] ?? raw['Upstream Node'] ?? '';
     const downstream = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
-    const lga = raw['SW LGA 20% H1-H6'] ?? raw['SW_LGA_20%_H1-H6'] ?? raw['LGA'] ?? '';
     const condition = item.conditionLabel || raw['SW_Condition'] || item.condition || '';
     const lengthM = Number.isFinite(item.lengthM) && item.lengthM > 0 ? item.lengthM.toFixed(1) + ' m' : '';
     const cost = fmtCurrencyKml(item.pipeCost);
@@ -7459,8 +7505,7 @@ function buildSinglePackageKml(pkg) {
       + '<b>Downstream:</b> ' + cdataEsc(downstream || '—') + '<br>'
       + '<b>Length:</b> ' + cdataEsc(lengthM || '—') + '<br>'
       + '<b>Cost:</b> ' + cdataEsc(cost || '—') + '<br>'
-      + '<b>Condition:</b> ' + cdataEsc(condition || '—') + '<br>'
-      + '<b>LGA H1-H6:</b> ' + cdataEsc(lga || '—') + ']]>';
+      + '<b>Condition:</b> ' + cdataEsc(condition || '—') + ']]>';
     return '<Placemark>'
       + '<name>' + xmlEsc(pkgId + ' — ' + assetId) + '</name>'
       + '<description>' + desc + '</description>'
