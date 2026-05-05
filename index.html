@@ -7554,11 +7554,10 @@ async function downloadReliningPackagesZip() {
   try {
     const HEADERS = [
       'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
-      'SW_Condition', 'Score', 'criticality_1dp', 'diameter_weight',
-      'condition_score', 'pipe_priority_score',
+      'SW_Condition', 'Observed_Condition', 'criticality_1dp',
       'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
       'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
-      'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Number of Pipes'
+      'Diameters (mm)', 'Max Distance Between Pipes (km)'
     ];
     const expectedHeader = HEADERS.join(',');
 
@@ -7606,11 +7605,7 @@ async function downloadReliningPackagesZip() {
     }
 
     function pkgFilename(pkg) {
-      const suburbs = packageSuburbs(pkg)
-        .map(s => s.replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, ''))
-        .filter(Boolean)
-        .join('_') || 'UNKNOWN';
-      return `${pkg.package_id}_${suburbs}_D${primaryFilenameDiameter(pkg) || 'UNKNOWN'}mm.csv`;
+      return `${pkg.package_id}_pipes.csv`;
     }
 
     function maxDistanceText(pkg) {
@@ -7641,15 +7636,13 @@ async function downloadReliningPackagesZip() {
         const raw = item.raw || {};
         const diam = Math.round(item.diameterMm ?? 0);
         const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
-        const dw = Number(item.diameter_weight ?? reliningDiameterWeight(item.diameterMm));
-        const cs = Number(item.condition_score ?? 0);
-        const pps = Number(item.pipe_priority_score ?? 0);
         const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
         const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
         totalLengthM += lenM;
         totalCost += cost;
 
         const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
+        const rawObserved = String(getValueByAliases(raw, ['Observed_Condition', 'Observed Condition']) || '').trim();
         const rawLga   = raw['SW LGA 20% H1-H6'] ?? raw['SW_LGA_20%_H1-H6'] ?? raw['LGA'] ?? '';
         const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
         const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
@@ -7661,19 +7654,15 @@ async function downloadReliningPackagesZip() {
           diam || '',
           lenM ? lenM.toFixed(1) + ' m' : '',
           raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
-          rawScore,
+          rawObserved,
           score1dp(rawScore || crit),
-          dw.toFixed(1),
-          cs.toFixed(1),
-          pps.toFixed(1),
           rawLga, rawUp, rawDown,
           Number.isFinite(item.ratePerM) ? item.ratePerM : '',
           cost ? fmtCurrency(cost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
           diametersStr,
-          maxDist,
-          ''   // Number of Pipes blank on data rows
+          maxDist
         ]));
       });
 
@@ -7684,7 +7673,6 @@ async function downloadReliningPackagesZip() {
       totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
       totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
       totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
-      totalsRow[HEADERS.indexOf('Number of Pipes')]    = assets.length;
       lines.push(csvRow(totalsRow));
 
       const csvContent = lines.join('\n');
