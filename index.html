@@ -9467,7 +9467,7 @@ async function downloadCctvPackagesZip() {
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'cctv_rate_per_hour', 'package_total_cost', 'Address', 'Asset Suburb',
-      'Diameters (mm)', 'Max Distance Between Pipes (km)'
+      'Max Distance Between Pipes (km)'
     ];
     const expectedHeader = HEADERS.join(',');
 
@@ -9552,7 +9552,6 @@ async function downloadCctvPackagesZip() {
           pkgTotalCost ? fmtCurrency(pkgTotalCost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
-          diametersStr,
           maxDist
         ]));
       });
@@ -9561,7 +9560,6 @@ async function downloadCctvPackagesZip() {
       totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
       totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
       totalsRow[HEADERS.indexOf('package_total_cost')] = fmtCurrency(pkgTotalCost);
-      totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
       totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
       lines.push(csvRow(totalsRow));
 
