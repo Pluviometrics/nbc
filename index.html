@@ -7104,9 +7104,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ].join('\n');
 }
 
-function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
+function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind) {
   options = options || {};
   packageColor = packageColor || '#00847F';
+  const mapTitleSuffix = kind === 'cctv' ? 'CCTV Inspection Map' : 'Pipe Relining Map';
   const assets = pkg.assets || [];
   const reportPipes = assets.map(item => {
     const raw = item.raw || {};
@@ -7157,7 +7158,8 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
       condition_7_count: pkg.condition_7_count || 0,
       condition_8_count: pkg.condition_8_count || 0,
       centroid: centroid,
-      color: packageColor
+      color: packageColor,
+      map_title_suffix: mapTitleSuffix
     },
     pipes: reportPipes,
     options: options
@@ -7182,8 +7184,9 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
-  document.getElementById('mapTitle').textContent = pkg.id + ' — Pipe Relining Map';
-  document.title = pkg.id + ' — Pipe Relining Map';
+  var titleSuffix = pkg.map_title_suffix || 'Pipe Relining Map';
+  document.getElementById('mapTitle').textContent = pkg.id + ' — ' + titleSuffix;
+  document.title = pkg.id + ' — ' + titleSuffix;
   document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
   document.getElementById('subtitle').textContent = (pkg.suburbs||[]).join(', ') || '—';
 
@@ -7940,7 +7943,7 @@ function updateReliningSelectedMapOverlay() {
   reliningSelectedLeaderSvg.style.display = 'block';
 }
 
-function getReliningPipeCentreLatLng(item) {
+function getPackagePipeCentreLatLng(item) {
   if (!item) return null;
   const raw = item.raw || {};
   const start = resolveLineCoordinatePair(raw, true);
@@ -7957,6 +7960,10 @@ function getReliningPipeCentreLatLng(item) {
   if (!candidate) return null;
   if (candidate.lat < -90 || candidate.lat > 90 || candidate.lon < -180 || candidate.lon > 180) return null;
   return candidate;
+}
+
+function getReliningPipeCentreLatLng(item) {
+  return getPackagePipeCentreLatLng(item);
 }
 
 function renderReliningPackagesMap(options = {}) {
@@ -9343,6 +9350,7 @@ function renderGeneratedCctvPackages(packages) {
         Total length ${totalLength.toLocaleString(undefined, { maximumFractionDigits: 1 })} m · Estimated CCTV cost ${formatCurrency(totalCost)}
       </div>
       <div style="margin-top:10px">
+        <button class="export-btn" onclick="downloadCctvPackagesZip()">Download ZIP</button>
         <button class="export-btn" onclick="exportCctvPackagesCsv()">Export ESRI CSV</button>
       </div>
     </div>
@@ -9435,6 +9443,233 @@ function exportCctvPackagesCsv() {
 
   const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
   origPriDownload(`cctv_packages_esri_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
+function cctvPackageMapFilename(pkg) {
+  const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+  return `package_maps/${safe}_map.html`;
+}
+
+async function downloadCctvPackagesZip() {
+  const packages = lastCctvPackagingGeneration?.packages || [];
+  if (!packages.length) {
+    alert('Generate CCTV packages before downloading.');
+    return;
+  }
+  if (typeof JSZip === 'undefined') {
+    alert('JSZip library not loaded. Please refresh the page and try again.');
+    return;
+  }
+
+  try {
+    const HEADERS = [
+      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'SW_Condition', 'Observed_Condition',
+      'SW_Upstream Node', 'SW_Downstream Node',
+      'cctv_rate_per_hour', 'package_total_cost', 'Address', 'Asset Suburb',
+      'Diameters (mm)', 'Max Distance Between Pipes (km)'
+    ];
+    const expectedHeader = HEADERS.join(',');
+
+    function fmtCurrency(v, cents = true) {
+      if (!Number.isFinite(v)) return '';
+      return '$' + v.toLocaleString('en-AU', {
+        minimumFractionDigits: cents ? 2 : 0,
+        maximumFractionDigits: cents ? 2 : 0
+      });
+    }
+
+    function csvCell(v) {
+      const s = String(v ?? '');
+      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
+    }
+
+    function csvRow(arr) { return arr.map(csvCell).join(','); }
+
+    function packageDiameters(pkg) {
+      return [...new Set((pkg.assets || []).map(a => Math.round(Number(a.diameterMm) || 0)).filter(d => d > 0))]
+        .sort((a, b) => a - b);
+    }
+
+    function packageDiametersText(pkg) {
+      return packageDiameters(pkg).join(', ');
+    }
+
+    function packageSuburbs(pkg) {
+      return (pkg.suburbs || [pkg.suburb || 'UNKNOWN'])
+        .map(s => String(s || '').trim().toUpperCase())
+        .filter(Boolean);
+    }
+
+    function pkgFilename(pkg) {
+      return `${pkg.package_id}_pipes.csv`;
+    }
+
+    function maxDistanceText(pkg) {
+      return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
+    }
+
+    const zip = new JSZip();
+    const csvNames = [];
+    const summaryLines = ['CCTV PACKAGE SUMMARY', '='.repeat(60), ''];
+    const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Length (m)', 'CCTV Hours', 'Cost ($)', 'Asset IDs']];
+
+    packages.forEach((pkg, index) => {
+      const assets = pkg.assets || [];
+      const diametersStr = packageDiametersText(pkg);
+      const maxDist = maxDistanceText(pkg);
+      const suburbs = packageSuburbs(pkg).join(', ');
+      const cctvRate = Number(pkg.cctv_rate || 0);
+      const pkgTotalCost = Number(pkg.total_cost || 0);
+
+      const lines = [csvRow(HEADERS)];
+      let totalLengthM = 0;
+
+      assets.forEach(item => {
+        const raw = item.raw || {};
+        const diam = Math.round(item.diameterMm ?? 0);
+        const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
+        totalLengthM += lenM;
+
+        const rawObserved = String(getValueByAliases(raw, ['Observed_Condition', 'Observed Condition']) || '').trim();
+        const rawCondition = String(getValueByAliases(raw, ['SW_Condition']) || item.conditionLabel || '').trim();
+        const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
+        const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
+        const rawAddr  = raw['Formatted_Address'] ?? '';
+
+        lines.push(csvRow([
+          pkg.package_id,
+          item.assetId,
+          diam || '',
+          lenM ? lenM.toFixed(1) + ' m' : '',
+          rawCondition,
+          rawObserved,
+          rawUp, rawDown,
+          cctvRate ? fmtCurrency(cctvRate) : '',
+          pkgTotalCost ? fmtCurrency(pkgTotalCost) : '',
+          rawAddr,
+          String(item.suburb || '').toUpperCase(),
+          diametersStr,
+          maxDist
+        ]));
+      });
+
+      const totalsRow = HEADERS.map(() => '');
+      totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
+      totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
+      totalsRow[HEADERS.indexOf('package_total_cost')] = fmtCurrency(pkgTotalCost);
+      totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
+      totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
+      lines.push(csvRow(totalsRow));
+
+      const csvContent = lines.join('\n');
+      const baseFilename = pkgFilename(pkg);
+      if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
+        throw new Error(`ZIP validation failed: ${baseFilename} has the wrong header.`);
+      }
+      let filename = baseFilename;
+      if (csvNames.includes(filename)) {
+        const stem = baseFilename.replace(/\.csv$/i, '');
+        let suffix = 2;
+        while (csvNames.includes(`${stem}_${suffix}.csv`)) suffix++;
+        filename = `${stem}_${suffix}.csv`;
+      }
+      csvNames.push(filename);
+      zip.file(filename, '﻿' + csvContent);
+
+      summaryLines.push(`Package:    ${pkg.package_id}`);
+      summaryLines.push(`Suburb:     ${suburbs}`);
+      summaryLines.push(`Diameters:  ${diametersStr}`);
+      summaryLines.push(`Pipes:      ${assets.length}`);
+      summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}m`);
+      summaryLines.push(`Max Dist:   ${maxDist}`);
+      summaryLines.push(`CCTV hours: ${Number(pkg.cctv_hours || 0).toFixed(2)}`);
+      summaryLines.push(`Cost:       $${pkgTotalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
+      summaryLines.push('-'.repeat(60));
+      if (index < packages.length - 1) summaryLines.push('');
+      summaryRows.push([
+        pkg.package_id,
+        suburbs,
+        packageDiametersText(pkg),
+        maxDist,
+        assets.length,
+        Math.round(totalLengthM * 10) / 10,
+        Number(pkg.cctv_hours || 0).toFixed(2),
+        Math.round(pkgTotalCost),
+        assets.map(a => a.assetId).join(', ')
+      ]);
+    });
+
+    if (!csvNames.length) {
+      throw new Error('ZIP validation failed: no package CSV files were generated.');
+    }
+    zip.file('package_summary.txt', summaryLines.join('\n'));
+
+    const sortedCsvNames = csvNames.slice().sort();
+    zip.file('file_list.txt', ['CCTV PACKAGE FILE LIST', '='.repeat(60), '', ...sortedCsvNames].join('\n'));
+
+    const PKG_MAP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
+    const expectedMapNames = [];
+    const generatedAtIso = new Date().toISOString();
+    const cctvOptions = lastCctvPackagingGeneration?.options || null;
+    packages.forEach((pkg, i) => {
+      const color = PKG_MAP_PALETTE[i % PKG_MAP_PALETTE.length];
+      const mapFilename = cctvPackageMapFilename(pkg);
+      try {
+        const mapHtml = buildSinglePackageMapHtml(pkg, cctvOptions, generatedAtIso, color, 'cctv');
+        zip.file(mapFilename, mapHtml);
+        expectedMapNames.push(mapFilename);
+      } catch (mapErr) {
+        console.error('[CCTV ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
+        throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
+      }
+    });
+
+    if (typeof XLSX !== 'undefined') {
+      const wbSummary = XLSX.utils.book_new();
+      const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+      XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'CCTV Package Summary');
+      zip.file('package_summary.xlsx', XLSX.write(wbSummary, { type: 'array', bookType: 'xlsx' }));
+
+      const wbFileList = XLSX.utils.book_new();
+      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedCsvNames.map(n => [n])]);
+      XLSX.utils.book_append_sheet(wbFileList, wsFileList, 'File List');
+      zip.file('file_list.xlsx', XLSX.write(wbFileList, { type: 'array', bookType: 'xlsx' }));
+    }
+
+    const blob = await zip.generateAsync({ type: 'blob' });
+    const checkZip = await JSZip.loadAsync(blob);
+    const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
+    const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
+    const zipCsvSet = new Set(zipCsvNames);
+    const missingFromZip = csvNames.filter(name => !zipCsvSet.has(name));
+    if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
+    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package CSV file(s) listed in file_list.txt are missing from the generated ZIP.`);
+    if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
+    if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
+    const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
+    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing.`);
+    for (const name of zipCsvNames) {
+      const csvText = await checkZip.file(name).async('string');
+      const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
+      if (firstLine !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
+    }
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `cctv_packages_${new Date().toISOString().slice(0, 10)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+
+  } catch (err) {
+    console.error('CCTV ZIP export error:', err);
+    alert('CCTV ZIP export failed: ' + err.message);
+  }
 }
 
 function ensureCctvPackagesMap() {
@@ -9607,6 +9842,13 @@ function renderCctvPackagesMap(options = {}) {
   }
 
   let drawn = 0;
+  let lineDrawn = 0;
+  let pointFallback = 0;
+  const cctvPipeWeight = (dia) => {
+    const d = Number(dia);
+    if (!d || isNaN(d) || d <= 0) return 2;
+    return Math.max(2, Math.min(12, d / 50));
+  };
   const mapPackages = selectedCctvPackageId
     ? packages.filter(pkg => pkg.package_id !== selectedCctvPackageId).concat(packages.filter(pkg => pkg.package_id === selectedCctvPackageId))
     : packages;
@@ -9616,41 +9858,44 @@ function renderCctvPackagesMap(options = {}) {
     if (!assets.length) return;
     const style = getCctvPackageMapStyle(pkg, packageIndex);
     const color = style.color;
-    const points = assets.map(item => [item.lat, item.lon]);
-    if (points.length > 1) {
-      const packageLine = L.polyline(points, {
-        color,
-        weight: style.isSelected ? 8 : 3,
-        opacity: style.isSelected ? 1 : (style.isDimmed ? 0.16 : 0.75),
-        dashArray: style.isSelected ? '' : '6 6'
-      }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
-      if (style.isSelected) {
-        L.polyline(points, { color: '#FFD166', weight: 18, opacity: 0.72 }).addTo(cctvPackagesLayer);
-        L.polyline(points, { color: '#111827', weight: 11, opacity: 0.95 }).addTo(cctvPackagesLayer);
-        L.polyline(points, { color: '#FFD166', weight: 5, opacity: 1 }).addTo(cctvPackagesLayer);
-      }
-    }
     assets.forEach(item => {
-      if (style.isSelected) {
-        L.circleMarker([item.lat, item.lon], {
-          radius: 18,
-          color: '#111827',
-          weight: 4,
-          fillColor: '#FFD166',
-          fillOpacity: 0.42
-        }).addTo(cctvPackagesLayer);
+      const raw = item.raw || {};
+      const startPair = resolveLineCoordinatePair(raw, true);
+      const endPair = resolveLineCoordinatePair(raw, false);
+      const hasLine = startPair && endPair
+        && Number.isFinite(startPair.lat) && Number.isFinite(startPair.lon)
+        && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
+        && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
+      const baseWeight = cctvPipeWeight(item.diameterMm);
+      if (hasLine) {
+        const line = L.polyline([[startPair.lat, startPair.lon], [endPair.lat, endPair.lon]], {
+          color,
+          weight: style.isSelected ? baseWeight + 2 : baseWeight,
+          opacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : 0.92)
+        }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
+        if (style.isSelected && line.bringToFront) line.bringToFront();
+        if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, line);
+        lineDrawn += 1;
+        drawn += 1;
+      } else {
+        if (style.isSelected) {
+          L.circleMarker([item.lat, item.lon], {
+            radius: 18, color: '#111827', weight: 4, fillColor: '#FFD166', fillOpacity: 0.42
+          }).addTo(cctvPackagesLayer);
+        }
+        const radius = style.isSelected ? 11 : (item.isTbaCondition ? 7 : 5);
+        const marker = L.circleMarker([item.lat, item.lon], {
+          radius,
+          color: style.isSelected ? '#111827' : '#fff',
+          weight: style.isSelected ? 3 : 1.5,
+          fillColor: color,
+          fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : (item.isTbaCondition ? 0.95 : 0.78)),
+          opacity: style.isDimmed ? 0.5 : 1
+        }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
+        if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, marker);
+        pointFallback += 1;
+        drawn += 1;
       }
-      const radius = style.isSelected ? 11 : (item.isTbaCondition ? 7 : 5);
-      const assetMarker = L.circleMarker([item.lat, item.lon], {
-        radius,
-        color: style.isSelected ? '#111827' : '#fff',
-        weight: style.isSelected ? 3 : 1.5,
-        fillColor: color,
-        fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.18 : (item.isTbaCondition ? 0.95 : 0.78)),
-        opacity: style.isDimmed ? 0.2 : 1
-      }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
-      if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, assetMarker);
-      drawn += 1;
     });
     if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
       const focusMarker = L.circleMarker([pkg.lat, pkg.lon], {
@@ -9668,8 +9913,41 @@ function renderCctvPackagesMap(options = {}) {
       cctvPackageFocusLayers.set(pkg.package_id, focusMarker);
     }
   });
+  if (selectedPackage) {
+    const centres = (selectedPackage.assets || [])
+      .map(item => getPackagePipeCentreLatLng(item))
+      .filter(pt => pt
+        && Number.isFinite(pt.lat) && Number.isFinite(pt.lon)
+        && pt.lat >= -90 && pt.lat <= 90
+        && pt.lon >= -180 && pt.lon <= 180);
+    if (centres.length >= 2) {
+      const ordered = [centres[0]];
+      const remaining = centres.slice(1);
+      while (remaining.length) {
+        const last = ordered[ordered.length - 1];
+        let bestIdx = 0;
+        let bestDistSq = Infinity;
+        for (let i = 0; i < remaining.length; i += 1) {
+          const dLat = remaining[i].lat - last.lat;
+          const dLon = remaining[i].lon - last.lon;
+          const distSq = dLat * dLat + dLon * dLon;
+          if (distSq < bestDistSq) { bestDistSq = distSq; bestIdx = i; }
+        }
+        ordered.push(remaining.splice(bestIdx, 1)[0]);
+      }
+      const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
+        color: '#111827',
+        weight: 2.25,
+        opacity: 0.9,
+        dashArray: '4 6',
+        interactive: false
+      }).addTo(cctvPackagesLayer);
+      if (connector.bringToFront) connector.bringToFront();
+    }
+  }
   if (subtitle) {
-    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${drawn.toLocaleString()} pipe point${drawn === 1 ? '' : 's'}. Each package has a distinct colour${selectedCctvPackageId ? `; ${selectedCctvPackageId} is highlighted.` : '.'}`;
+    const fallbackNote = pointFallback ? ` (${pointFallback.toLocaleString()} drawn as fallback markers — missing endpoints)` : '';
+    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${lineDrawn.toLocaleString()} pipe line${lineDrawn === 1 ? '' : 's'}${fallbackNote}.${selectedCctvPackageId ? ` ${selectedCctvPackageId} is highlighted.` : ''}`;
   }
   renderCctvSelectedMapOverlay();
   if (!selectedPackage && options.fit !== false) fitCctvPackagesMap();
