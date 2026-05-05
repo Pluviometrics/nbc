@@ -7954,6 +7954,29 @@ function updateReliningSelectedMapOverlay() {
   reliningSelectedLeaderSvg.style.display = 'block';
 }
 
+function getReliningPipeCentreLatLng(item) {
+  if (!item) return null;
+  const xMid = Number.isFinite(item.xMid) ? item.xMid : null;
+  const yMid = Number.isFinite(item.yMid) ? item.yMid : null;
+  if (xMid !== null && yMid !== null) {
+    if (xMid > 1000 && yMid > 1000) {
+      const projected = utmToLatLng(xMid, yMid, 56, true);
+      if (projected && Number.isFinite(projected.lat) && Number.isFinite(projected.lon)) return projected;
+    }
+    if (yMid >= -35 && yMid <= -32 && xMid >= 150 && xMid <= 153) {
+      return { lat: yMid, lon: xMid };
+    }
+  }
+  const raw = item.raw || {};
+  const start = resolveLineCoordinatePair(raw, true);
+  const end = resolveLineCoordinatePair(raw, false);
+  if (start && end) return { lat: (start.lat + end.lat) / 2, lon: (start.lon + end.lon) / 2 };
+  if (start) return start;
+  if (end) return end;
+  if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) return { lat: item.lat, lon: item.lon };
+  return null;
+}
+
 function renderReliningPackagesMap(options = {}) {
   ensureReliningPackagesMap();
   const subtitle = document.getElementById('reliningMapSubtitle');
@@ -8054,6 +8077,35 @@ function renderReliningPackagesMap(options = {}) {
       reliningPackageFocusLayers.set(pkg.package_id, focusMarker);
     }
   });
+  if (selectedPackage) {
+    const centres = (selectedPackage.assets || [])
+      .map(item => getReliningPipeCentreLatLng(item))
+      .filter(pt => pt && Number.isFinite(pt.lat) && Number.isFinite(pt.lon));
+    if (centres.length >= 2) {
+      const ordered = [centres[0]];
+      const remaining = centres.slice(1);
+      while (remaining.length) {
+        const last = ordered[ordered.length - 1];
+        let bestIdx = 0;
+        let bestDistSq = Infinity;
+        for (let i = 0; i < remaining.length; i += 1) {
+          const dLat = remaining[i].lat - last.lat;
+          const dLon = remaining[i].lon - last.lon;
+          const distSq = dLat * dLat + dLon * dLon;
+          if (distSq < bestDistSq) { bestDistSq = distSq; bestIdx = i; }
+        }
+        ordered.push(remaining.splice(bestIdx, 1)[0]);
+      }
+      const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
+        color: '#111827',
+        weight: 2.25,
+        opacity: 0.9,
+        dashArray: '4 6',
+        interactive: false
+      }).addTo(reliningPackagesLayer);
+      if (connector.bringToFront) connector.bringToFront();
+    }
+  }
   if (subtitle) {
     const fallbackNote = pointFallback ? ` (${pointFallback.toLocaleString()} drawn as fallback markers — missing endpoints).` : '';
     subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${lineDrawn.toLocaleString()} pipe line${lineDrawn === 1 ? '' : 's'}${fallbackNote}${selectedReliningPackageId ? ` ${selectedReliningPackageId} is highlighted.` : ''}`;
