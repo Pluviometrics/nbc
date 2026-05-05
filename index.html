@@ -7956,25 +7956,21 @@ function updateReliningSelectedMapOverlay() {
 
 function getReliningPipeCentreLatLng(item) {
   if (!item) return null;
-  const xMid = Number.isFinite(item.xMid) ? item.xMid : null;
-  const yMid = Number.isFinite(item.yMid) ? item.yMid : null;
-  if (xMid !== null && yMid !== null) {
-    if (xMid > 1000 && yMid > 1000) {
-      const projected = utmToLatLng(xMid, yMid, 56, true);
-      if (projected && Number.isFinite(projected.lat) && Number.isFinite(projected.lon)) return projected;
-    }
-    if (yMid >= -35 && yMid <= -32 && xMid >= 150 && xMid <= 153) {
-      return { lat: yMid, lon: xMid };
-    }
-  }
   const raw = item.raw || {};
   const start = resolveLineCoordinatePair(raw, true);
   const end = resolveLineCoordinatePair(raw, false);
-  if (start && end) return { lat: (start.lat + end.lat) / 2, lon: (start.lon + end.lon) / 2 };
-  if (start) return start;
-  if (end) return end;
-  if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) return { lat: item.lat, lon: item.lon };
-  return null;
+  let candidate = null;
+  if (start && end
+      && Number.isFinite(start.lat) && Number.isFinite(start.lon)
+      && Number.isFinite(end.lat) && Number.isFinite(end.lon)) {
+    candidate = { lat: (start.lat + end.lat) / 2, lon: (start.lon + end.lon) / 2 };
+  } else if (Number.isFinite(item.xMid) && Number.isFinite(item.yMid)) {
+    const projected = utmToLatLng(item.xMid, item.yMid, 56, true);
+    if (projected && Number.isFinite(projected.lat) && Number.isFinite(projected.lon)) candidate = projected;
+  }
+  if (!candidate) return null;
+  if (candidate.lat < -90 || candidate.lat > 90 || candidate.lon < -180 || candidate.lon > 180) return null;
+  return candidate;
 }
 
 function renderReliningPackagesMap(options = {}) {
@@ -8080,7 +8076,11 @@ function renderReliningPackagesMap(options = {}) {
   if (selectedPackage) {
     const centres = (selectedPackage.assets || [])
       .map(item => getReliningPipeCentreLatLng(item))
-      .filter(pt => pt && Number.isFinite(pt.lat) && Number.isFinite(pt.lon));
+      .filter(pt => pt
+        && Number.isFinite(pt.lat) && Number.isFinite(pt.lon)
+        && pt.lat >= -90 && pt.lat <= 90
+        && pt.lon >= -180 && pt.lon <= 180);
+    console.info('[relining-map] connector centres for ' + selectedPackage.package_id + ':', centres);
     if (centres.length >= 2) {
       const ordered = [centres[0]];
       const remaining = centres.slice(1);
