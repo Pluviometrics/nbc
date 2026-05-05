@@ -282,6 +282,31 @@ body.busy-ui button,body.busy-ui .run-btn,body.busy-ui .export-btn{cursor:progre
 .pkg-empty{font-size:12px;color:var(--text-l);padding:16px;background:white;border:1px dashed var(--border);border-radius:var(--r)}
 .pkg-assumptions{margin-top:12px;font-size:11px;color:var(--text-l);line-height:1.7}
 .pkg-assumptions code{font-size:11px}
+
+/* Pipe Relining sub-tabs (page-relining only — namespaced to avoid colliding with the rainfall .tab/.tab-bar selectors) */
+.subtab-bar{display:flex;gap:4px;background:white;border:1px solid var(--border);border-radius:var(--r);padding:6px;align-self:flex-start}
+.subtab{padding:8px 16px;font-size:11px;font-weight:700;color:var(--text-l);cursor:pointer;border-radius:6px;transition:all .15s;letter-spacing:.05em;border:none;background:transparent;text-transform:uppercase;font-family:inherit}
+.subtab.active{background:var(--navy);color:white}
+.subtab:hover:not(.active){background:var(--panel);color:var(--navy)}
+#relining-subpage-main,#relining-subpage-edit{display:flex;flex-direction:column;gap:16px;width:100%}
+
+/* Edit Packages panel */
+.edit-pkg-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;background:white;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-l)}
+.edit-pkg-toolbar strong{color:var(--navy)}
+.edit-pkg-card{background:white;border:1px solid var(--border);border-radius:var(--r);padding:14px}
+.edit-pkg-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.edit-pkg-title{font-size:14px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.edit-pkg-meta{font-size:11px;color:var(--text-l);margin-top:3px}
+.edit-pkg-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;background:var(--panel);color:var(--text-l)}
+.edit-pkg-tag.manual{background:#FFE9A8;color:#7A5A00}
+.edit-pkg-tag.empty{background:#FAD2CF;color:#7B2D26}
+.edit-pkg-tag.moved{background:#D8EBE5;color:#0E5C4F}
+.edit-pkg-asset-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.7fr 0.7fr 0.9fr 2fr 0.7fr;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--border);align-items:center}
+.edit-pkg-asset-row:last-child{border-bottom:none}
+.edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border)}
+.edit-pkg-asset-row select{font-size:11px;padding:4px 6px;width:100%}
+.edit-pkg-empty-msg{color:var(--text-l);font-style:italic;font-size:12px;padding:10px 0}
+
 .fw-shell{max-width:none;margin:0;display:flex;flex-direction:column;gap:16px;overflow:auto;width:100%;min-height:0}
 .fw-hero{background:var(--navy);color:white;border-radius:var(--r);padding:22px 24px;display:flex;flex-direction:column;gap:10px}
 .fw-title{font-size:24px;font-weight:800}

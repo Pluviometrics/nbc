@@ -885,6 +885,12 @@ window.addEventListener('keydown', (event) => {
       <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
     </div>
 
+    <div class="subtab-bar">
+      <button class="subtab active" type="button" id="reliningSubtabMain" onclick="switchReliningSubtab('main')">Pipe Relining</button>
+      <button class="subtab" type="button" id="reliningSubtabEdit" onclick="switchReliningSubtab('edit')">Edit Packages</button>
+    </div>
+
+    <div id="relining-subpage-main">
     <div class="pkg-panel">
       <div class="lbl">Upload Required Files</div>
       <div class="pkg-grid" style="grid-template-columns:auto auto 1fr">
@@ -997,6 +1003,15 @@ window.addEventListener('keydown', (event) => {
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
         </div>
       </div>
+      <div id="pkgCostAdjustmentsRow" style="margin-top:14px">
+        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Cost Modifiers</div>
+        <div style="display:flex;gap:24px;font-size:12px;align-items:center;flex-wrap:wrap">
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
+            Apply project initiation multiplier (×1.15)
+          </label>
+        </div>
+      </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
@@ -1042,6 +1057,18 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div id="reliningPackagesMap"></div>
       </div>
+    </div>
+    </div><!-- /#relining-subpage-main -->
+
+    <div id="relining-subpage-edit" style="display:none">
+      <div class="pkg-panel">
+        <div class="lbl">Edit Packages</div>
+        <div style="font-size:12px;color:var(--text-l);margin-top:6px;line-height:1.5">
+          Move pipes between generated packages. Manual moves persist across regenerations until cleared. Empty packages are kept.
+          To create a new package, choose <em>+ Create new package</em> in any pipe's <strong>Move to package</strong> dropdown.
+        </div>
+      </div>
+      <div id="editPackagesArea" class="pkg-empty">Generate packages on the Pipe Relining tab first to enable manual editing.</div>
     </div>
   </div>
 </div>
@@ -4478,7 +4505,7 @@ function getReliningPackagingOptions() {
     costMode: 'median',
     contractor: null,
     trafficControl: false,
-    projectInitiation: false,
+    projectInitiation: document.getElementById('pkgInitiation')?.checked !== false,
     groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
@@ -5258,6 +5285,338 @@ function prioritiseAndRenumberReliningPackages(packages) {
       package_id: `RLN_${String(index + 1).padStart(3, '0')}`,
       assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: `RLN_${String(index + 1).padStart(3, '0')}` }))
     }));
+}
+
+// Manual package editing: each generated package gets an opaque anchor_id;
+// the user's per-asset move log is persisted to localStorage and replayed on
+// every regeneration. Stubs are created for anchors that no longer correspond
+// to any auto package so manual moves stay in their new home across re-runs.
+const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
+let reliningManualMoves = loadReliningManualMoves();
+
+function loadReliningManualMoves() {
+  try {
+    const raw = localStorage.getItem(RELINING_MANUAL_MOVES_KEY);
+    if (!raw) return { assignments: {}, anchorOrigins: {} };
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return { assignments: {}, anchorOrigins: {} };
+    return {
+      assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {},
+      anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {}
+    };
+  } catch (err) {
+    console.warn('[Relining manual edit] load failed', err);
+    return { assignments: {}, anchorOrigins: {} };
+  }
+}
+
+function persistReliningManualMoves() {
+  try {
+    localStorage.setItem(RELINING_MANUAL_MOVES_KEY, JSON.stringify(reliningManualMoves));
+  } catch (err) {
+    console.warn('[Relining manual edit] persist failed', err);
+  }
+}
+
+function generateReliningAnchorId() {
+  return 'anc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+function ensurePackageAnchors(packages) {
+  return (packages || []).map(pkg => pkg.anchor_id ? pkg : { ...pkg, anchor_id: generateReliningAnchorId() });
+}
+
+function manualReliningAssignmentCount() {
+  return Object.keys(reliningManualMoves?.assignments || {}).length;
+}
+
+function applyReliningManualMoves(packages, options = {}) {
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
+  const { assignments, anchorOrigins } = reliningManualMoves;
+  if (!Object.keys(assignments).length && !Object.keys(anchorOrigins).length) return packages;
+
+  const assetCatalog = new Map();
+  packages.forEach(pkg => {
+    (pkg.assets || []).forEach(asset => {
+      const uid = String(asset.assetId || '');
+      if (uid) assetCatalog.set(uid, { asset, currentAnchor: pkg.anchor_id });
+    });
+  });
+
+  const anchorPool = new Map();
+  packages.forEach(pkg => anchorPool.set(pkg.anchor_id, { existing: pkg, items: [] }));
+  Object.entries(anchorOrigins).forEach(([anchorId, info]) => {
+    if (!anchorPool.has(anchorId)) {
+      anchorPool.set(anchorId, {
+        existing: {
+          anchor_id: anchorId,
+          package_id: info.last_package_id || 'RLN_PENDING',
+          manual_origin: info.kind || 'manual'
+        },
+        items: []
+      });
+    }
+  });
+
+  let assignmentsChanged = false;
+  assetCatalog.forEach(({ asset, currentAnchor }, uid) => {
+    const target = assignments[uid];
+    let dest = currentAnchor;
+    if (target) {
+      if (anchorPool.has(target)) dest = target;
+      else { delete assignments[uid]; assignmentsChanged = true; }
+    }
+    anchorPool.get(dest).items.push(asset);
+  });
+
+  Object.keys(assignments).forEach(uid => {
+    if (!assetCatalog.has(uid)) { delete assignments[uid]; assignmentsChanged = true; }
+  });
+
+  if (assignmentsChanged) persistReliningManualMoves();
+
+  return [...anchorPool.values()].map(({ existing, items }) =>
+    buildReliningPackageObject(existing.package_id, items, options, existing));
+}
+
+function findReliningAssetCurrentAnchor(assetUid) {
+  if (!lastPackagingGeneration) return null;
+  const uid = String(assetUid);
+  for (const pkg of lastPackagingGeneration.packages || []) {
+    for (const asset of pkg.assets || []) {
+      if (String(asset.assetId) === uid) return pkg.anchor_id;
+    }
+  }
+  return null;
+}
+
+function moveReliningAssetToPackage(assetUid, targetAnchorId) {
+  if (!lastPackagingGeneration) return;
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
+  const uid = String(assetUid);
+  const sourceAnchor = findReliningAssetCurrentAnchor(uid);
+  if (!sourceAnchor) { alert('Asset not found in current packaging.'); return; }
+  if (sourceAnchor === targetAnchorId) return;
+  const targetPkg = (lastPackagingGeneration.packages || []).find(p => p.anchor_id === targetAnchorId);
+  if (!targetPkg && !reliningManualMoves.anchorOrigins[targetAnchorId]) {
+    alert('Target package not found.');
+    return;
+  }
+  reliningManualMoves.assignments[uid] = targetAnchorId;
+  if (!reliningManualMoves.anchorOrigins[targetAnchorId]) {
+    reliningManualMoves.anchorOrigins[targetAnchorId] = {
+      kind: 'existing',
+      created_at: new Date().toISOString(),
+      last_package_id: targetPkg?.package_id || ''
+    };
+  } else if (targetPkg) {
+    reliningManualMoves.anchorOrigins[targetAnchorId].last_package_id = targetPkg.package_id;
+  }
+  persistReliningManualMoves();
+  reapplyManualEditsToCurrentGeneration();
+}
+
+function createNewReliningPackageForAsset(assetUid) {
+  if (!lastPackagingGeneration) return;
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
+  const uid = String(assetUid);
+  if (!findReliningAssetCurrentAnchor(uid)) { alert('Asset not found in current packaging.'); return; }
+  const newAnchor = generateReliningAnchorId();
+  reliningManualMoves.anchorOrigins[newAnchor] = {
+    kind: 'new',
+    created_at: new Date().toISOString(),
+    last_package_id: ''
+  };
+  reliningManualMoves.assignments[uid] = newAnchor;
+  persistReliningManualMoves();
+  reapplyManualEditsToCurrentGeneration();
+}
+
+function clearReliningManualMove(assetUid) {
+  if (!reliningManualMoves) return;
+  const uid = String(assetUid);
+  if (!(uid in (reliningManualMoves.assignments || {}))) return;
+  delete reliningManualMoves.assignments[uid];
+  persistReliningManualMoves();
+  renderEditPackagesPanel();
+  renderGeneratedPackages(lastPackagingGeneration);
+}
+
+function resetAllReliningManualMoves() {
+  const hasAssignments = Object.keys(reliningManualMoves?.assignments || {}).length > 0;
+  const hasOrigins = Object.keys(reliningManualMoves?.anchorOrigins || {}).length > 0;
+  if (!hasAssignments && !hasOrigins) return;
+  if (!confirm('Clear all manual package edits and regenerate from scratch?')) return;
+  reliningManualMoves = { assignments: {}, anchorOrigins: {} };
+  persistReliningManualMoves();
+  if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
+    generateReliningPackages();
+  } else {
+    if (lastPackagingGeneration) {
+      renderGeneratedPackages(lastPackagingGeneration);
+      renderReliningPackagesMap();
+    }
+    renderEditPackagesPanel();
+  }
+}
+
+function reapplyManualEditsToCurrentGeneration() {
+  if (!lastPackagingGeneration) { renderEditPackagesPanel(); return; }
+  const options = lastPackagingGeneration.options || (typeof getReliningPackagingOptions === 'function' ? getReliningPackagingOptions() : {});
+  let packages = (lastPackagingGeneration.packages || []).map(pkg => ({ ...pkg }));
+  packages = ensurePackageAnchors(packages);
+  packages = applyReliningManualMoves(packages, options);
+  packages = prioritiseAndRenumberReliningPackages(packages);
+  packages.forEach(pkg => {
+    if (reliningManualMoves.anchorOrigins[pkg.anchor_id]) {
+      reliningManualMoves.anchorOrigins[pkg.anchor_id].last_package_id = pkg.package_id;
+    }
+  });
+  persistReliningManualMoves();
+  const totalLength = packages.reduce((s, p) => s + (Number(p.total_length_m) || 0), 0);
+  const totalCost = packages.reduce((s, p) => s + (Number(p.total_cost) || 0), 0);
+  lastPackagingGeneration = {
+    ...lastPackagingGeneration,
+    packages,
+    package_count: packages.length,
+    total_length_m: Number(totalLength.toFixed(1)),
+    total_cost: Number(totalCost.toFixed(2))
+  };
+  renderGeneratedPackages(lastPackagingGeneration);
+  renderReliningPackagesMap();
+  renderEditPackagesPanel();
+}
+
+function switchReliningSubtab(name) {
+  const main = document.getElementById('relining-subpage-main');
+  const edit = document.getElementById('relining-subpage-edit');
+  const tabMain = document.getElementById('reliningSubtabMain');
+  const tabEdit = document.getElementById('reliningSubtabEdit');
+  if (!main || !edit || !tabMain || !tabEdit) return;
+  if (name === 'edit') {
+    main.style.display = 'none';
+    edit.style.display = 'flex';
+    tabMain.classList.remove('active');
+    tabEdit.classList.add('active');
+    renderEditPackagesPanel();
+  } else {
+    main.style.display = 'flex';
+    edit.style.display = 'none';
+    tabMain.classList.add('active');
+    tabEdit.classList.remove('active');
+    setTimeout(() => { try { if (typeof refreshReliningPackagesMap === 'function') refreshReliningPackagesMap(); } catch (e) {} }, 0);
+  }
+}
+
+function reliningEditTargetOptionsHtml(currentAnchor) {
+  const packages = lastPackagingGeneration?.packages || [];
+  const opts = packages.map(p => {
+    const isCurrent = p.anchor_id === currentAnchor;
+    const tag = p.manual_origin ? ' (manual)' : '';
+    const suburbs = (p.suburbs || [p.suburb]).filter(Boolean).join(', ') || 'no suburb';
+    const label = `${p.package_id}${tag} — ${suburbs} (${p.pipe_count} pipes)`;
+    return `<option value="${escapeHtml(p.anchor_id || '')}"${isCurrent ? ' selected disabled' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+  return `${opts}<option value="__NEW__">+ Create new package</option>`;
+}
+
+let _reliningEditPanelListenersAttached = false;
+function attachReliningEditPanelListeners() {
+  if (_reliningEditPanelListenersAttached) return;
+  _reliningEditPanelListenersAttached = true;
+  document.addEventListener('change', (event) => {
+    const select = event.target?.closest?.('select[data-relining-edit-target]');
+    if (!select) return;
+    const value = select.value;
+    const assetUid = select.getAttribute('data-asset-uid') || '';
+    const currentAnchor = select.getAttribute('data-current-anchor') || '';
+    if (!value || value === currentAnchor) return;
+    if (value === '__NEW__') createNewReliningPackageForAsset(assetUid);
+    else moveReliningAssetToPackage(assetUid, value);
+  });
+  document.addEventListener('click', (event) => {
+    const btn = event.target?.closest?.('button[data-relining-edit-clear]');
+    if (!btn) return;
+    event.preventDefault();
+    clearReliningManualMove(btn.getAttribute('data-asset-uid') || '');
+  });
+}
+
+function renderEditPackagesPanel() {
+  const area = document.getElementById('editPackagesArea');
+  if (!area) return;
+  attachReliningEditPanelListeners();
+  const data = lastPackagingGeneration;
+  if (!data || !data.packages || !data.packages.length) {
+    area.className = 'pkg-empty';
+    area.textContent = 'Generate packages on the Pipe Relining tab first to enable manual editing.';
+    return;
+  }
+  // Defensive: in case packages were produced before this code path stamped anchors.
+  if (data.packages.some(p => !p.anchor_id)) {
+    data.packages = ensurePackageAnchors(data.packages);
+  }
+  const packages = data.packages;
+  const moveCount = manualReliningAssignmentCount();
+  const affectedAnchors = new Set(Object.values(reliningManualMoves?.assignments || {}));
+
+  const toolbarHtml = `
+    <div class="edit-pkg-toolbar">
+      <div>
+        <strong>${moveCount.toLocaleString()}</strong> manual move${moveCount === 1 ? '' : 's'} active.
+        Affected packages: <strong>${affectedAnchors.size.toLocaleString()}</strong>.
+        Manual moves persist across regenerations.
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="export-btn" type="button" onclick="resetAllReliningManualMoves()">Reset All Manual Edits</button>
+      </div>
+    </div>
+  `;
+
+  const cardsHtml = packages.map(pkg => {
+    const assets = pkg.assets || [];
+    const isManual = !!pkg.manual_origin;
+    const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ') || 'No suburb';
+    const headerHtml = `
+      <div class="edit-pkg-header">
+        <div>
+          <div class="edit-pkg-title">
+            ${escapeHtml(pkg.package_id || '')}
+            ${isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : ''}
+            ${assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : ''}
+          </div>
+          <div class="edit-pkg-meta">${escapeHtml(suburbs)} · ${assets.length} pipe${assets.length === 1 ? '' : 's'} · ${escapeHtml(formatCurrency(pkg.total_cost))} · ${Number(pkg.total_length_m || 0).toFixed(1)} m</div>
+        </div>
+      </div>
+    `;
+    if (!assets.length) {
+      return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>`;
+    }
+    const headRow = `<div class="edit-pkg-asset-row head"><div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div></div>`;
+    const rows = assets.map(asset => {
+      const uid = String(asset.assetId || '');
+      const isMoved = !!reliningManualMoves?.assignments?.[uid];
+      return `
+        <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
+          <div>${escapeHtml(uid)}${isMoved ? ' <span class="edit-pkg-tag moved">Moved</span>' : ''}</div>
+          <div>${escapeHtml(asset.suburb || '')}</div>
+          <div>${escapeHtml(String(asset.diameterMm ?? ''))}</div>
+          <div>${Number(asset.lengthM || 0).toFixed(1)}</div>
+          <div>${Number.isFinite(asset.pipeCost) ? escapeHtml(formatCurrency(asset.pipeCost)) : ''}</div>
+          <div>
+            <select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">
+              ${reliningEditTargetOptionsHtml(pkg.anchor_id)}
+            </select>
+          </div>
+          <div>${isMoved ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : ''}</div>
+        </div>
+      `;
+    }).join('');
+    return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}${headRow}${rows}</div>`;
+  }).join('');
+
+  area.className = '';
+  area.innerHTML = toolbarHtml + cardsHtml;
 }
 
 function isIslandPipe(item) {
@@ -6185,6 +6544,9 @@ async function generateReliningPackages() {
     await waitForPaint();
     packages = prioritiseAndRenumberReliningPackages(packages);
     packages = enforceReliningPackageRadius(packages, options);
+    packages = ensurePackageAnchors(packages);
+    packages = applyReliningManualMoves(packages, options);
+    packages = prioritiseAndRenumberReliningPackages(packages);
     logReliningPackageDebug(packages, options);
     const totalLength = packages.reduce((sum, pkg) => sum + (Number(pkg.total_length_m) || 0), 0);
     const totalCost = packages.reduce((sum, pkg) => sum + (Number(pkg.total_cost) || 0), 0);
@@ -6212,6 +6574,7 @@ async function generateReliningPackages() {
     renderPackagingSamples(preview.streams);
     renderGeneratedPackages(data);
     renderReliningPackagesMap();
+    renderEditPackagesPanel();
   } catch (e) {
     setPackagingStatus(false, 'Package generation failed');
     const area = document.getElementById('pkgPackagesArea');
