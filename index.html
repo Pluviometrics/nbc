@@ -6350,8 +6350,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       conditionMix,
       diameterMix,
       materialMix,
-      dedicated_map_url: `./package_maps/${safeId}_map.html`,
-      dedicated_kml_url: `./package_maps/${safeId}.kml`
+      dedicated_map_url: `./package_maps/${safeId}_map.html`
     };
   });
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
@@ -6366,6 +6365,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
       address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
+      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -6567,7 +6567,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
       '<div class="pkg-card-actions">' +
         '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
-        (pkg.dedicated_kml_url ? '<a class="pkg-card-link-btn" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') +
         '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
         '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
       '</div>' +
@@ -6596,7 +6595,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<td class="r">' + esc(maxSpanKm) + '</td>' +
         '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
         '<td>' + esc(notes.join('; ')) + '</td>' +
-        '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a>' + (pkg.dedicated_kml_url ? ' · <a class="pkg-row-link" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') + ' · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+        '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
         '</tr>';
     }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
 
@@ -6611,7 +6610,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '<span class="pipe-color" style="background:' + color + '"></span>' +
         '<h3>' + esc(pkg.id) + '</h3>' +
         '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
-        (pkg.dedicated_kml_url ? '<a class="pkg-card-link-btn" href="' + esc(pkg.dedicated_kml_url) + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="kml" download>KML ↗</a>' : '') +
         '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
       '</header>' +
       '<div class="pkg-report-meta">' +
@@ -6664,10 +6662,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="10">No pipes match the current filters.</td></tr></tbody>'; return; }
+    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="11">No pipes match the current filters.</td></tr></tbody>'; return; }
     tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
       '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>' +
-      '<th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
+      '<th>LGA H1-H6</th><th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
@@ -6678,6 +6676,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td>' + esc(p.condition) + '</td>' +
           '<td class="r">' + fmtNum(p.length_m, 1) + '</td>' +
           '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>' +
+          '<td>' + esc(p.lga || '') + '</td>' +
           '<td>' + esc(p.upstream || '') + '</td>' +
           '<td>' + esc(p.downstream || '') + '</td></tr>';
       }).join('') + '</tbody>';
@@ -6923,7 +6922,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   document.body.addEventListener('click', function(e) {
     var a = e.target.closest && e.target.closest('a.pkg-card-link-btn, a.pkg-row-link, a.select-pkg-link');
     if (!a) return;
-    if (a.getAttribute('data-link-kind') === 'kml') return; // KML download — let browser handle, no map side-effect
     var id = a.getAttribute('data-package-id');
     if (id && pkgIndex[id] != null) setSelection(id, { zoom: true });
     if (a.getAttribute('href') === '#mapPanel') {
@@ -7091,9 +7089,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '</div>',
     '</main>',
     '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Report — read-only.</footer>',
-    '<script id="report-data" type="application/json">' + json + '<\/script>',
-    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\/script>',
-    '<script>' + runtimeJs + '<\/script>',
+    '<script id="report-data" type="application/json">' + json + '<\\/script>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\\/script>',
+    '<script>' + runtimeJs + '<\\/script>',
     '</body>',
     '</html>'
   ].join('\n');
@@ -7105,8 +7103,11 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   const assets = pkg.assets || [];
   const reportPipes = assets.map(item => {
     const raw = item.raw || {};
+    const startPair = resolveLineCoordinatePair(raw, true);
+    const endPair = resolveLineCoordinatePair(raw, false);
     return {
       asset_id: item.assetId || '',
+      package_id: pkg.package_id || '',
       suburb: String(item.suburb || pkg.suburb || '').toUpperCase(),
       diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
       material: raw['SW_Material'] || raw['Material'] || raw['Pipe Material'] || '',
@@ -7117,7 +7118,11 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
-      lon: Number.isFinite(item.lon) ? item.lon : null
+      lon: Number.isFinite(item.lon) ? item.lon : null,
+      start_lat: startPair && Number.isFinite(startPair.lat) ? startPair.lat : null,
+      start_lon: startPair && Number.isFinite(startPair.lon) ? startPair.lon : null,
+      end_lat: endPair && Number.isFinite(endPair.lat) ? endPair.lat : null,
+      end_lon: endPair && Number.isFinite(endPair.lon) ? endPair.lon : null
     };
   });
   const coordPipes = reportPipes.filter(p => p.lat != null && p.lon != null);
@@ -7224,28 +7229,8 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   var map = null;
   var bounds = null;
   var assetMarkers = {};
+  var pipeFeatures = {};
   var selectedAsset = null;
-
-  function highlightAsset(asset) {
-    Object.keys(assetMarkers).forEach(function(a) {
-      var m = assetMarkers[a];
-      if (a === asset) {
-        m.setStyle({ radius: 11, color: '#111827', weight: 3, fillColor: '#FFD166', fillOpacity: 1 });
-        if (m.bringToFront) m.bringToFront();
-      } else {
-        m.setStyle({ radius: 6, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85 });
-      }
-    });
-    selectedAsset = asset;
-  }
-
-  function focusAsset(asset) {
-    var m = assetMarkers[asset];
-    if (!m || !map) return;
-    highlightAsset(asset);
-    map.flyTo(m.getLatLng(), Math.max(map.getZoom(), 17), { duration: 0.5 });
-    setTimeout(function(){ m.openPopup(); }, 350);
-  }
 
   function initMap() {
     var mapEl = document.getElementById('map');
@@ -7270,47 +7255,80 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
     });
     tile.addTo(map);
 
+    function getPipeWeight(dia) {
+      var d = Number(dia);
+      if (!d || isNaN(d) || d <= 0) return 2;
+      var w = d / 60;
+      return Math.max(2, Math.min(9, w));
+    }
+
     var pts = [];
-    var coordPipes = pipes.filter(function(p){ return p.lat != null && p.lon != null; });
-    coordPipes.forEach(function(p){ pts.push([p.lat, p.lon]); });
-    if (coordPipes.length > 1) {
-      L.polyline(coordPipes.map(function(p){ return [p.lat, p.lon]; }), {
-        color: color, weight: 3, opacity: 0.7, dashArray: '6 6'
-      }).addTo(map);
+    var lineCount = 0;
+    var fallbackCount = 0;
+    var hasEndpoints = function(p) {
+      return p.start_lat != null && p.start_lon != null && p.end_lat != null && p.end_lon != null
+        && Number.isFinite(p.start_lat) && Number.isFinite(p.start_lon)
+        && Number.isFinite(p.end_lat) && Number.isFinite(p.end_lon)
+        && !(p.start_lat === p.end_lat && p.start_lon === p.end_lon);
+    };
+
+    function popupHtml(p) {
+      return ''
+        + '<strong>' + esc(p.asset_id) + '</strong>'
+        + (p.package_id ? ' <span style="color:#5A6B7A;font-weight:500">· ' + esc(p.package_id) + '</span>' : '')
+        + '<br>Suburb: ' + esc(p.suburb || '—')
+        + '<br>Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '—')
+        + (p.material ? '<br>Material: ' + esc(p.material) : '')
+        + '<br>Condition: ' + esc(p.condition || '—')
+        + '<br>Length: ' + fmtNum(p.length_m, 1) + ' m'
+        + (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '')
+        + (p.upstream ? '<br>Upstream: ' + esc(p.upstream) : '')
+        + (p.downstream ? '<br>Downstream: ' + esc(p.downstream) : '')
+        + (p.address ? '<br>Address: ' + esc(p.address) : '');
     }
-    var centroid = pkg.centroid && pkg.centroid.length === 2 ? [pkg.centroid[0], pkg.centroid[1]] : null;
-    if (centroid && coordPipes.length) {
-      coordPipes.forEach(function(p){
-        L.polyline([centroid, [p.lat, p.lon]], {
-          color: color, weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false
-        }).addTo(map);
-      });
-    }
-    coordPipes.forEach(function(p){
-      var marker = L.circleMarker([p.lat, p.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85 });
-      marker.bindPopup(
-        '<strong>' + esc(p.asset_id) + '</strong><br>' +
-        'Suburb: ' + esc(p.suburb) + '<br>' +
-        'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
-        (p.material ? 'Material: ' + esc(p.material) + '<br>' : '') +
-        'Condition: ' + esc(p.condition || '—') + '<br>' +
-        'Length: ' + fmtNum(p.length_m, 1) + ' m' +
-        (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
-        (p.address ? '<br>Address: ' + esc(p.address) : '') +
-        (p.upstream ? '<br>Upstream: ' + esc(p.upstream) : '') +
-        (p.downstream ? '<br>Downstream: ' + esc(p.downstream) : '')
-      );
-      if (p.asset_id) assetMarkers[p.asset_id] = marker;
-      marker.addTo(map);
+
+    pipes.forEach(function(p) {
+      if (hasEndpoints(p)) {
+        var weight = getPipeWeight(p.diameter_mm);
+        var line = L.polyline([[p.start_lat, p.start_lon], [p.end_lat, p.end_lon]], {
+          color: color,
+          weight: weight,
+          opacity: 0.96
+        });
+        line.bindPopup(popupHtml(p));
+        line.addTo(map);
+        pts.push([p.start_lat, p.start_lon]);
+        pts.push([p.end_lat, p.end_lon]);
+        if (p.asset_id) {
+          pipeFeatures[p.asset_id] = { type: 'line', feature: line, baseWeight: weight, latlng: [(p.start_lat + p.end_lat) / 2, (p.start_lon + p.end_lon) / 2] };
+          assetMarkers[p.asset_id] = line;
+        }
+        lineCount += 1;
+      } else if (p.lat != null && p.lon != null && Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
+        var marker = L.circleMarker([p.lat, p.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.85 });
+        marker.bindPopup(popupHtml(p));
+        marker.addTo(map);
+        pts.push([p.lat, p.lon]);
+        if (p.asset_id) {
+          pipeFeatures[p.asset_id] = { type: 'point', feature: marker, latlng: [p.lat, p.lon] };
+          assetMarkers[p.asset_id] = marker;
+        }
+        fallbackCount += 1;
+      } else {
+        fallbackCount += 1;
+      }
     });
-    if (centroid) {
-      L.circleMarker(centroid, { radius: 11, color: color, weight: 3, fillColor: color, fillOpacity: 0.6 })
-        .bindTooltip(pkg.id + ' (centroid)', { direction: 'top' })
-        .addTo(map);
-      pts.push(centroid);
+
+    if (lineCount + fallbackCount > 0) {
+      console.info('[package-map] drew ' + lineCount + ' line(s), ' + fallbackCount + ' fallback marker(s)');
     }
+    if (fallbackCount > 0) {
+      var sub = document.querySelector('.cctv-map-sub');
+      if (sub) sub.textContent += ' · ' + fallbackCount + ' pipe(s) drawn as fallback markers (missing endpoints).';
+    }
+
     if (pts.length) {
-      bounds = L.latLngBounds(pts).pad(0.2);
+      bounds = L.latLngBounds(pts).pad(0.15);
       map.fitBounds(bounds);
     } else {
       map.setView([-33.75, 151.27], 11);
@@ -7321,6 +7339,70 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
     }
   }
   initMap();
+
+  function highlightAsset(asset) {
+    Object.keys(pipeFeatures).forEach(function(a) {
+      var entry = pipeFeatures[a];
+      if (!entry) return;
+      if (entry.type === 'line') {
+        entry.feature.setStyle({ color: a === asset ? '#FFD166' : color, weight: a === asset ? Math.max(entry.baseWeight + 4, 6) : entry.baseWeight, opacity: a === asset ? 1 : 0.96 });
+        if (a === asset && entry.feature.bringToFront) entry.feature.bringToFront();
+      } else if (entry.type === 'point') {
+        entry.feature.setStyle({ radius: a === asset ? 11 : 6, color: a === asset ? '#111827' : '#fff', weight: a === asset ? 3 : 1.5, fillColor: a === asset ? '#FFD166' : color, fillOpacity: 1 });
+        if (a === asset && entry.feature.bringToFront) entry.feature.bringToFront();
+      }
+    });
+    selectedAsset = asset;
+  }
+
+  function focusAsset(asset, opts) {
+    opts = opts || {};
+    var entry = pipeFeatures[asset];
+    if (!entry || !map) return;
+    highlightAsset(asset);
+    var target = entry.latlng;
+    if (target) map.flyTo(target, Math.max(map.getZoom(), 17), { duration: 0.4 });
+    setTimeout(function(){ if (entry.feature && entry.feature.openPopup) entry.feature.openPopup(); }, 320);
+    if (opts.updateHash !== false) {
+      var newHash = '#asset=' + encodeURIComponent(asset);
+      if (window.location.hash !== newHash) {
+        try { history.replaceState(null, '', window.location.pathname + window.location.search + newHash); }
+        catch (_e) { window.location.hash = newHash; }
+      }
+    }
+    var tr = document.querySelector('#pipesTable tr[data-asset="' + String(asset).replace(/"/g, '\\"') + '"]');
+    if (tr) {
+      Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
+      tr.classList.add('selected');
+      if (tr.scrollIntoView) tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  function readAssetFromUrl() {
+    if (window.location.hash) {
+      var m = window.location.hash.replace(/^#/, '');
+      var params = new URLSearchParams(m);
+      var a = params.get('asset') || params.get('pipe');
+      if (a) return a;
+    }
+    var qs = new URLSearchParams(window.location.search);
+    return qs.get('pipe') || qs.get('asset') || null;
+  }
+
+  var initialAsset = readAssetFromUrl();
+  if (initialAsset && pipeFeatures[initialAsset]) {
+    setTimeout(function(){ focusAsset(initialAsset, { updateHash: false }); }, 200);
+  } else if (initialAsset) {
+    var w = document.createElement('div');
+    w.className = 'map-warning';
+    w.textContent = 'Pipe ' + initialAsset + ' was not found in this package map.';
+    document.getElementById('map').parentNode.appendChild(w);
+  }
+
+  window.addEventListener('hashchange', function() {
+    var a = readAssetFromUrl();
+    if (a && pipeFeatures[a]) focusAsset(a, { updateHash: false });
+  });
 
   document.getElementById('fitBtn').addEventListener('click', function(){
     if (map && bounds) map.fitBounds(bounds);
@@ -7342,13 +7424,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   // Marker click → also highlight matching row
   Object.keys(assetMarkers).forEach(function(asset) {
     assetMarkers[asset].on('click', function() {
-      Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
-      var tr = document.querySelector('#pipesTable tr[data-asset="' + asset.replace(/"/g, '\\"') + '"]');
-      if (tr) {
-        tr.classList.add('selected');
-        if (tr.scrollIntoView) tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-      highlightAsset(asset);
+      focusAsset(asset);
     });
   });
 })();
@@ -7462,73 +7538,6 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
 function reliningPackageMapFilename(pkg) {
   const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
   return `package_maps/${safe}_map.html`;
-}
-
-function buildSinglePackageKml(pkg) {
-  const pkgId = pkg.package_id || 'PACKAGE';
-  const xmlEsc = s => String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
-  const cdataEsc = s => String(s == null ? '' : s).replace(/]]>/g, ']]]]><![CDATA[>');
-  const fmtCurrencyKml = n => Number.isFinite(n) && Number(n) !== 0
-    ? '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
-    : '';
-  const placemarks = (pkg.assets || []).map(item => {
-    const raw = item.raw || {};
-    const assetId = item.assetId || '';
-    const diameterRaw = raw['SWP_Pipe Diameter_mm'] ?? raw['SWP_Pipe_Diameter_mm'] ?? item.diameterMm;
-    const diameter = Number.isFinite(Number(diameterRaw)) && Number(diameterRaw) > 0
-      ? Math.round(Number(diameterRaw)) + ' mm' : '';
-    const upstream = raw['SW_Upstream Node'] ?? raw['SW_Upstream_Node'] ?? raw['Upstream Node'] ?? '';
-    const downstream = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
-    const condition = item.conditionLabel || raw['SW_Condition'] || item.condition || '';
-    const lengthM = Number.isFinite(item.lengthM) && item.lengthM > 0 ? item.lengthM.toFixed(1) + ' m' : '';
-    const cost = fmtCurrencyKml(item.pipeCost);
-
-    const start = resolveLineCoordinatePair(raw, true);
-    const end = resolveLineCoordinatePair(raw, false);
-    const hasLine = start && end
-      && Number.isFinite(start.lat) && Number.isFinite(start.lon)
-      && Number.isFinite(end.lat) && Number.isFinite(end.lon);
-    let geometry = '';
-    let styleId = 'pipePoint';
-    if (hasLine) {
-      geometry = `<LineString><tessellate>1</tessellate><coordinates>${start.lon},${start.lat},0 ${end.lon},${end.lat},0</coordinates></LineString>`;
-      styleId = 'pipeLine';
-    } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
-      geometry = `<Point><coordinates>${item.lon},${item.lat},0</coordinates></Point>`;
-    } else {
-      return null;
-    }
-    const desc = '<![CDATA[<b>Diameter:</b> ' + cdataEsc(diameter || '—') + '<br>'
-      + '<b>Upstream:</b> ' + cdataEsc(upstream || '—') + '<br>'
-      + '<b>Downstream:</b> ' + cdataEsc(downstream || '—') + '<br>'
-      + '<b>Length:</b> ' + cdataEsc(lengthM || '—') + '<br>'
-      + '<b>Cost:</b> ' + cdataEsc(cost || '—') + '<br>'
-      + '<b>Condition:</b> ' + cdataEsc(condition || '—') + ']]>';
-    return '<Placemark>'
-      + '<name>' + xmlEsc(pkgId + ' — ' + assetId) + '</name>'
-      + '<description>' + desc + '</description>'
-      + '<styleUrl>#' + styleId + '</styleUrl>'
-      + geometry
-      + '</Placemark>';
-  }).filter(Boolean).join('\n  ');
-
-  return '<?xml version="1.0" encoding="UTF-8"?>\n'
-    + '<kml xmlns="http://www.opengis.net/kml/2.2">\n'
-    + '<Document>\n'
-    + '  <name>' + xmlEsc(pkgId) + ' — Pipe Relining Package</name>\n'
-    + '  <description>' + xmlEsc('Per-pipe export of relining package ' + pkgId + '. ' + ((pkg.assets || []).length) + ' pipe' + ((pkg.assets || []).length === 1 ? '' : 's') + '.') + '</description>\n'
-    + '  <Style id="pipeLine"><LineStyle><color>ff897c00</color><width>4</width></LineStyle></Style>\n'
-    + '  <Style id="pipePoint"><IconStyle><scale>1.0</scale><Icon><href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href></Icon></IconStyle></Style>\n'
-    + '  ' + placemarks + '\n'
-    + '</Document>\n'
-    + '</kml>\n';
-}
-
-function reliningPackageKmlFilename(pkg) {
-  const safe = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
-  return `package_maps/${safe}.kml`;
 }
 
 async function downloadReliningPackagesZip() {
@@ -7714,29 +7723,7 @@ async function downloadReliningPackagesZip() {
         Math.round(totalCost),
         assets.map(a => a.assetId).join(', ')
       ]);
-
-      const mapHtml = buildSinglePackageMapHtml(pkg);
-      const mapFilename = `package_maps/${pkg.package_id}_map.html`;
-      zip.file(mapFilename, mapHtml);
-
-      const kmlContent = buildSinglePackageKml(pkg);
-      const kmlFilename = `package_maps/${pkg.package_id}.kml`;
-      zip.file(kmlFilename, kmlContent);
     });
-
-    if (!packages.length) {
-      throw new Error("No packages found");
-    }
-    const expectedPackageCount = packages.length;
-    const pkgFolderEntries = Object.keys(zip.files).filter(f => f.startsWith("package_maps/") && !zip.files[f].dir);
-    const actualMapCount = pkgFolderEntries.filter(f => f.endsWith("_map.html")).length;
-    const actualKmlCount = pkgFolderEntries.filter(f => f.endsWith(".kml")).length;
-    if (actualMapCount !== expectedPackageCount) {
-      throw new Error(`Missing package maps: expected ${expectedPackageCount}, got ${actualMapCount}`);
-    }
-    if (actualKmlCount !== expectedPackageCount) {
-      throw new Error(`Missing package KMLs: expected ${expectedPackageCount}, got ${actualKmlCount}`);
-    }
 
     if (!csvNames.length) {
       throw new Error('ZIP validation failed: no package CSV files were generated.');
@@ -7763,6 +7750,23 @@ async function downloadReliningPackagesZip() {
       console.error('[ZIP] Failed to build package_report.html:', reportErr);
       throw new Error('package_report.html could not be built: ' + (reportErr && reportErr.message || reportErr));
     }
+
+    // per-package dedicated map HTML files — colours mirror the overview report's palette so they line up
+    const PKG_MAP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
+    const expectedMapNames = [];
+    const generatedAtIso = new Date().toISOString();
+    packages.forEach((pkg, i) => {
+      const color = PKG_MAP_PALETTE[i % PKG_MAP_PALETTE.length];
+      const mapFilename = reliningPackageMapFilename(pkg);
+      try {
+        const mapHtml = buildSinglePackageMapHtml(pkg, lastPackagingGeneration?.options || null, generatedAtIso, color);
+        zip.file(mapFilename, mapHtml);
+        expectedMapNames.push(mapFilename);
+      } catch (mapErr) {
+        console.error('[ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
+        throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
+      }
+    });
 
     // xlsx files
     if (typeof XLSX !== 'undefined') {
@@ -7794,6 +7798,8 @@ async function downloadReliningPackagesZip() {
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
+    const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
+    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
       const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
@@ -7975,6 +7981,13 @@ function renderReliningPackagesMap(options = {}) {
       : '';
   }
   let drawn = 0;
+  let lineDrawn = 0;
+  let pointFallback = 0;
+  const reliningPipeWeight = (dia) => {
+    const d = Number(dia);
+    if (!d || isNaN(d) || d <= 0) return 2;
+    return Math.max(2, Math.min(12, d / 50));
+  };
   const mapPackages = selectedReliningPackageId
     ? packages.filter(pkg => pkg.package_id !== selectedReliningPackageId).concat(packages.filter(pkg => pkg.package_id === selectedReliningPackageId))
     : packages;
@@ -7984,37 +7997,46 @@ function renderReliningPackagesMap(options = {}) {
     if (!assets.length) return;
     const style = getReliningPackageMapStyle(pkg, packageIndex);
     const color = style.color;
-    const points = assets.map(item => [item.lat, item.lon]);
-    if (points.length > 1) {
-      L.polyline(points, {
-        color,
-        weight: style.isSelected ? 8 : 3,
-        opacity: style.isSelected ? 1 : (style.isDimmed ? 0.16 : 0.75),
-        dashArray: style.isSelected ? '' : '6 6'
-      }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false })).addTo(reliningPackagesLayer);
-    }
     assets.forEach(item => {
-      if (style.isSelected) {
-        L.circleMarker([item.lat, item.lon], {
-          radius: 18,
-          color: '#111827',
-          weight: 4,
-          fillColor: '#FFD166',
-          fillOpacity: 0.42
-        }).addTo(reliningPackagesLayer);
+      const raw = item.raw || {};
+      const startPair = resolveLineCoordinatePair(raw, true);
+      const endPair = resolveLineCoordinatePair(raw, false);
+      const hasLine = startPair && endPair
+        && Number.isFinite(startPair.lat) && Number.isFinite(startPair.lon)
+        && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
+        && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
+      const baseWeight = reliningPipeWeight(item.diameterMm);
+      if (hasLine) {
+        const line = L.polyline([[startPair.lat, startPair.lon], [endPair.lat, endPair.lon]], {
+          color,
+          weight: style.isSelected ? baseWeight + 2 : baseWeight,
+          opacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.92)
+        }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
+          .bindPopup(buildReliningPackagePopup(pkg))
+          .addTo(reliningPackagesLayer);
+        if (style.isSelected && line.bringToFront) line.bringToFront();
+        lineDrawn += 1;
+        drawn += 1;
+      } else {
+        if (style.isSelected) {
+          L.circleMarker([item.lat, item.lon], {
+            radius: 18, color: '#111827', weight: 4, fillColor: '#FFD166', fillOpacity: 0.42
+          }).addTo(reliningPackagesLayer);
+        }
+        const marker = L.circleMarker([item.lat, item.lon], {
+          radius: style.isSelected ? 11 : 5,
+          color: style.isSelected ? '#111827' : '#fff',
+          weight: style.isSelected ? 3 : 1.5,
+          fillColor: color,
+          fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.78),
+          opacity: style.isDimmed ? 0.7 : 1
+        }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
+          .bindPopup(buildReliningPackagePopup(pkg))
+          .addTo(reliningPackagesLayer);
+        if (!reliningPackageFocusLayers.has(pkg.package_id)) reliningPackageFocusLayers.set(pkg.package_id, marker);
+        pointFallback += 1;
+        drawn += 1;
       }
-      const marker = L.circleMarker([item.lat, item.lon], {
-        radius: style.isSelected ? 11 : 5,
-        color: style.isSelected ? '#111827' : '#fff',
-        weight: style.isSelected ? 3 : 1.5,
-        fillColor: color,
-        fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.18 : 0.78),
-        opacity: style.isDimmed ? 0.2 : 1
-      }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
-        .bindPopup(buildReliningPackagePopup(pkg))
-        .addTo(reliningPackagesLayer);
-      if (!reliningPackageFocusLayers.has(pkg.package_id)) reliningPackageFocusLayers.set(pkg.package_id, marker);
-      drawn += 1;
     });
     if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
       const focusMarker = L.circleMarker([pkg.lat, pkg.lon], {
@@ -8033,8 +8055,10 @@ function renderReliningPackagesMap(options = {}) {
     }
   });
   if (subtitle) {
-    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${drawn.toLocaleString()} pipe point${drawn === 1 ? '' : 's'}.${selectedReliningPackageId ? ` ${selectedReliningPackageId} is highlighted.` : ''}`;
+    const fallbackNote = pointFallback ? ` (${pointFallback.toLocaleString()} drawn as fallback markers — missing endpoints).` : '';
+    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${lineDrawn.toLocaleString()} pipe line${lineDrawn === 1 ? '' : 's'}${fallbackNote}${selectedReliningPackageId ? ` ${selectedReliningPackageId} is highlighted.` : ''}`;
   }
+  if (lineDrawn + pointFallback > 0) console.info('[relining-map] drew ' + lineDrawn + ' line(s), ' + pointFallback + ' fallback marker(s)');
   renderReliningSelectedMapOverlay();
   if (!selectedPackage && options.fit !== false) fitReliningPackagesMap();
 }
