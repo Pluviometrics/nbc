@@ -23,6 +23,16 @@
 <script src="./bom_northern_beaches_all_gauges.js"></script>
 <script src="./bom_ifd_cache.js"></script>
 <link rel="stylesheet" href="./styles.css"/>
+<style>
+  #cctvPkgPackagesArea.pkg-table-wrap { max-height: 560px; }
+  #cctvPkgPackagesArea table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--navy, #1A2B3C);
+    color: #fff;
+  }
+</style>
 </head>
 <body>
 
@@ -1251,6 +1261,10 @@ window.addEventListener('keydown', (event) => {
         <div class="fg">
           <label for="cctvPkgMetresPerHour">CCTV Survey Production Rate (m/hr)</label>
           <input type="text" id="cctvPkgMetresPerHour" value="80"/>
+        </div>
+        <div class="fg">
+          <label for="cctvPkgRatePerHour">CCTV Rate ($/hr)</label>
+          <input type="text" id="cctvPkgRatePerHour" value="205"/>
         </div>
         <div class="fg">
           <label for="cctvPkgCriticalityWeight">Criticality Influence</label>
@@ -8314,6 +8328,7 @@ function getCctvPackagingOptions() {
     targetLengthM: Math.max(1, parseNumberValue(document.getElementById('cctvPkgTargetLength')?.value) || 1000),
     pipesPerPackage: Math.max(1, Math.round(parseNumberValue(document.getElementById('cctvPkgPipeCount')?.value) || 25)),
     metresPerHour: Math.max(1, parseNumberValue(document.getElementById('cctvPkgMetresPerHour')?.value) || 80),
+    cctvRatePerHour: Math.max(0, parseNumberValue(document.getElementById('cctvPkgRatePerHour')?.value) || 205),
     criticalityWeight: Math.max(0, parseNumberValue(document.getElementById('cctvPkgCriticalityWeight')?.value) || 0.1),
     consolidateSmallPackages: !!document.getElementById('cctvPkgConsolidateSmall')?.checked,
     consolidateSmallPackageMaxPipes: 4,
@@ -8877,7 +8892,7 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
     const centroid = meanCoordinate(items);
     const totalLengthM = items.reduce((sum, item) => sum + (item.lengthM || 0), 0);
     const surveyHours = calculateCctvSurveyHours(totalLengthM, items.length, options);
-    const cctvRate = rateMeta?.medianRate || 0;
+    const cctvRate = options.cctvRatePerHour || 205;
     const totalCost = surveyHours * cctvRate;
     const maxSpanM = maxPackageSpanM(items);
     const maxCentroidDistanceM = maxDistanceFromCentroidM(items, centroid);
@@ -9013,7 +9028,7 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
     const centroid = meanCoordinate(items);
     const totalLengthM = items.reduce((sum, item) => sum + (item.lengthM || 0), 0);
     const surveyHours = calculateCctvSurveyHours(totalLengthM, items.length, options);
-    const cctvRate = rateMeta?.medianRate || 0;
+    const cctvRate = options.cctvRatePerHour || 205;
     const totalCost = surveyHours * cctvRate;
     const maxSpanM = maxPackageSpanM(items);
     const maxCentroidDistanceM = maxDistanceFromCentroidM(items, centroid);
@@ -9074,7 +9089,7 @@ function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOption
   const clusterCenter = meanCoordinate(items);
   const totalLengthM = items.reduce((sum, item) => sum + (item.lengthM || 0), 0);
   const surveyHours = calculateCctvSurveyHours(totalLengthM, items.length, options);
-  const cctvRate = rateMeta?.medianRate || 0;
+  const cctvRate = options.cctvRatePerHour || 205;
   const totalCost = surveyHours * cctvRate;
   const maxSpanM = maxPackageSpanM(items);
   const maxCentroidDistanceM = maxDistanceFromCentroidM(items, clusterCenter);
@@ -9311,17 +9326,13 @@ function renderGeneratedCctvPackages(packages) {
   const summaryRows = packages.map(pkg => ({
     package_id: renderCctvPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
-    centroid_lga: 'Northern Beaches',
     pipe_count: pkg.pipe_count,
-    criticality_score: Number(pkg.criticality_score || 0).toFixed(1),
     total_length_m: pkg.total_length_m.toFixed(1),
     max_spread_m: Number(pkg.max_span_m || 0).toFixed(0),
-    max_centroid_distance_m: Number(pkg.max_centroid_distance_m || 0).toFixed(0),
     cctv_hours: pkg.cctv_hours.toFixed(2),
     cctv_rate: formatCurrency(pkg.cctv_rate),
     total_cost: formatCurrency(pkg.total_cost),
-    asset_ids: pkg.asset_ids.join(', '),
-    package_map_link: pkg.package_map_link || ''
+    asset_ids: pkg.asset_ids.join(', ')
   }));
   const sampleRows = packages[0].assets.slice(0, 12).map(item => ({
     package_id: packages[0].package_id,
