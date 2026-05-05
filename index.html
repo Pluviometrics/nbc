@@ -4692,6 +4692,15 @@ function distanceFromPackageCenterM(center, item) {
   return center && isUsablePackageCoordinate(item) ? haversineDistanceM(center, item) : Number.POSITIVE_INFINITY;
 }
 
+function canJoinSpatialPackage(existingItems, candidateItem, options) {
+  if (!isUsablePackageCoordinate(candidateItem)) return false;
+  const usableExisting = (existingItems || []).filter(isUsablePackageCoordinate);
+  if (!usableExisting.length) return true;
+  const center = meanCoordinate(usableExisting);
+  if (!center) return true;
+  return haversineDistanceM(center, candidateItem) <= getPackageDistanceThresholdM(options);
+}
+
 function reliningClusterSeedCompare(a, b) {
   const priorityDiff = (Number(b.criticalityScore) || 0) - (Number(a.criticalityScore) || 0);
   if (priorityDiff !== 0) return priorityDiff;
