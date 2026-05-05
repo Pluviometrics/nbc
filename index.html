@@ -6364,8 +6364,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
-      address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
-      lga: raw['SW LGA 20% H1-H6'] || raw['SW_LGA_20%_H1-H6'] || raw['LGA'] || '',
+      address: raw['Formatted_Address'] || '',
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -6662,10 +6661,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="11">No pipes match the current filters.</td></tr></tbody>'; return; }
+    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="10">No pipes match the current filters.</td></tr></tbody>'; return; }
     tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
       '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>' +
-      '<th>LGA H1-H6</th><th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
+      '<th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + esc(p.asset_id) + '</td>' +
@@ -6676,7 +6675,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td>' + esc(p.condition) + '</td>' +
           '<td class="r">' + fmtNum(p.length_m, 1) + '</td>' +
           '<td class="r">' + esc(fmtCurrency(p.pipe_cost)) + '</td>' +
-          '<td>' + esc(p.lga || '') + '</td>' +
           '<td>' + esc(p.upstream || '') + '</td>' +
           '<td>' + esc(p.downstream || '') + '</td></tr>';
       }).join('') + '</tbody>';
@@ -7114,7 +7112,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
-      address: raw['Pipe_Start_Address'] || raw['Start Address'] || '',
+      address: raw['Formatted_Address'] || '',
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -7204,7 +7202,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor) {
   var dnCol = pipes.some(function(p){ return p.downstream; });
   var addrCol = pipes.some(function(p){ return p.address; });
   var headers = '<thead><tr><th>Asset</th><th>Suburb</th><th class="r">Diameter</th><th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>';
-  if (addrCol) headers += '<th>Start Address</th>';
+  if (addrCol) headers += '<th>Address</th>';
   if (upCol) headers += '<th>Upstream</th>';
   if (dnCol) headers += '<th>Downstream</th>';
   headers += '</tr></thead>';
@@ -7554,9 +7552,9 @@ async function downloadReliningPackagesZip() {
   try {
     const HEADERS = [
       'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
-      'SW_Condition', 'Observed_Condition', 'criticality_1dp',
-      'SW LGA 20% H1-H6', 'SW_Upstream Node', 'SW_Downstream Node',
-      'rate_per_m', 'pipe_cost', 'Pipe_Start_Address', 'Asset Suburb',
+      'SW_Condition', 'Observed_Condition',
+      'SW_Upstream Node', 'SW_Downstream Node',
+      'rate_per_m', 'pipe_cost', 'Address', 'Asset Suburb',
       'Diameters (mm)', 'Max Distance Between Pipes (km)'
     ];
     const expectedHeader = HEADERS.join(',');
@@ -7612,11 +7610,6 @@ async function downloadReliningPackagesZip() {
       return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
     }
 
-    function score1dp(value) {
-      const num = Number(value);
-      return Number.isFinite(num) ? (Math.floor(num * 10) / 10).toFixed(1) : '';
-    }
-
     const zip = new JSZip();
     const csvNames = [];
     const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60), ''];
@@ -7635,18 +7628,15 @@ async function downloadReliningPackagesZip() {
       assets.forEach(item => {
         const raw = item.raw || {};
         const diam = Math.round(item.diameterMm ?? 0);
-        const crit = Number.isFinite(item.criticalityScore) ? item.criticalityScore : 0;
         const lenM = Number.isFinite(item.lengthM) ? item.lengthM : 0;
         const cost = Number.isFinite(item.pipeCost) ? item.pipeCost : 0;
         totalLengthM += lenM;
         totalCost += cost;
 
-        const rawScore = raw['Score'] ?? raw['Criticality Score'] ?? raw['Critical_Score'] ?? crit;
         const rawObserved = String(getValueByAliases(raw, ['Observed_Condition', 'Observed Condition']) || '').trim();
-        const rawLga   = raw['SW LGA 20% H1-H6'] ?? raw['SW_LGA_20%_H1-H6'] ?? raw['LGA'] ?? '';
         const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
         const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
-        const rawAddr  = raw['Pipe_Start_Address'] ?? raw['Start Address']  ?? '';
+        const rawAddr  = raw['Formatted_Address'] ?? '';
 
         lines.push(csvRow([
           pkg.package_id,
@@ -7655,8 +7645,7 @@ async function downloadReliningPackagesZip() {
           lenM ? lenM.toFixed(1) + ' m' : '',
           raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
           rawObserved,
-          score1dp(rawScore || crit),
-          rawLga, rawUp, rawDown,
+          rawUp, rawDown,
           Number.isFinite(item.ratePerM) ? item.ratePerM : '',
           cost ? fmtCurrency(cost) : '',
           rawAddr,
