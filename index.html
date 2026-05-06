@@ -7117,7 +7117,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pl = polylinesByPackage[pid];
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({ weight: sel ? 2 : 1, opacity: sel ? 0.85 : (dim ? 0.1 : 0.45), dashArray: sel ? '' : '2 4' });
+      pl.setStyle({ weight: sel ? 2 : 1.25, opacity: sel ? 0.95 : (dim ? 0.12 : 0.6), dashArray: sel ? '' : '2 4' });
       if (sel && pl.bringToFront) pl.bringToFront();
     });
     Object.keys(markersByPackage).forEach(function(pid) {
@@ -7137,7 +7137,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     Object.keys(connectorsByPackage).forEach(function(pid) {
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      connectorsByPackage[pid].forEach(function(c) { c.setStyle({ opacity: sel ? 0.55 : (dim ? 0.06 : 0.3), weight: sel ? 2 : 1 }); });
+      connectorsByPackage[pid].forEach(function(c) { c.setStyle({ opacity: sel ? 0.85 : (dim ? 0.08 : 0.45), weight: sel ? 1.75 : 1.25 }); });
     });
     Array.prototype.forEach.call(document.querySelectorAll('#packagesTable tr.package-row'), function(tr) {
       tr.classList.toggle('selected', tr.getAttribute('data-package-id') === selectedPackageId);
@@ -7197,7 +7197,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
       pkgPipes.forEach(function(p) { pkgPoints.push([p.lat, p.lon]); allPoints.push([p.lat, p.lon]); });
       if (pkgPoints.length > 1) {
-        var pl = L.polyline(pkgPoints, { color: '#5A6B7A', weight: 1, opacity: 0.45, dashArray: '2 4' }).addTo(map);
+        var pl = L.polyline(pkgPoints, { color: '#000000', weight: 1.25, opacity: 0.6, dashArray: '2 4' }).addTo(map);
         pl.on('click', function(e) { L.DomEvent.stop(e); setSelection(pkg.id); });
         polylinesByPackage[pkg.id] = pl;
       }
@@ -7206,7 +7206,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (centroidLatLng && pkgPipes.length) {
         var connectors = [];
         pkgPipes.forEach(function(p) {
-          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: '#5A6B7A', weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false });
+          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: '#000000', weight: 1.25, opacity: 0.45, dashArray: '2 4', interactive: false });
           line.addTo(map);
           connectors.push(line);
         });
@@ -7820,10 +7820,18 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
           pipeCentre = [p.lat, p.lon];
         }
         if (pipeCentre) {
+          // White halo first, black dashed on top — readable on any aerial tile.
           L.polyline([centroidLatLng, pipeCentre], {
-            color: '#5A6B7A',
-            weight: 1,
-            opacity: 0.3,
+            color: '#FFFFFF',
+            weight: 2.5,
+            opacity: 0.55,
+            dashArray: '2 4',
+            interactive: false
+          }).addTo(map);
+          L.polyline([centroidLatLng, pipeCentre], {
+            color: '#000000',
+            weight: 1.25,
+            opacity: 0.75,
             dashArray: '2 4',
             interactive: false
           }).addTo(map);
@@ -8527,8 +8535,12 @@ function renderReliningPackagesMap(options = {}) {
     const style = getReliningPackageMapStyle(pkg, packageIndex);
     const color = style.color;
     // Subtle centroid-to-pipe helper lines, always visible per package.
+    // White halo + black dashed top so the line reads against any aerial tile,
+    // while staying visually secondary to the pipe geometry above it.
     if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
       const cLat = Number(pkg.lat), cLon = Number(pkg.lon);
+      const haloOpacity = style.isSelected ? 0.7 : (style.isDimmed ? 0.18 : 0.55);
+      const topOpacity = style.isSelected ? 0.95 : (style.isDimmed ? 0.25 : 0.75);
       assets.forEach(item => {
         const r = item.raw || {};
         const sP = resolveLineCoordinatePair(r, true);
@@ -8537,13 +8549,9 @@ function renderReliningPackagesMap(options = {}) {
         if (sP && eP && Number.isFinite(sP.lat) && Number.isFinite(eP.lat)) {
           pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
         } else { pcLat = item.lat; pcLon = item.lon; }
-        L.polyline([[cLat, cLon], [pcLat, pcLon]], {
-          color: '#5A6B7A',
-          weight: 1,
-          opacity: style.isSelected ? 0.55 : (style.isDimmed ? 0.1 : 0.32),
-          dashArray: '2 4',
-          interactive: false
-        }).addTo(reliningPackagesLayer);
+        const latLngs = [[cLat, cLon], [pcLat, pcLon]];
+        L.polyline(latLngs, { color: '#FFFFFF', weight: 2.5, opacity: haloOpacity, dashArray: '2 4', interactive: false }).addTo(reliningPackagesLayer);
+        L.polyline(latLngs, { color: '#000000', weight: 1.25, opacity: topOpacity, dashArray: '2 4', interactive: false }).addTo(reliningPackagesLayer);
       });
     }
     assets.forEach(item => {
@@ -8626,10 +8634,12 @@ function renderReliningPackagesMap(options = {}) {
         }
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
-      const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
-        color: '#5A6B7A',
-        weight: 1,
-        opacity: 0.45,
+      const connectorLatLngs = ordered.map(pt => [pt.lat, pt.lon]);
+      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 3, opacity: 0.7, dashArray: '2 4', interactive: false }).addTo(reliningPackagesLayer);
+      const connector = L.polyline(connectorLatLngs, {
+        color: '#000000',
+        weight: 1.5,
+        opacity: 0.9,
         dashArray: '2 4',
         interactive: false
       }).addTo(reliningPackagesLayer);
@@ -10403,8 +10413,11 @@ function renderCctvPackagesMap(options = {}) {
     const style = getCctvPackageMapStyle(pkg, packageIndex);
     const color = style.color;
     // Subtle centroid-to-pipe helper lines, always visible per package.
+    // White halo + black dashed top so the line reads against any aerial tile.
     if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
       const cLat = Number(pkg.lat), cLon = Number(pkg.lon);
+      const haloOpacity = style.isSelected ? 0.7 : (style.isDimmed ? 0.18 : 0.55);
+      const topOpacity = style.isSelected ? 0.95 : (style.isDimmed ? 0.25 : 0.75);
       assets.forEach(item => {
         const r = item.raw || {};
         const sP = resolveLineCoordinatePair(r, true);
@@ -10413,13 +10426,9 @@ function renderCctvPackagesMap(options = {}) {
         if (sP && eP && Number.isFinite(sP.lat) && Number.isFinite(eP.lat)) {
           pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
         } else { pcLat = item.lat; pcLon = item.lon; }
-        L.polyline([[cLat, cLon], [pcLat, pcLon]], {
-          color: '#5A6B7A',
-          weight: 1,
-          opacity: style.isSelected ? 0.55 : (style.isDimmed ? 0.1 : 0.32),
-          dashArray: '2 4',
-          interactive: false
-        }).addTo(cctvPackagesLayer);
+        const latLngs = [[cLat, cLon], [pcLat, pcLon]];
+        L.polyline(latLngs, { color: '#FFFFFF', weight: 2.5, opacity: haloOpacity, dashArray: '2 4', interactive: false }).addTo(cctvPackagesLayer);
+        L.polyline(latLngs, { color: '#000000', weight: 1.25, opacity: topOpacity, dashArray: '2 4', interactive: false }).addTo(cctvPackagesLayer);
       });
     }
     assets.forEach(item => {
@@ -10499,10 +10508,12 @@ function renderCctvPackagesMap(options = {}) {
         }
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
-      const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
-        color: '#5A6B7A',
-        weight: 1,
-        opacity: 0.45,
+      const connectorLatLngs = ordered.map(pt => [pt.lat, pt.lon]);
+      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 3, opacity: 0.7, dashArray: '2 4', interactive: false }).addTo(cctvPackagesLayer);
+      const connector = L.polyline(connectorLatLngs, {
+        color: '#000000',
+        weight: 1.5,
+        opacity: 0.9,
         dashArray: '2 4',
         interactive: false
       }).addTo(cctvPackagesLayer);
