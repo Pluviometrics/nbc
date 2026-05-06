@@ -7227,7 +7227,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           (p.material ? 'Material: ' + esc(p.material) + '<br>' : '') +
           'Condition: ' + esc(p.condition || '—') + '<br>' +
           'Length: ' + fmtNum(p.length_m, 1) + ' m' +
-          (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '')
+          (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
+          (p.address ? '<br>Address: ' + esc(p.address) : '')
         );
         marker.on('click', function(e) { L.DomEvent.stopPropagation(e); setSelection(pkg.id, { zoom: false }); });
         marker.addTo(map);
@@ -8394,6 +8395,25 @@ function buildReliningPackagePopup(pkg) {
     </div>`;
 }
 
+// Per-pipe popup bound to actual pipe geometry on the in-app maps. Used by both
+// the relining and CCTV in-app map render paths. Connectors/helper lines are
+// drawn with interactive:false so they never receive these popups.
+function buildPipePopupHtml(item, pkg) {
+  const raw = item && item.raw ? item.raw : {};
+  const assetId = String(item?.assetId ?? '');
+  const diameterMm = Number(item?.diameterMm);
+  const lengthM = Number(item?.lengthM) || 0;
+  const address = String(raw['Formatted_Address'] || raw['Asset_Address'] || raw['Pipe_Start_Address'] || '').trim();
+  const pkgId = String(pkg?.package_id || item?.package_id || '');
+  return `
+    <div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">
+      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${escapeHtml(assetId || 'Pipe')}${pkgId ? ` <span style="color:var(--text-l);font-weight:500">· ${escapeHtml(pkgId)}</span>` : ''}</div>
+      <div><strong>Pipe size:</strong> ${Number.isFinite(diameterMm) ? `${Math.round(diameterMm)} mm` : '—'}</div>
+      <div><strong>Pipe length:</strong> ${lengthM.toFixed(1)} m</div>
+      <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
+    </div>`;
+}
+
 function getSelectedReliningPackage() {
   if (!selectedReliningPackageId) return null;
   return (lastPackagingGeneration?.packages || []).find(pkg => pkg.package_id === selectedReliningPackageId) || null;
@@ -8573,7 +8593,7 @@ function renderReliningPackagesMap(options = {}) {
           weight: style.isSelected ? baseWeight + 2 : baseWeight,
           opacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.92)
         }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
-          .bindPopup(buildReliningPackagePopup(pkg))
+          .bindPopup(buildPipePopupHtml(item, pkg))
           .addTo(reliningPackagesLayer);
         if (style.isSelected && line.bringToFront) line.bringToFront();
         lineDrawn += 1;
@@ -8592,7 +8612,7 @@ function renderReliningPackagesMap(options = {}) {
           fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.78),
           opacity: style.isDimmed ? 0.7 : 1
         }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
-          .bindPopup(buildReliningPackagePopup(pkg))
+          .bindPopup(buildPipePopupHtml(item, pkg))
           .addTo(reliningPackagesLayer);
         if (!reliningPackageFocusLayers.has(pkg.package_id)) reliningPackageFocusLayers.set(pkg.package_id, marker);
         pointFallback += 1;
@@ -10449,7 +10469,9 @@ function renderCctvPackagesMap(options = {}) {
           color,
           weight: style.isSelected ? baseWeight + 2 : baseWeight,
           opacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : 0.92)
-        }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
+        }).on('click', () => selectCctvPackageFromMap(pkg.package_id))
+          .bindPopup(buildPipePopupHtml(item, pkg))
+          .addTo(cctvPackagesLayer);
         if (style.isSelected && line.bringToFront) line.bringToFront();
         if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, line);
         lineDrawn += 1;
@@ -10468,7 +10490,9 @@ function renderCctvPackagesMap(options = {}) {
           fillColor: color,
           fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : (item.isTbaCondition ? 0.95 : 0.78)),
           opacity: style.isDimmed ? 0.5 : 1
-        }).on('click', () => selectCctvPackageFromMap(pkg.package_id)).addTo(cctvPackagesLayer);
+        }).on('click', () => selectCctvPackageFromMap(pkg.package_id))
+          .bindPopup(buildPipePopupHtml(item, pkg))
+          .addTo(cctvPackagesLayer);
         if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, marker);
         pointFallback += 1;
         drawn += 1;
