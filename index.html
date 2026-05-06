@@ -7117,7 +7117,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pl = polylinesByPackage[pid];
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({ weight: sel ? 3 : 2, opacity: sel ? 0.95 : (dim ? 0.12 : 0.65), dashArray: sel ? '' : '8 6' });
+      pl.setStyle({ weight: sel ? 3.75 : 2.5, opacity: sel ? 0.95 : (dim ? 0.12 : 0.65), dashArray: sel ? '' : '12 9' });
       if (sel && pl.bringToFront) pl.bringToFront();
     });
     Object.keys(markersByPackage).forEach(function(pid) {
@@ -7137,7 +7137,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     Object.keys(connectorsByPackage).forEach(function(pid) {
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      connectorsByPackage[pid].forEach(function(c) { c.setStyle({ opacity: sel ? 0.9 : (dim ? 0.08 : 0.55), weight: sel ? 2.75 : 2 }); });
+      connectorsByPackage[pid].forEach(function(c) { c.setStyle({ opacity: sel ? 0.9 : (dim ? 0.08 : 0.55), weight: sel ? 3.5 : 2.5 }); });
     });
     Array.prototype.forEach.call(document.querySelectorAll('#packagesTable tr.package-row'), function(tr) {
       tr.classList.toggle('selected', tr.getAttribute('data-package-id') === selectedPackageId);
@@ -7197,7 +7197,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
       pkgPipes.forEach(function(p) { pkgPoints.push([p.lat, p.lon]); allPoints.push([p.lat, p.lon]); });
       if (pkgPoints.length > 1) {
-        var pl = L.polyline(pkgPoints, { color: '#000000', weight: 2, opacity: 0.65, dashArray: '8 6' }).addTo(map);
+        var pl = L.polyline(pkgPoints, { color: '#000000', weight: 2.5, opacity: 0.65, dashArray: '12 9' }).addTo(map);
         pl.on('click', function(e) { L.DomEvent.stop(e); setSelection(pkg.id); });
         polylinesByPackage[pkg.id] = pl;
       }
@@ -7206,7 +7206,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (centroidLatLng && pkgPipes.length) {
         var connectors = [];
         pkgPipes.forEach(function(p) {
-          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: '#000000', weight: 2, opacity: 0.55, dashArray: '8 6', interactive: false });
+          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: '#000000', weight: 2.5, opacity: 0.55, dashArray: '12 9', interactive: false });
           line.addTo(map);
           connectors.push(line);
         });
@@ -7823,16 +7823,16 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
           // White halo first, black dashed on top — readable on any aerial tile.
           L.polyline([centroidLatLng, pipeCentre], {
             color: '#FFFFFF',
-            weight: 4,
+            weight: 5,
             opacity: 0.6,
-            dashArray: '8 6',
+            dashArray: '12 9',
             interactive: false
           }).addTo(map);
           L.polyline([centroidLatLng, pipeCentre], {
             color: '#000000',
-            weight: 2,
+            weight: 2.5,
             opacity: 0.8,
-            dashArray: '8 6',
+            dashArray: '12 9',
             interactive: false
           }).addTo(map);
           connectorCount += 1;
@@ -8550,8 +8550,8 @@ function renderReliningPackagesMap(options = {}) {
           pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
         } else { pcLat = item.lat; pcLon = item.lon; }
         const latLngs = [[cLat, cLon], [pcLat, pcLon]];
-        L.polyline(latLngs, { color: '#FFFFFF', weight: 4, opacity: haloOpacity, dashArray: '8 6', interactive: false }).addTo(reliningPackagesLayer);
-        L.polyline(latLngs, { color: '#000000', weight: 2, opacity: topOpacity, dashArray: '8 6', interactive: false }).addTo(reliningPackagesLayer);
+        L.polyline(latLngs, { color: '#FFFFFF', weight: 5, opacity: haloOpacity, dashArray: '12 9', interactive: false }).addTo(reliningPackagesLayer);
+        L.polyline(latLngs, { color: '#000000', weight: 2.5, opacity: topOpacity, dashArray: '12 9', interactive: false }).addTo(reliningPackagesLayer);
       });
     }
     assets.forEach(item => {
@@ -8635,12 +8635,12 @@ function renderReliningPackagesMap(options = {}) {
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
       const connectorLatLngs = ordered.map(pt => [pt.lat, pt.lon]);
-      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 5, opacity: 0.7, dashArray: '8 6', interactive: false }).addTo(reliningPackagesLayer);
+      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 6, opacity: 0.7, dashArray: '12 9', interactive: false }).addTo(reliningPackagesLayer);
       const connector = L.polyline(connectorLatLngs, {
         color: '#000000',
-        weight: 2.5,
+        weight: 3,
         opacity: 0.9,
-        dashArray: '8 6',
+        dashArray: '12 9',
         interactive: false
       }).addTo(reliningPackagesLayer);
       if (connector.bringToFront) connector.bringToFront();
@@ -10427,8 +10427,8 @@ function renderCctvPackagesMap(options = {}) {
           pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
         } else { pcLat = item.lat; pcLon = item.lon; }
         const latLngs = [[cLat, cLon], [pcLat, pcLon]];
-        L.polyline(latLngs, { color: '#FFFFFF', weight: 4, opacity: haloOpacity, dashArray: '8 6', interactive: false }).addTo(cctvPackagesLayer);
-        L.polyline(latLngs, { color: '#000000', weight: 2, opacity: topOpacity, dashArray: '8 6', interactive: false }).addTo(cctvPackagesLayer);
+        L.polyline(latLngs, { color: '#FFFFFF', weight: 5, opacity: haloOpacity, dashArray: '12 9', interactive: false }).addTo(cctvPackagesLayer);
+        L.polyline(latLngs, { color: '#000000', weight: 2.5, opacity: topOpacity, dashArray: '12 9', interactive: false }).addTo(cctvPackagesLayer);
       });
     }
     assets.forEach(item => {
@@ -10509,12 +10509,12 @@ function renderCctvPackagesMap(options = {}) {
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
       const connectorLatLngs = ordered.map(pt => [pt.lat, pt.lon]);
-      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 5, opacity: 0.7, dashArray: '8 6', interactive: false }).addTo(cctvPackagesLayer);
+      L.polyline(connectorLatLngs, { color: '#FFFFFF', weight: 6, opacity: 0.7, dashArray: '12 9', interactive: false }).addTo(cctvPackagesLayer);
       const connector = L.polyline(connectorLatLngs, {
         color: '#000000',
-        weight: 2.5,
+        weight: 3,
         opacity: 0.9,
-        dashArray: '8 6',
+        dashArray: '12 9',
         interactive: false
       }).addTo(cctvPackagesLayer);
       if (connector.bringToFront) connector.bringToFront();
