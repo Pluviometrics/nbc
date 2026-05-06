@@ -7473,9 +7473,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '</div>',
     '</main>',
     '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Report — read-only.</footer>',
-    '<script id="report-data" type="application/json">' + json + '<\\/script>',
-    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\\/script>',
-    '<script>' + runtimeJs + '<\\/script>',
+    '<script id="report-data" type="application/json">' + json + '<\/script>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\/script>',
+    '<script>' + runtimeJs + '<\/script>',
     '</body>',
     '</html>'
   ].join('\n');
@@ -7944,7 +7944,7 @@ async function downloadReliningPackagesZip() {
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'rate_per_m', 'pipe_cost', 'Address', 'Asset Suburb',
-      'Diameters (mm)', 'Max Distance Between Pipes (km)'
+      'Max Distance Between Pipes (km)'
     ];
     const expectedHeader = HEADERS.join(',');
 
@@ -8039,8 +8039,7 @@ async function downloadReliningPackagesZip() {
           cost ? fmtCurrency(cost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
-          diametersStr,
-          maxDist
+          ''
         ]));
       });
 
@@ -8049,7 +8048,6 @@ async function downloadReliningPackagesZip() {
       totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
       totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
       totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
-      totalsRow[HEADERS.indexOf('Diameters (mm)')]     = diametersStr;
       totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
       lines.push(csvRow(totalsRow));
 
@@ -9926,7 +9924,7 @@ async function downloadCctvPackagesZip() {
           pkgTotalCost ? fmtCurrency(pkgTotalCost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
-          maxDist
+          ''
         ]));
       });
 
