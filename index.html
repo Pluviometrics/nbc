@@ -8400,16 +8400,42 @@ function buildReliningPackagePopup(pkg) {
 // drawn with interactive:false so they never receive these popups.
 function buildPipePopupHtml(item, pkg) {
   const raw = item && item.raw ? item.raw : {};
-  const assetId = String(item?.assetId ?? '');
-  const diameterMm = Number(item?.diameterMm);
-  const lengthM = Number(item?.lengthM) || 0;
-  const address = String(raw['Formatted_Address'] || raw['Asset_Address'] || raw['Pipe_Start_Address'] || '').trim();
-  const pkgId = String(pkg?.package_id || item?.package_id || '');
+  const firstStr = (...vals) => {
+    for (const v of vals) {
+      const s = String(v ?? '').trim();
+      if (s) return s;
+    }
+    return '';
+  };
+  const firstPositiveNum = (...vals) => {
+    for (const v of vals) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+  };
+  const assetId = firstStr(
+    item?.assetId,
+    raw['asset_id'], raw['Asset_ID'], raw['Asset ID'], raw['Asset']
+  );
+  const sizeMm = firstPositiveNum(
+    item?.diameterMm,
+    raw['diameter'], raw['Diameter'], raw['Pipe_Diameter'],
+    raw['SWP_Pipe Diameter_mm'], raw['SWP_Pipe_Diameter_mm']
+  );
+  const lengthM = firstPositiveNum(
+    item?.lengthM,
+    raw['pipe_length'], raw['Shape_Length'], raw['Length'], raw['Spatial Length_m']
+  );
+  const address = firstStr(
+    raw['Formatted_Address'], raw['Pipe_Start_Address'], raw['Address'], raw['Asset_Address']
+  );
+  const pkgId = firstStr(pkg?.package_id, item?.package_id);
   return `
     <div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">
       <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${escapeHtml(assetId || 'Pipe')}${pkgId ? ` <span style="color:var(--text-l);font-weight:500">· ${escapeHtml(pkgId)}</span>` : ''}</div>
-      <div><strong>Pipe size:</strong> ${Number.isFinite(diameterMm) ? `${Math.round(diameterMm)} mm` : '—'}</div>
-      <div><strong>Pipe length:</strong> ${lengthM.toFixed(1)} m</div>
+      <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
+      <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
     </div>`;
 }
@@ -8592,9 +8618,15 @@ function renderReliningPackagesMap(options = {}) {
           color,
           weight: style.isSelected ? baseWeight + 2 : baseWeight,
           opacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.92)
-        }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
-          .bindPopup(buildPipePopupHtml(item, pkg))
-          .addTo(reliningPackagesLayer);
+        }).on('click', (e) => {
+          // Open popup via L.popup() on the map so it survives the layerGroup
+          // clearLayers() that runs during the package re-render below.
+          L.popup({ closeButton: true, autoPan: false })
+            .setLatLng(e.latlng)
+            .setContent(buildPipePopupHtml(item, pkg))
+            .openOn(reliningPackagesMap);
+          setTimeout(() => focusReliningPackageOnMap(pkg.package_id, { scroll: false }), 0);
+        }).addTo(reliningPackagesLayer);
         if (style.isSelected && line.bringToFront) line.bringToFront();
         lineDrawn += 1;
         drawn += 1;
@@ -8611,9 +8643,13 @@ function renderReliningPackagesMap(options = {}) {
           fillColor: color,
           fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.78),
           opacity: style.isDimmed ? 0.7 : 1
-        }).on('click', () => focusReliningPackageOnMap(pkg.package_id, { scroll: false }))
-          .bindPopup(buildPipePopupHtml(item, pkg))
-          .addTo(reliningPackagesLayer);
+        }).on('click', (e) => {
+          L.popup({ closeButton: true, autoPan: false })
+            .setLatLng(e.latlng)
+            .setContent(buildPipePopupHtml(item, pkg))
+            .openOn(reliningPackagesMap);
+          setTimeout(() => focusReliningPackageOnMap(pkg.package_id, { scroll: false }), 0);
+        }).addTo(reliningPackagesLayer);
         if (!reliningPackageFocusLayers.has(pkg.package_id)) reliningPackageFocusLayers.set(pkg.package_id, marker);
         pointFallback += 1;
         drawn += 1;
@@ -10469,9 +10505,13 @@ function renderCctvPackagesMap(options = {}) {
           color,
           weight: style.isSelected ? baseWeight + 2 : baseWeight,
           opacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : 0.92)
-        }).on('click', () => selectCctvPackageFromMap(pkg.package_id))
-          .bindPopup(buildPipePopupHtml(item, pkg))
-          .addTo(cctvPackagesLayer);
+        }).on('click', (e) => {
+          L.popup({ closeButton: true, autoPan: false })
+            .setLatLng(e.latlng)
+            .setContent(buildPipePopupHtml(item, pkg))
+            .openOn(cctvPackagesMap);
+          setTimeout(() => selectCctvPackageFromMap(pkg.package_id), 0);
+        }).addTo(cctvPackagesLayer);
         if (style.isSelected && line.bringToFront) line.bringToFront();
         if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, line);
         lineDrawn += 1;
@@ -10490,9 +10530,13 @@ function renderCctvPackagesMap(options = {}) {
           fillColor: color,
           fillOpacity: style.isSelected ? 1 : (style.isDimmed ? 0.4 : (item.isTbaCondition ? 0.95 : 0.78)),
           opacity: style.isDimmed ? 0.5 : 1
-        }).on('click', () => selectCctvPackageFromMap(pkg.package_id))
-          .bindPopup(buildPipePopupHtml(item, pkg))
-          .addTo(cctvPackagesLayer);
+        }).on('click', (e) => {
+          L.popup({ closeButton: true, autoPan: false })
+            .setLatLng(e.latlng)
+            .setContent(buildPipePopupHtml(item, pkg))
+            .openOn(cctvPackagesMap);
+          setTimeout(() => selectCctvPackageFromMap(pkg.package_id), 0);
+        }).addTo(cctvPackagesLayer);
         if (!cctvPackageFocusLayers.has(pkg.package_id)) cctvPackageFocusLayers.set(pkg.package_id, marker);
         pointFallback += 1;
         drawn += 1;
