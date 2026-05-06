@@ -7117,7 +7117,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pl = polylinesByPackage[pid];
       var sel = (pid === selectedPackageId);
       var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({ weight: sel ? 7 : 3, opacity: sel ? 1 : (dim ? 0.18 : 0.7), dashArray: sel ? '' : '6 6' });
+      pl.setStyle({ weight: sel ? 2 : 1, opacity: sel ? 0.85 : (dim ? 0.1 : 0.45), dashArray: sel ? '' : '2 4' });
       if (sel && pl.bringToFront) pl.bringToFront();
     });
     Object.keys(markersByPackage).forEach(function(pid) {
@@ -7197,7 +7197,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
       pkgPipes.forEach(function(p) { pkgPoints.push([p.lat, p.lon]); allPoints.push([p.lat, p.lon]); });
       if (pkgPoints.length > 1) {
-        var pl = L.polyline(pkgPoints, { color: color, weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(map);
+        var pl = L.polyline(pkgPoints, { color: '#5A6B7A', weight: 1, opacity: 0.45, dashArray: '2 4' }).addTo(map);
         pl.on('click', function(e) { L.DomEvent.stop(e); setSelection(pkg.id); });
         polylinesByPackage[pkg.id] = pl;
       }
@@ -7206,7 +7206,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (centroidLatLng && pkgPipes.length) {
         var connectors = [];
         pkgPipes.forEach(function(p) {
-          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: color, weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false });
+          var line = L.polyline([centroidLatLng, [p.lat, p.lon]], { color: '#5A6B7A', weight: 1, opacity: 0.3, dashArray: '2 4', interactive: false });
           line.addTo(map);
           connectors.push(line);
         });
@@ -7798,9 +7798,20 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
       if (sub) sub.textContent += ' · ' + fallbackCount + ' pipe(s) drawn as fallback markers (missing endpoints).';
     }
 
-    // Subtle centroid-to-pipe helper lines, mirroring the combined report's style.
+    // Subtle centroid-to-pipe helper lines. Always draw — fall back to a
+    // computed centroid if the package didn't ship one in the data envelope.
+    var centroidLatLng = null;
     if (pkg.centroid && Number.isFinite(pkg.centroid[0]) && Number.isFinite(pkg.centroid[1])) {
-      var centroidLatLng = [pkg.centroid[0], pkg.centroid[1]];
+      centroidLatLng = [Number(pkg.centroid[0]), Number(pkg.centroid[1])];
+    } else if (pts.length) {
+      var sumLat = 0, sumLon = 0, n = 0;
+      pts.forEach(function(pt) {
+        if (Number.isFinite(pt[0]) && Number.isFinite(pt[1])) { sumLat += pt[0]; sumLon += pt[1]; n += 1; }
+      });
+      if (n) centroidLatLng = [sumLat / n, sumLon / n];
+    }
+    if (centroidLatLng) {
+      var connectorCount = 0;
       pipes.forEach(function(p) {
         var pipeCentre = null;
         if (hasEndpoints(p)) {
@@ -7816,8 +7827,10 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
             dashArray: '2 4',
             interactive: false
           }).addTo(map);
+          connectorCount += 1;
         }
       });
+      console.info('[package-map] drew ' + connectorCount + ' centroid connector(s)');
     }
 
     if (pts.length) {
@@ -7925,8 +7938,12 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
 
   const gmapsLat = Number.isFinite(pkg.lat) ? Number(pkg.lat) : (centroid ? Number(centroid[0]) : null);
   const gmapsLon = Number.isFinite(pkg.lon) ? Number(pkg.lon) : (centroid ? Number(centroid[1]) : null);
+  // Pan-only URL — Google Maps's @lat,lng,zoomZ form opens the area without
+  // dropping a search pin and without rendering arbitrary user geometry, which
+  // matches the "Open Area in Google Maps" intent. Pipe geometry is exported
+  // separately as the sibling _pipes.kml for Google My Maps import.
   const gmapsHref = (Number.isFinite(gmapsLat) && Number.isFinite(gmapsLon))
-    ? `https://www.google.com/maps?q=${gmapsLat.toFixed(6)},${gmapsLon.toFixed(6)}`
+    ? `https://www.google.com/maps/@${gmapsLat.toFixed(6)},${gmapsLon.toFixed(6)},17z`
     : 'https://www.google.com/maps';
   const safePkgId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
 
@@ -8018,7 +8035,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '<div class="cctv-map-title">Package Pipes</div>',
     '<div class="cctv-map-sub">Pipes, centroid, and connector lines for this package only.</div>',
     '</div>',
-    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + gmapsHref + '" target="_blank" rel="noopener">Open Area in Google Maps ↗</a><a class="export-btn" href="' + safePkgId + '_pipes.kml" download>Download Pipes (KML)</a></div>',
+    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + gmapsHref + '" target="_blank" rel="noopener">Open Area in Google Maps ↗</a><a class="export-btn" href="' + safePkgId + '_pipes.kml" download>Download Pipes for Google My Maps (KML)</a></div>',
     '</div>',
     '<div id="map"></div>',
     '</div>',
@@ -8509,6 +8526,26 @@ function renderReliningPackagesMap(options = {}) {
     if (!assets.length) return;
     const style = getReliningPackageMapStyle(pkg, packageIndex);
     const color = style.color;
+    // Subtle centroid-to-pipe helper lines, always visible per package.
+    if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
+      const cLat = Number(pkg.lat), cLon = Number(pkg.lon);
+      assets.forEach(item => {
+        const r = item.raw || {};
+        const sP = resolveLineCoordinatePair(r, true);
+        const eP = resolveLineCoordinatePair(r, false);
+        let pcLat, pcLon;
+        if (sP && eP && Number.isFinite(sP.lat) && Number.isFinite(eP.lat)) {
+          pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
+        } else { pcLat = item.lat; pcLon = item.lon; }
+        L.polyline([[cLat, cLon], [pcLat, pcLon]], {
+          color: '#5A6B7A',
+          weight: 1,
+          opacity: style.isSelected ? 0.55 : (style.isDimmed ? 0.1 : 0.32),
+          dashArray: '2 4',
+          interactive: false
+        }).addTo(reliningPackagesLayer);
+      });
+    }
     assets.forEach(item => {
       const raw = item.raw || {};
       const startPair = resolveLineCoordinatePair(raw, true);
@@ -10365,6 +10402,26 @@ function renderCctvPackagesMap(options = {}) {
     if (!assets.length) return;
     const style = getCctvPackageMapStyle(pkg, packageIndex);
     const color = style.color;
+    // Subtle centroid-to-pipe helper lines, always visible per package.
+    if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
+      const cLat = Number(pkg.lat), cLon = Number(pkg.lon);
+      assets.forEach(item => {
+        const r = item.raw || {};
+        const sP = resolveLineCoordinatePair(r, true);
+        const eP = resolveLineCoordinatePair(r, false);
+        let pcLat, pcLon;
+        if (sP && eP && Number.isFinite(sP.lat) && Number.isFinite(eP.lat)) {
+          pcLat = (sP.lat + eP.lat) / 2; pcLon = (sP.lon + eP.lon) / 2;
+        } else { pcLat = item.lat; pcLon = item.lon; }
+        L.polyline([[cLat, cLon], [pcLat, pcLon]], {
+          color: '#5A6B7A',
+          weight: 1,
+          opacity: style.isSelected ? 0.55 : (style.isDimmed ? 0.1 : 0.32),
+          dashArray: '2 4',
+          interactive: false
+        }).addTo(cctvPackagesLayer);
+      });
+    }
     assets.forEach(item => {
       const raw = item.raw || {};
       const startPair = resolveLineCoordinatePair(raw, true);
