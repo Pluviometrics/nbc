@@ -7498,13 +7498,27 @@ function buildPipeKml(pkg, packageColor) {
   const hex = String(packageColor || '#00847F').replace(/^#/, '').padEnd(6, '0').slice(0, 6);
   const r = hex.slice(0, 2), g = hex.slice(2, 4), b = hex.slice(4, 6);
   const kmlColor = ('ff' + b + g + r).toLowerCase(); // KML uses AABBGGRR
+
+  function endpointForItem(item, isStart) {
+    const raw = item && item.raw ? item.raw : {};
+    if (typeof resolveLineCoordinatePair === 'function') {
+      const pair = resolveLineCoordinatePair(raw, isStart);
+      if (pair && Number.isFinite(pair.lat) && Number.isFinite(pair.lon)) return pair;
+    }
+    // Secondary fallback: some upstream paths store endpoints directly on the
+    // asset object (e.g. report-pipes mappings) instead of in raw.
+    const lat = Number(isStart ? item.start_lat : item.end_lat);
+    const lon = Number(isStart ? item.start_lon : item.end_lon);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    return null;
+  }
+
+  let lineCount = 0;
+  let pointCount = 0;
   const placemarks = (pkg.assets || []).map((item) => {
-    const raw = item.raw || {};
-    const startPair = typeof resolveLineCoordinatePair === 'function' ? resolveLineCoordinatePair(raw, true) : null;
-    const endPair = typeof resolveLineCoordinatePair === 'function' ? resolveLineCoordinatePair(raw, false) : null;
+    const startPair = endpointForItem(item, true);
+    const endPair = endpointForItem(item, false);
     const hasEndpoints = startPair && endPair
-      && Number.isFinite(startPair.lat) && Number.isFinite(startPair.lon)
-      && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
       && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
     const ptLat = Number.isFinite(item.lat) ? Number(item.lat) : null;
     const ptLon = Number.isFinite(item.lon) ? Number(item.lon) : null;
@@ -7518,13 +7532,16 @@ function buildPipeKml(pkg, packageColor) {
       `Condition: ${item.conditionLabel || item.condition || ''}`
     ].join('\n');
     if (hasEndpoints) {
-      return `  <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipeLine</styleUrl><LineString><tessellate>1</tessellate><coordinates>${startPair.lon},${startPair.lat},0 ${endPair.lon},${endPair.lat},0</coordinates></LineString></Placemark>`;
+      lineCount += 1;
+      return `    <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipeLine</styleUrl><LineString><tessellate>1</tessellate><coordinates>${startPair.lon},${startPair.lat},0 ${endPair.lon},${endPair.lat},0</coordinates></LineString></Placemark>`;
     }
     if (ptLat != null && ptLon != null) {
-      return `  <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipePoint</styleUrl><Point><coordinates>${ptLon},${ptLat},0</coordinates></Point></Placemark>`;
+      pointCount += 1;
+      return `    <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipePoint</styleUrl><Point><coordinates>${ptLon},${ptLat},0</coordinates></Point></Placemark>`;
     }
     return '';
   }).filter(Boolean).join('\n');
+  console.info(`[KML] ${pkg.package_id || 'pkg'}: ${lineCount} pipe LineString(s), ${pointCount} centroid Point(s)`);
   return `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
@@ -7532,7 +7549,10 @@ function buildPipeKml(pkg, packageColor) {
   <description>${escXml(`NBC pipe geometry export for Google My Maps import. Generated ${new Date().toISOString()}.`)}</description>
   <Style id="pipeLine"><LineStyle><color>${kmlColor}</color><width>4</width></LineStyle></Style>
   <Style id="pipePoint"><IconStyle><color>${kmlColor}</color><scale>1.1</scale></IconStyle></Style>
+  <Folder>
+    <name>Pipes</name>
 ${placemarks}
+  </Folder>
 </Document>
 </kml>`;
 }
@@ -7778,6 +7798,28 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
       if (sub) sub.textContent += ' · ' + fallbackCount + ' pipe(s) drawn as fallback markers (missing endpoints).';
     }
 
+    // Subtle centroid-to-pipe helper lines, mirroring the combined report's style.
+    if (pkg.centroid && Number.isFinite(pkg.centroid[0]) && Number.isFinite(pkg.centroid[1])) {
+      var centroidLatLng = [pkg.centroid[0], pkg.centroid[1]];
+      pipes.forEach(function(p) {
+        var pipeCentre = null;
+        if (hasEndpoints(p)) {
+          pipeCentre = [(p.start_lat + p.end_lat) / 2, (p.start_lon + p.end_lon) / 2];
+        } else if (p.lat != null && p.lon != null && Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
+          pipeCentre = [p.lat, p.lon];
+        }
+        if (pipeCentre) {
+          L.polyline([centroidLatLng, pipeCentre], {
+            color: '#5A6B7A',
+            weight: 1,
+            opacity: 0.3,
+            dashArray: '2 4',
+            interactive: false
+          }).addTo(map);
+        }
+      });
+    }
+
     if (pts.length) {
       bounds = L.latLngBounds(pts).pad(0.15);
       map.fitBounds(bounds);
@@ -7976,7 +8018,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '<div class="cctv-map-title">Package Pipes</div>',
     '<div class="cctv-map-sub">Pipes, centroid, and connector lines for this package only.</div>',
     '</div>',
-    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + gmapsHref + '" target="_blank" rel="noopener">Open in Google Maps ↗</a><a class="export-btn" href="' + safePkgId + '_pipes.kml" download>Download Pipes (KML)</a></div>',
+    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + gmapsHref + '" target="_blank" rel="noopener">Open Area in Google Maps ↗</a><a class="export-btn" href="' + safePkgId + '_pipes.kml" download>Download Pipes (KML)</a></div>',
     '</div>',
     '<div id="map"></div>',
     '</div>',
@@ -8548,10 +8590,10 @@ function renderReliningPackagesMap(options = {}) {
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
       const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
-        color: '#111827',
-        weight: 2.25,
-        opacity: 0.9,
-        dashArray: '4 6',
+        color: '#5A6B7A',
+        weight: 1,
+        opacity: 0.45,
+        dashArray: '2 4',
         interactive: false
       }).addTo(reliningPackagesLayer);
       if (connector.bringToFront) connector.bringToFront();
@@ -10401,10 +10443,10 @@ function renderCctvPackagesMap(options = {}) {
         ordered.push(remaining.splice(bestIdx, 1)[0]);
       }
       const connector = L.polyline(ordered.map(pt => [pt.lat, pt.lon]), {
-        color: '#111827',
-        weight: 2.25,
-        opacity: 0.9,
-        dashArray: '4 6',
+        color: '#5A6B7A',
+        weight: 1,
+        opacity: 0.45,
+        dashArray: '2 4',
         interactive: false
       }).addTo(cctvPackagesLayer);
       if (connector.bringToFront) connector.bringToFront();
