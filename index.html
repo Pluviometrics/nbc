@@ -6,7 +6,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
 <meta http-equiv="Pragma" content="no-cache"/>
 <meta http-equiv="Expires" content="0"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
@@ -7171,16 +7171,24 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     }
     map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
     var tileFailedNoticed = false;
-    var tileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '&copy; Spatial Services, NSW Department of Customer Service', maxZoom: 21
+    });
+    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO', subdomains: 'abcd', maxZoom: 19
     });
-    tileLayer.on('tileerror', function() {
+    sixAerial.on('tileerror', function() {
       if (tileFailedNoticed) return; tileFailedNoticed = true;
       var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
-      n.textContent = 'Map tiles could not be loaded (offline?). Markers and connectors remain visible.';
+      n.textContent = 'Aerial tiles could not be loaded (offline?). Toggle to Streets in the map control, or use markers and connectors.';
       mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
     });
-    tileLayer.addTo(map);
+    sixAerial.addTo(map);
+    L.control.layers(
+      { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
+      null,
+      { position: 'topright', collapsed: true }
+    ).addTo(map);
 
     var allPoints = [];
     packages.forEach(function(pkg) {
@@ -7481,6 +7489,54 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ].join('\n');
 }
 
+// Per-package KML for Google My Maps import. Polyline geometry where pipe
+// endpoints are available, point fallback where only a centroid is known.
+function buildPipeKml(pkg, packageColor) {
+  const escXml = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+  const hex = String(packageColor || '#00847F').replace(/^#/, '').padEnd(6, '0').slice(0, 6);
+  const r = hex.slice(0, 2), g = hex.slice(2, 4), b = hex.slice(4, 6);
+  const kmlColor = ('ff' + b + g + r).toLowerCase(); // KML uses AABBGGRR
+  const placemarks = (pkg.assets || []).map((item) => {
+    const raw = item.raw || {};
+    const startPair = typeof resolveLineCoordinatePair === 'function' ? resolveLineCoordinatePair(raw, true) : null;
+    const endPair = typeof resolveLineCoordinatePair === 'function' ? resolveLineCoordinatePair(raw, false) : null;
+    const hasEndpoints = startPair && endPair
+      && Number.isFinite(startPair.lat) && Number.isFinite(startPair.lon)
+      && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
+      && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
+    const ptLat = Number.isFinite(item.lat) ? Number(item.lat) : null;
+    const ptLon = Number.isFinite(item.lon) ? Number(item.lon) : null;
+    const diam = item.diameterMm ? `${Math.round(item.diameterMm)}mm` : '';
+    const name = (item.assetId || 'Pipe') + (diam ? ` (${diam})` : '');
+    const desc = [
+      `Package: ${pkg.package_id || ''}`,
+      `Suburb: ${item.suburb || ''}`,
+      `Diameter: ${diam || '?'}`,
+      `Length: ${(Number(item.lengthM) || 0).toFixed(1)} m`,
+      `Condition: ${item.conditionLabel || item.condition || ''}`
+    ].join('\n');
+    if (hasEndpoints) {
+      return `  <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipeLine</styleUrl><LineString><tessellate>1</tessellate><coordinates>${startPair.lon},${startPair.lat},0 ${endPair.lon},${endPair.lat},0</coordinates></LineString></Placemark>`;
+    }
+    if (ptLat != null && ptLon != null) {
+      return `  <Placemark><name>${escXml(name)}</name><description>${escXml(desc)}</description><styleUrl>#pipePoint</styleUrl><Point><coordinates>${ptLon},${ptLat},0</coordinates></Point></Placemark>`;
+    }
+    return '';
+  }).filter(Boolean).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>${escXml(pkg.package_id || 'Package')}</name>
+  <description>${escXml(`NBC pipe geometry export for Google My Maps import. Generated ${new Date().toISOString()}.`)}</description>
+  <Style id="pipeLine"><LineStyle><color>${kmlColor}</color><width>4</width></LineStyle></Style>
+  <Style id="pipePoint"><IconStyle><color>${kmlColor}</color><scale>1.1</scale></IconStyle></Style>
+${placemarks}
+</Document>
+</kml>`;
+}
+
 function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind) {
   options = options || {};
   packageColor = packageColor || '#00847F';
@@ -7630,17 +7686,25 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     }
     map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
     var tileFailed = false;
-    var tile = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: '&copy; Spatial Services, NSW Department of Customer Service', maxZoom: 21
+    });
+    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO', subdomains: 'abcd', maxZoom: 19
     });
-    tile.on('tileerror', function() {
+    sixAerial.on('tileerror', function() {
       if (tileFailed) return; tileFailed = true;
       var n = document.createElement('div');
       n.className = 'map-warning';
-      n.textContent = 'Map tiles could not be loaded (offline?). Markers and connectors remain visible.';
+      n.textContent = 'Aerial tiles could not be loaded (offline?). Toggle to Streets in the map control, or use markers and connectors.';
       mapEl.parentNode.appendChild(n);
     });
-    tile.addTo(map);
+    sixAerial.addTo(map);
+    L.control.layers(
+      { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
+      null,
+      { position: 'topright', collapsed: true }
+    ).addTo(map);
 
     function getPipeWeight(dia) {
       var d = Number(dia);
@@ -7817,6 +7881,13 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
 })();
 `;
 
+  const gmapsLat = Number.isFinite(pkg.lat) ? Number(pkg.lat) : (centroid ? Number(centroid[0]) : null);
+  const gmapsLon = Number.isFinite(pkg.lon) ? Number(pkg.lon) : (centroid ? Number(centroid[1]) : null);
+  const gmapsHref = (Number.isFinite(gmapsLat) && Number.isFinite(gmapsLon))
+    ? `https://www.google.com/maps?q=${gmapsLat.toFixed(6)},${gmapsLon.toFixed(6)}`
+    : 'https://www.google.com/maps';
+  const safePkgId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+
   return [
     '<!DOCTYPE html>',
     '<html lang="en">',
@@ -7905,7 +7976,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '<div class="cctv-map-title">Package Pipes</div>',
     '<div class="cctv-map-sub">Pipes, centroid, and connector lines for this package only.</div>',
     '</div>',
-    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + (String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE') + '.kml" download>Open in Google Earth ↗</a></div>',
+    '<div class="ca-actions"><button type="button" class="export-btn" id="fitBtn">Fit Pipes</button><a class="export-btn" href="' + gmapsHref + '" target="_blank" rel="noopener">Open in Google Maps ↗</a><a class="export-btn" href="' + safePkgId + '_pipes.kml" download>Download Pipes (KML)</a></div>',
     '</div>',
     '<div id="map"></div>',
     '</div>',
@@ -8126,6 +8197,8 @@ async function downloadReliningPackagesZip() {
         const mapHtml = buildSinglePackageMapHtml(pkg, lastPackagingGeneration?.options || null, generatedAtIso, color);
         zip.file(mapFilename, mapHtml);
         expectedMapNames.push(mapFilename);
+        const safePkgId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+        zip.file(`package_maps/${safePkgId}_pipes.kml`, buildPipeKml(pkg, color));
       } catch (mapErr) {
         console.error('[ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
         throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
@@ -8199,11 +8272,21 @@ function ensureReliningPackagesMap() {
   }
   reliningPackagesMap = L.map('reliningPackagesMap').setView([-33.75, 151.25], 11);
   reliningPackagesMap.on('move zoom resize', updateReliningSelectedMapOverlay);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
+  const sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Spatial Services, NSW Department of Customer Service',
+    maxZoom: 21
+  });
+  const cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap, &copy; CARTO',
     subdomains: 'abcd',
     maxZoom: 19
-  }).addTo(reliningPackagesMap);
+  });
+  sixAerial.addTo(reliningPackagesMap);
+  L.control.layers(
+    { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
+    null,
+    { position: 'topright', collapsed: true }
+  ).addTo(reliningPackagesMap);
   reliningPackagesLayer = L.layerGroup().addTo(reliningPackagesMap);
 }
 
@@ -9992,6 +10075,8 @@ async function downloadCctvPackagesZip() {
         const mapHtml = buildSinglePackageMapHtml(pkg, cctvOptions, generatedAtIso, color, 'cctv');
         zip.file(mapFilename, mapHtml);
         expectedMapNames.push(mapFilename);
+        const safePkgId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+        zip.file(`package_maps/${safePkgId}_pipes.kml`, buildPipeKml(pkg, color));
       } catch (mapErr) {
         console.error('[CCTV ZIP] Failed to build map for ' + pkg.package_id + ':', mapErr);
         throw new Error('Map for ' + pkg.package_id + ' could not be built: ' + (mapErr && mapErr.message || mapErr));
@@ -10051,11 +10136,21 @@ function ensureCctvPackagesMap() {
   }
   cctvPackagesMap = L.map('cctvPackagesMap').setView([-33.75, 151.25], 11);
   cctvPackagesMap.on('move zoom resize', updateCctvSelectedMapOverlay);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
+  const sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: '&copy; Spatial Services, NSW Department of Customer Service',
+    maxZoom: 21
+  });
+  const cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; OpenStreetMap, &copy; CARTO',
     subdomains: 'abcd',
     maxZoom: 19
-  }).addTo(cctvPackagesMap);
+  });
+  sixAerial.addTo(cctvPackagesMap);
+  L.control.layers(
+    { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
+    null,
+    { position: 'topright', collapsed: true }
+  ).addTo(cctvPackagesMap);
   cctvPackagesLayer = L.layerGroup().addTo(cctvPackagesMap);
 }
 
