@@ -32,6 +32,14 @@
     background: var(--navy, #1A2B3C);
     color: #fff;
   }
+  #pkgPackagesArea.pkg-table-wrap { max-height: 600px; }
+  #pkgPackagesArea table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--navy, #1A2B3C);
+    color: #fff;
+  }
 </style>
 </head>
 <body>
@@ -1032,10 +1040,6 @@ window.addEventListener('keydown', (event) => {
 
     <div class="pkg-meta" id="pkgMeta"></div>
     <div class="pkg-card-grid" id="pkgCards"></div>
-    <div class="pkg-panel">
-      <div class="lbl">Eligible Candidate Sample</div>
-      <div id="pkgSampleArea" class="pkg-empty">Upload files and run the preview to see eligible relining candidates.</div>
-    </div>
     <div class="pkg-panel">
       <div class="lbl">Generated Packages</div>
       <div id="pkgPackagesArea" class="pkg-empty">Generate relining packages to see package counts, cost totals, and sample package rows.</div>
