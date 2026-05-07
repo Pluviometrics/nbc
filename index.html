@@ -6754,7 +6754,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
-      address: raw['Formatted_Address'] || '',
+      address: String(raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || '').trim(),
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -7225,7 +7225,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           'Condition: ' + esc(p.condition || '—') + '<br>' +
           'Length: ' + fmtNum(p.length_m, 1) + ' m' +
           (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
-          (p.address ? '<br>Address: ' + esc(p.address) : '')
+          (p.address ? '<br>Address: ' + esc(p.address) : '') +
+          (p.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '')
         );
         marker.on('click', function(e) { L.DomEvent.stopPropagation(e); setSelection(pkg.id, { zoom: false }); });
         marker.addTo(map);
@@ -7569,7 +7570,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
-      address: raw['Formatted_Address'] || '',
+      address: String(raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || '').trim(),
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
@@ -7749,7 +7750,8 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
         + (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '')
         + (p.upstream ? '<br>Upstream: ' + esc(p.upstream) : '')
         + (p.downstream ? '<br>Downstream: ' + esc(p.downstream) : '')
-        + (p.address ? '<br>Address: ' + esc(p.address) : '');
+        + (p.address ? '<br>Address: ' + esc(p.address) : '')
+        + (p.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '');
     }
 
     pipes.forEach(function(p) {
@@ -8065,7 +8067,7 @@ async function downloadReliningPackagesZip() {
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'rate_per_m', 'pipe_cost', 'Address', 'Asset Suburb',
-      'Max Distance Between Pipes (km)'
+      'Max Distance Between Pipes (km)', 'Google_Street_View'
     ];
     const expectedHeader = HEADERS.join(',');
 
@@ -8086,6 +8088,18 @@ async function downloadReliningPackagesZip() {
     }
 
     function csvRow(arr) { return arr.map(csvCell).join(','); }
+
+    // Address fallback per spec, then Google Maps search URL — opens Google
+    // Maps which can switch to Street View. No API key needed.
+    function pipeStreetAddress(raw) {
+      return String(
+        raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || ''
+      ).trim();
+    }
+    function pipeStreetViewUrl(raw) {
+      const addr = pipeStreetAddress(raw);
+      return addr ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}` : '';
+    }
 
     function packageDiameters(pkg) {
       const values = (pkg.diameters_mm || pkg.diameters || [])
@@ -8146,7 +8160,8 @@ async function downloadReliningPackagesZip() {
         const rawObserved = String(getValueByAliases(raw, ['Observed_Condition', 'Observed Condition']) || '').trim();
         const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
         const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
-        const rawAddr  = raw['Formatted_Address'] ?? '';
+        const rawAddr  = pipeStreetAddress(raw);
+        const svUrl    = pipeStreetViewUrl(raw);
 
         lines.push(csvRow([
           pkg.package_id,
@@ -8160,7 +8175,8 @@ async function downloadReliningPackagesZip() {
           cost ? fmtCurrency(cost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
-          ''
+          '',
+          svUrl
         ]));
       });
 
@@ -8405,9 +8421,13 @@ function buildPipePopupHtml(item, pkg) {
     item?.lengthM,
     raw['pipe_length'], raw['Shape_Length'], raw['Length'], raw['Spatial Length_m']
   );
+  // Address fallback order per spec: Formatted_Address → Address → Pipe_Start_Address → Street_Address.
   const address = firstStr(
-    raw['Formatted_Address'], raw['Pipe_Start_Address'], raw['Address'], raw['Asset_Address']
+    raw['Formatted_Address'], raw['Address'], raw['Pipe_Start_Address'], raw['Street_Address']
   );
+  const streetViewUrl = address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+    : '';
   const pkgId = firstStr(pkg?.package_id, item?.package_id);
   return `
     <div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">
@@ -8415,6 +8435,7 @@ function buildPipePopupHtml(item, pkg) {
       <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
       <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
+      ${streetViewUrl ? `<div style="margin-top:6px"><a href="${escapeHtml(streetViewUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open in Google Street View ↗</a></div>` : ''}
     </div>`;
 }
 
@@ -10009,7 +10030,7 @@ async function downloadCctvPackagesZip() {
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'cctv_rate_per_hour', 'package_total_cost', 'Address', 'Asset Suburb',
-      'Max Distance Between Pipes (km)'
+      'Max Distance Between Pipes (km)', 'Google_Street_View'
     ];
     const expectedHeader = HEADERS.join(',');
 
@@ -10030,6 +10051,18 @@ async function downloadCctvPackagesZip() {
     }
 
     function csvRow(arr) { return arr.map(csvCell).join(','); }
+
+    // Address fallback per spec, then Google Maps search URL — opens Google
+    // Maps which can switch to Street View. No API key needed.
+    function pipeStreetAddress(raw) {
+      return String(
+        raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || ''
+      ).trim();
+    }
+    function pipeStreetViewUrl(raw) {
+      const addr = pipeStreetAddress(raw);
+      return addr ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}` : '';
+    }
 
     function packageDiameters(pkg) {
       return [...new Set((pkg.assets || []).map(a => Math.round(Number(a.diameterMm) || 0)).filter(d => d > 0))]
@@ -10080,7 +10113,8 @@ async function downloadCctvPackagesZip() {
         const rawCondition = String(getValueByAliases(raw, ['SW_Condition']) || item.conditionLabel || '').trim();
         const rawUp    = raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '';
         const rawDown  = raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '';
-        const rawAddr  = raw['Formatted_Address'] ?? '';
+        const rawAddr  = pipeStreetAddress(raw);
+        const svUrl    = pipeStreetViewUrl(raw);
 
         lines.push(csvRow([
           pkg.package_id,
@@ -10094,7 +10128,8 @@ async function downloadCctvPackagesZip() {
           pkgTotalCost ? fmtCurrency(pkgTotalCost) : '',
           rawAddr,
           String(item.suburb || '').toUpperCase(),
-          ''
+          '',
+          svUrl
         ]));
       });
 
