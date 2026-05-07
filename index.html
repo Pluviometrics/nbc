@@ -24,16 +24,17 @@
 <script src="./bom_ifd_cache.js"></script>
 <link rel="stylesheet" href="./styles.css"/>
 <style>
-  #cctvPkgPackagesArea.pkg-table-wrap { max-height: 560px; }
-  #cctvPkgPackagesArea table thead th {
-    position: sticky;
-    top: 0;
-    z-index: 10;
-    background: var(--navy, #1A2B3C);
-    color: #fff;
+  /* Generated Packages tables — let the page-level scroll (pkg-shell) handle
+     scrolling so wheel events over side / empty areas scroll the page, and
+     wheel events over the panel are not trapped inside it. The thead sticks
+     to the page-shell scroll context (i.e. the top of the visible area). */
+  #pkgPackagesArea.pkg-table-wrap,
+  #cctvPkgPackagesArea.pkg-table-wrap {
+    overflow: visible;
+    max-height: none;
   }
-  #pkgPackagesArea.pkg-table-wrap { max-height: 600px; }
-  #pkgPackagesArea table thead th {
+  #pkgPackagesArea table thead th,
+  #cctvPkgPackagesArea table thead th {
     position: sticky;
     top: 0;
     z-index: 10;
