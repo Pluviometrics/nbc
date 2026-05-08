@@ -6118,7 +6118,7 @@ function togglePackagingInputs() {
   const method = document.getElementById('pkgMethod')?.value || 'value';
   const valueWrap = document.getElementById('pkgValueWrap');
   const countWrap = document.getElementById('pkgCountWrap');
-  if (valueWrap) valueWrap.style.display = method === 'value' ? '' : 'none';
+  if (valueWrap) valueWrap.style.display = method === 'count' ? 'none' : '';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
 }
 
