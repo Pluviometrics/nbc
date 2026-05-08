@@ -888,31 +888,31 @@ window.addEventListener('keydown', (event) => {
   </div>
 </div>
 
-<div id="page-relining" style="display:none;flex:1;min-height:0;overflow:auto;background:var(--panel);padding:20px">
-  <div class="pkg-shell">
-    <div class="pkg-hero" style="position:sticky;top:0;z-index:100">
-      <div style="flex:1;min-width:0">
-        <div class="pkg-title">Relining Packaging</div>
-        <div class="pkg-sub" id="pkgHeroQuote"></div>
+<div id="page-relining" style="display:none;flex:1;min-height:0;overflow:auto;background:var(--panel);padding:0">
+  <!-- Hero sits outside pkg-shell as direct child of scroll container so sticky works -->
+  <div class="pkg-hero" style="position:sticky;top:0;z-index:100;border-radius:0;margin:0">
+    <div style="flex:1;min-width:0">
+      <div class="pkg-title">Relining Packaging</div>
+      <div class="pkg-sub" id="pkgHeroQuote"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0">
+      <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
+      <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
+          <input type="checkbox" id="pkgIncludeLocks"> Include lock file
+        </label>
+        <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0">
-        <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
-        <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-          <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
-          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
-            <input type="checkbox" id="pkgIncludeLocks"> Include lock file
-          </label>
-          <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
-        </div>
-        <div style="display:flex;gap:8px">
-          <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
-            Load Locks
-            <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
-          </label>
-        </div>
+      <div style="display:flex;gap:8px">
+        <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
+          Load Locks
+          <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
+        </label>
       </div>
     </div>
-
+  </div>
+  <div class="pkg-shell" style="padding:20px">
     <div class="subtab-bar">
       <button class="subtab active" type="button" id="reliningSubtabMain" onclick="switchReliningSubtab('main')">Pipe Relining</button>
       <button class="subtab" type="button" id="reliningSubtabEdit" onclick="switchReliningSubtab('edit')">Edit Packages</button>
