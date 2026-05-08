@@ -45,6 +45,42 @@
     background: var(--navy, #1A2B3C);
     color: #fff;
   }
+  /* "Default" / "(default)" markers on the relining control panel */
+  #page-relining .default-tag {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: #E8F5F4;
+    color: #00847F;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    vertical-align: middle;
+  }
+  #page-relining .default-hint {
+    margin-top: 4px;
+    font-size: 10px;
+    color: #00847F;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+  }
+  /* Inline error blocks inside the relining tool */
+  #page-relining .pkg-error {
+    margin-top: 10px;
+    padding: 9px 12px;
+    border: 1px solid #E5B7B0;
+    background: #FDECE8;
+    color: #7B2D26;
+    border-radius: 6px;
+    font-size: 12px;
+    line-height: 1.5;
+    font-weight: 600;
+  }
+  #page-relining .pkg-error[hidden] { display: none; }
+  #page-relining .pkg-error strong { color: #7B2D26; }
 </style>
 </head>
 <body>
@@ -191,7 +227,7 @@ window.addEventListener('keydown', (event) => {
     </div>
     <div class="home-card" onclick="switchPage('relining')">
       <div class="hc-icon">Packaging</div>
-      <div class="hc-title">Packaging</div>
+      <div class="hc-title">Pipe Relining Packaging Tool</div>
       <div class="hc-desc">Pipe relining scope packaging and cost estimation tool.</div>
       <div><span class="hc-badge live">Live</span></div>
     </div>
@@ -935,6 +971,7 @@ window.addEventListener('keydown', (event) => {
         </div>
       </div>
       <div style="font-size:11px;color:var(--text-l);margin-top:10px">Expected files: <code>assets_with_coords.csv</code> or <code>assets.csv</code>, and <code>Panel_Rates.xlsx</code>. Neither file is stored — they are held in memory for this session only.</div>
+      <div id="pkgUploadError" class="pkg-error" hidden></div>
     </div>
 
     <div class="pkg-panel">
@@ -945,31 +982,34 @@ window.addEventListener('keydown', (event) => {
           <select id="pkgReliningMode" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option>Condition 8 only</option>
             <option>Condition 7 only</option>
-            <option selected>Condition 7 and 8</option>
+            <option selected>Condition 7 and 8 (default)</option>
           </select>
+          <div class="default-hint">Default: Condition 7 and 8</div>
         </div>
         <div class="fg">
           <label for="pkgMethod">Packaging Method</label>
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-            <option value="value" selected>Value based</option>
+            <option value="value" selected>Value based (default)</option>
             <option value="count">Pipe count based</option>
             <option value="location">Location first</option>
           </select>
+          <div class="default-hint">Default: Value based</div>
         </div>
         <div class="fg" id="pkgValueWrap">
-          <label for="pkgMaxValue">Max Package Value ($)</label>
+          <label for="pkgMaxValue">Max Package Value ($) <span class="default-tag">Default $500,000</span></label>
           <input type="text" id="pkgMaxValue" value="500000"/>
         </div>
         <div class="fg" id="pkgCountWrap" style="display:none">
-          <label for="pkgPipeCount">Pipes Per Package</label>
+          <label for="pkgPipeCount">Pipes Per Package <span class="default-tag">Default 25</span></label>
           <input type="text" id="pkgPipeCount" value="25"/>
         </div>
         <div class="fg">
           <label for="pkgGroupSuburb">Group by Suburb</label>
           <select id="pkgGroupSuburb" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="yes">Yes</option>
-            <option value="no" selected>No</option>
+            <option value="no" selected>No (default)</option>
           </select>
+          <div class="default-hint">Default: No</div>
           <div id="pkgGroupSuburbHint" style="display:none;font-size:10px;color:var(--text-l);line-height:1.35;margin-top:4px">Disabled when a distance grouping method is selected.</div>
         </div>
         <div class="fg">
@@ -980,8 +1020,9 @@ window.addEventListener('keydown', (event) => {
             <option value="500">500m</option>
             <option value="1000">1000m</option>
             <option value="2000">2000m</option>
-            <option value="3000" selected>3000m</option>
+            <option value="3000" selected>3000m (default)</option>
           </select>
+          <div class="default-hint">Default: 3000m</div>
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -1027,10 +1068,10 @@ window.addEventListener('keydown', (event) => {
       </div>
       <div id="pkgTopupRow" style="margin-top:10px">
         <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top up underfilled packages</div>
-        <div style="display:flex;gap:20px;font-size:12px;align-items:center">
+        <div style="display:flex;gap:20px;font-size:12px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed <span class="default-tag">Default</span></label>
         </div>
       </div>
       <div id="pkgCostAdjustmentsRow" style="margin-top:14px">
@@ -1038,7 +1079,7 @@ window.addEventListener('keydown', (event) => {
         <div style="display:flex;gap:24px;font-size:12px;align-items:center;flex-wrap:wrap">
           <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
             <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
-            Apply project initiation multiplier (×1.15)
+            Apply project initiation multiplier (×1.15) <span class="default-tag">Default On</span>
           </label>
         </div>
       </div>
@@ -1058,12 +1099,14 @@ window.addEventListener('keydown', (event) => {
         <strong>Packaging Reasoning:</strong>
         Upload files and preview candidates to see the current relining rules applied to the data.
       </div>
+      <div id="pkgRunError" class="pkg-error" hidden></div>
     </div>
 
     <div class="pkg-meta" id="pkgMeta"></div>
     <div class="pkg-card-grid" id="pkgCards"></div>
     <div class="pkg-panel">
       <div class="lbl">Generated Packages</div>
+      <div id="pkgExportError" class="pkg-error" hidden></div>
       <div id="pkgPackagesArea" class="pkg-empty">Generate relining packages to see package counts and cost totals.</div>
     </div>
     <div class="pkg-panel">
@@ -1093,6 +1136,7 @@ window.addEventListener('keydown', (event) => {
           Move pipes between generated packages. Manual moves persist across regenerations until cleared. Empty packages are kept.
           To create a new package, choose <em>+ Create new package</em> in any pipe's <strong>Move to package</strong> dropdown.
         </div>
+        <div id="pkgEditError" class="pkg-error" hidden></div>
       </div>
       <div id="editPackagesArea" class="pkg-empty">Generate packages on the Pipe Relining tab first to enable manual editing.</div>
     </div>
@@ -5536,18 +5580,44 @@ function findReliningAssetCurrentAnchor(assetUid) {
   return null;
 }
 
+function setReliningError(targetId, message, nextAction = '') {
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  if (!message) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return;
+  }
+  const safeMsg = escapeHtml(String(message));
+  const safeNext = nextAction ? `<div style="margin-top:4px;font-weight:600;color:#7B2D26">${escapeHtml(String(nextAction))}</div>` : '';
+  el.hidden = false;
+  el.innerHTML = `<strong>${safeMsg}</strong>${safeNext}`;
+}
+
+function clearReliningError(targetId) {
+  setReliningError(targetId, '');
+}
+
+function clearAllReliningErrors() {
+  ['pkgUploadError', 'pkgRunError', 'pkgExportError', 'pkgEditError'].forEach(clearReliningError);
+}
+
 function moveReliningAssetToPackage(assetUid, targetAnchorId) {
   if (!lastPackagingGeneration) return;
   if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
   const uid = String(assetUid);
   const sourceAnchor = findReliningAssetCurrentAnchor(uid);
-  if (!sourceAnchor) { alert('Asset not found in current packaging.'); return; }
+  if (!sourceAnchor) {
+    setReliningError('pkgEditError', `Asset ${uid} was not found in the current packaging.`, 'Re-generate packages on the Pipe Relining tab and try the move again.');
+    return;
+  }
   if (sourceAnchor === targetAnchorId) return;
   const targetPkg = (lastPackagingGeneration.packages || []).find(p => p.anchor_id === targetAnchorId);
   if (!targetPkg && !reliningManualMoves.anchorOrigins[targetAnchorId]) {
-    alert('Target package not found.');
+    setReliningError('pkgEditError', 'Target package was not found.', 'Refresh the Edit Packages panel or pick a different target package and try again.');
     return;
   }
+  clearReliningError('pkgEditError');
   reliningManualMoves.assignments[uid] = targetAnchorId;
   if (!reliningManualMoves.anchorOrigins[targetAnchorId]) {
     reliningManualMoves.anchorOrigins[targetAnchorId] = {
@@ -5583,7 +5653,11 @@ function createNewReliningPackageForAsset(assetUid) {
   if (!lastPackagingGeneration) return;
   if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
   const uid = String(assetUid);
-  if (!findReliningAssetCurrentAnchor(uid)) { alert('Asset not found in current packaging.'); return; }
+  if (!findReliningAssetCurrentAnchor(uid)) {
+    setReliningError('pkgEditError', `Asset ${uid} was not found in the current packaging.`, 'Re-generate packages on the Pipe Relining tab and try again.');
+    return;
+  }
+  clearReliningError('pkgEditError');
   const newAnchor = generateReliningAnchorId();
   reliningManualMoves.anchorOrigins[newAnchor] = {
     kind: 'new',
@@ -5720,13 +5794,20 @@ function toggleReliningAllPackagesLock() {
 
 async function loadReliningLocksFile(file) {
   if (!file) return;
+  clearReliningError('pkgRunError');
   try {
     let json;
     if (file.name.endsWith('.zip')) {
-      if (typeof JSZip === 'undefined') { alert('JSZip not loaded — refresh and try again.'); return; }
+      if (typeof JSZip === 'undefined') {
+        setReliningError('pkgRunError', 'ZIP support library (JSZip) did not load.', 'Refresh the page and try Load Locks again.');
+        return;
+      }
       const zip = await JSZip.loadAsync(file);
       const entry = zip.file('locks.json');
-      if (!entry) { alert('No locks.json found in that ZIP.'); return; }
+      if (!entry) {
+        setReliningError('pkgRunError', `No locks.json was found inside ${file.name}.`, 'Pick a ZIP that includes locks.json, or upload a locks.json file directly.');
+        return;
+      }
       json = await entry.async('string');
     } else {
       json = await file.text();
@@ -5751,7 +5832,7 @@ async function loadReliningLocksFile(file) {
     const pipeCount = Object.keys(reliningManualMoves.assignments).length;
     console.info(`[Locks] Loaded ${pipeCount} assignment(s) from ${file.name}`);
   } catch (err) {
-    alert('Failed to load locks file: ' + (err?.message || err));
+    setReliningError('pkgRunError', `Failed to load locks file: ${err?.message || err}`, 'Confirm the file is a valid locks.json (or a ZIP containing locks.json) and try again.');
   }
 }
 
@@ -6214,10 +6295,10 @@ function renderGeneratedPackages(data) {
     package_id: renderReliningPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
     pipe_count: pkg.pipe_count,
-    condition_7_count: pkg.condition_7_count,
-    condition_8_count: pkg.condition_8_count,
     total_length_m: Number(pkg.total_length_m || 0).toFixed(1),
     total_cost: formatCurrency(pkg.total_cost),
+    condition_7_count: pkg.condition_7_count,
+    condition_8_count: pkg.condition_8_count,
     diameters_mm: (pkg.diameters_mm || []).join(', '),
     max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
     distance_warning: pkg.distance_warning || '',
@@ -6610,8 +6691,9 @@ function renderFutureWorksTable() {
 }
 
 function loadFutureWorksFromRelining(shouldSwitch = false) {
+  clearReliningError('pkgExportError');
   if (!lastPackagingGeneration?.packages?.length) {
-    alert('Generate relining packages first, then try again.');
+    setReliningError('pkgExportError', 'No packages to load into Future Works yet.', 'Click Generate Packages on the Pipe Relining tab first, then try again.');
     return;
   }
   if (!confirmReliningGeneratedSettingsCurrent('load into Future Works')) return;
@@ -6659,6 +6741,7 @@ function clearReliningPackagingOutputs(clearPreview = true) {
 async function loadReliningAssetsFile(event) {
   const file = event?.target?.files?.[0];
   if (!file) return;
+  clearReliningError('pkgUploadError');
   showLoad('Loading relining assets file...');
   try {
     const lower = file.name.toLowerCase();
@@ -6694,7 +6777,7 @@ async function loadReliningAssetsFile(event) {
     setPackagingStatus(false, 'Assets upload failed');
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: 0, suburb_column: '-' });
-    alert(`Assets upload failed: ${e.message || e}`);
+    setReliningError('pkgUploadError', `Assets upload failed: ${e.message || e}`, 'Check the file is a CSV/Excel export of the assets layer with the expected columns (asset id, diameter, condition, suburb, coordinates), then try again.');
   } finally {
     hideLoad();
     if (event?.target) event.target.value = '';
@@ -6704,6 +6787,7 @@ async function loadReliningAssetsFile(event) {
 async function loadReliningRatesFile(event) {
   const file = event?.target?.files?.[0];
   if (!file) return;
+  clearReliningError('pkgUploadError');
   showLoad('Loading relining rates workbook...');
   try {
     if (typeof XLSX === 'undefined') throw new Error('Excel library not loaded.');
@@ -6727,7 +6811,7 @@ async function loadReliningRatesFile(event) {
     setPackagingStatus(false, 'Rates upload failed');
     renderPackagingPaths();
     renderPackagingMeta({ asset_count: reliningAssetsRows.length, suburb_column: resolveSuburbColumn(reliningAssetsRows) });
-    alert(`Rates upload failed: ${e.message || e}`);
+    setReliningError('pkgUploadError', `Rates upload failed: ${e.message || e}`, 'Use a Panel_Rates.xlsx that contains SP6 Pipeline Relining rows in the _Tables, Rates_SP6, or first sheet, then try again.');
   } finally {
     hideLoad();
     if (event?.target) event.target.value = '';
@@ -6754,6 +6838,7 @@ function updateReliningStatus() {
 }
 
 async function loadPackagingPreview() {
+  clearReliningError('pkgRunError');
   try {
     if (!reliningAssetsRows.length) throw new Error('Upload the assets file first.');
     showLoad('Filtering relining candidates...');
@@ -6778,6 +6863,7 @@ async function loadPackagingPreview() {
     }
   } catch (e) {
     setPackagingStatus(false, 'Preview failed');
+    setReliningError('pkgRunError', `Preview failed: ${e.message || e}`, 'Upload the assets file (and rates if needed) and try again.');
     console.error('[Preview]', e);
   } finally {
     hideLoad();
@@ -6785,6 +6871,7 @@ async function loadPackagingPreview() {
 }
 
 async function generateReliningPackages() {
+  clearReliningError('pkgRunError');
   try {
     if (!reliningAssetsRows.length) throw new Error('Upload the assets file first.');
     if (!reliningRatesRows.length) throw new Error('Upload the panel rates workbook first.');
@@ -6860,6 +6947,7 @@ async function generateReliningPackages() {
       area.className = 'pkg-empty';
       area.textContent = String(e.message || e);
     }
+    setReliningError('pkgRunError', `Package generation failed: ${e.message || e}`, 'Confirm both files are loaded and the packaging rules are valid, then click Generate Packages again.');
   } finally {
     hideLoad();
   }
@@ -6891,9 +6979,10 @@ document.addEventListener('click', (event) => {
 });
 
 function exportReliningPackagesCsv() {
+  clearReliningError('pkgExportError');
   const packages = lastPackagingGeneration?.packages || [];
   if (!packages.length) {
-    alert('Generate relining packages before exporting.');
+    setReliningError('pkgExportError', 'No packages to export yet.', 'Click Generate Packages on the Pipe Relining tab, then export the CSV.');
     return;
   }
   if (!confirmReliningGeneratedSettingsCurrent('export')) return;
@@ -8345,14 +8434,15 @@ function reliningPackageMapFilename(pkg) {
 }
 
 async function downloadReliningPackagesZip() {
+  clearReliningError('pkgExportError');
   const packages = lastPackagingGeneration?.packages || [];
   if (!packages.length) {
-    alert('Generate relining packages before downloading.');
+    setReliningError('pkgExportError', 'No packages to download yet.', 'Click Generate Packages on the Pipe Relining tab, then download the ZIP.');
     return;
   }
   if (!confirmReliningGeneratedSettingsCurrent('download the ZIP')) return;
   if (typeof JSZip === 'undefined') {
-    alert('JSZip library not loaded. Please refresh the page and try again.');
+    setReliningError('pkgExportError', 'ZIP support library (JSZip) did not load.', 'Refresh the page and try Download ZIP again.');
     return;
   }
 
@@ -8620,7 +8710,7 @@ async function downloadReliningPackagesZip() {
 
   } catch (err) {
     console.error('ZIP export error:', err);
-    alert('ZIP export failed: ' + err.message);
+    setReliningError('pkgExportError', `ZIP export failed: ${err.message || err}`, 'Check the browser console for details, then click Download ZIP again.');
   }
 }
 
