@@ -1587,6 +1587,14 @@ function decodeInlineArg(value) {
   return decodeURIComponent(String(value ?? ''));
 }
 
+// CiAnywhere asset deep-link. Numeric-only guard prevents fake links — CiA can
+// silently show the last-open asset if KeyedAssetNumber is invalid.
+function buildCiAAssetUrl(assetNumber) {
+  const value = String(assetNumber ?? '').trim();
+  if (!value || !/^\d+$/.test(value)) return '';
+  return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + value + '&suite=CES';
+}
+
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 let allStations = [], selected = null, markers = {}, mode = 'recent';
 let bomRainfallGauges = [], bomRainfallMarkers = {};
@@ -6799,6 +6807,21 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
   function uniq(arr) { var seen = Object.create(null); var out = []; arr.forEach(function(v) { if (v === '' || v == null) return; var k = String(v); if (seen[k]) return; seen[k] = 1; out.push(v); }); return out; }
   function pkgAnchor(id) { return 'pkg-' + String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+  function buildCiAAssetUrl(id) {
+    var v = String(id == null ? '' : id).trim();
+    if (!v || !/^\\d+$/.test(v)) return '';
+    return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
+  }
+  function linkAssetId(id) {
+    var label = esc(id);
+    var url = buildCiAAssetUrl(id);
+    if (!url) return label;
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+  }
+  function linkAssetIdList(ids) {
+    if (!ids || !ids.length) return '';
+    return ids.map(function(id) { return linkAssetId(id); }).join(', ');
+  }
 
   document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
   document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
@@ -7014,7 +7037,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '</div>' +
       (pkg.distance_warning ? '<div class="pkg-report-warn">' + esc(pkg.distance_warning) + '</div>' : '') +
       '<div class="pkg-report-bullets"><div class="lbl-mini">Reasoning</div><ul>' + bullets + '</ul></div>' +
-      (pkg.asset_ids && pkg.asset_ids.length ? '<div class="pkg-report-assets"><span class="lbl-mini">Assets in this package</span>' + esc(pkg.asset_ids.join(', ')) + '</div>' : '') +
+      (pkg.asset_ids && pkg.asset_ids.length ? '<div class="pkg-report-assets"><span class="lbl-mini">Assets in this package</span>' + linkAssetIdList(pkg.asset_ids) + '</div>' : '') +
     '</section>';
   }).join('') || '<div class="pkg-empty">No packages were generated.</div>';
 
@@ -7058,7 +7081,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '<th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
-          '<td>' + esc(p.asset_id) + '</td>' +
+          '<td>' + linkAssetId(p.asset_id) + '</td>' +
           '<td><span class="pipe-color" style="background:' + colorFor(p.package_id) + '"></span>' + esc(p.package_id) + '</td>' +
           '<td>' + esc(p.suburb) + '</td>' +
           '<td class="r">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>' +
@@ -7086,7 +7109,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var selectedPackageId = null;
 
   function packagePopupHtml(pkg) {
-    var assetList = (pkg.asset_ids || []).slice(0, 10).join(', ');
+    var assetIdsShown = (pkg.asset_ids || []).slice(0, 10);
+    var assetList = assetIdsShown.length ? linkAssetIdList(assetIdsShown) : '';
     var more = (pkg.asset_ids || []).length > 10 ? ' …' : '';
     var html = '';
     html += '<div style="min-width:220px;max-width:280px;font-family:Segoe UI,system-ui,sans-serif">';
@@ -7102,7 +7126,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (diamKeys.length) html += '<div><strong>Diameters:</strong> ' + esc(diamKeys.map(function(k){ return k + 'mm × ' + pkg.diameterMix[k]; }).join(', ')) + '</div>';
     if (pkg.distance_warning) html += '<div style="color:#b91c1c"><strong>Warning:</strong> ' + esc(pkg.distance_warning) + '</div>';
     html += '<div><strong>Cost:</strong> ' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>';
-    html += '<div><strong>Assets:</strong> ' + esc(assetList || 'None') + more + '</div>';
+    html += '<div><strong>Assets:</strong> ' + (assetList || 'None') + more + '</div>';
     html += '</div>';
     html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">';
     html += '<a class="select-pkg-map-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" style="padding:5px 10px;font-size:11px;background:#005F5B;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open map ↗</a>';
@@ -7218,7 +7242,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       pkgPipes.forEach(function(p) {
         var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
         marker.bindPopup(
-          '<strong>' + esc(p.asset_id) + '</strong><br>' +
+          '<strong>' + linkAssetId(p.asset_id) + '</strong><br>' +
           'Package: ' + esc(p.package_id) + '<br>' +
           'Suburb: ' + esc(p.suburb) + '<br>' +
           'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
@@ -8430,9 +8454,14 @@ function buildPipePopupHtml(item, pkg) {
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
     : '';
   const pkgId = firstStr(pkg?.package_id, item?.package_id);
+  const ciaUrl = buildCiAAssetUrl(assetId);
+  const assetLabel = escapeHtml(assetId || 'Pipe');
+  const assetMarkup = ciaUrl
+    ? `<a href="${escapeHtml(ciaUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${assetLabel}</a>`
+    : assetLabel;
   return `
     <div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">
-      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${escapeHtml(assetId || 'Pipe')}${pkgId ? ` <span style="color:var(--text-l);font-weight:500">· ${escapeHtml(pkgId)}</span>` : ''}</div>
+      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${assetMarkup}${pkgId ? ` <span style="color:var(--text-l);font-weight:500">· ${escapeHtml(pkgId)}</span>` : ''}</div>
       <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
       <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
