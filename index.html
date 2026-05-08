@@ -7243,7 +7243,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
         marker.bindPopup(
           '<strong>' + (p.asset_id ? 'ASSET ID - ' + linkAssetId(p.asset_id) : 'Pipe') + (p.package_id ? ' - ' + esc(p.package_id) : '') + '</strong><br>' +
-          'Package: ' + esc(p.package_id) + '<br>' +
           'Suburb: ' + esc(p.suburb) + '<br>' +
           'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
           (p.material ? 'Material: ' + esc(p.material) + '<br>' : '') +
