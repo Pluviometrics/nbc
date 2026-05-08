@@ -953,7 +953,7 @@ window.addEventListener('keydown', (event) => {
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="value" selected>Value based</option>
             <option value="count">Pipe count based</option>
-            <option value="location">LOCATION</option>
+            <option value="location">Location first</option>
           </select>
         </div>
         <div class="fg" id="pkgValueWrap">
@@ -970,6 +970,7 @@ window.addEventListener('keydown', (event) => {
             <option value="yes">Yes</option>
             <option value="no" selected>No</option>
           </select>
+          <div id="pkgGroupSuburbHint" style="display:none;font-size:10px;color:var(--text-l);line-height:1.35;margin-top:4px">Disabled when a distance grouping method is selected.</div>
         </div>
         <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
@@ -4563,6 +4564,9 @@ function getReliningPackagingOptions() {
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
+  const topupMode = method === 'count'
+    ? 'No top up'
+    : (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up');
   return {
     reliningMode,
     method,
@@ -4572,13 +4576,57 @@ function getReliningPackagingOptions() {
     contractor: null,
     trafficControl: false,
     projectInitiation: document.getElementById('pkgInitiation')?.checked !== false,
-    groupBySuburb: (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
+    groupBySuburb: !proximityM && (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
     proximityM,
-    topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up'),
+    topupMode,
     customSizeGroups: getReliningSizeGroups()
   };
 }
+
+function reliningOptionsFingerprint(options = {}) {
+  const sizeGroups = (options.customSizeGroups || [])
+    .map(group => (group || []).map(Number).filter(Number.isFinite).sort((a, b) => a - b));
+  return JSON.stringify({
+    reliningMode: options.reliningMode || 'Condition 7 and 8',
+    method: options.method || 'value',
+    maxPackageValue: Number(options.maxPackageValue) || 500000,
+    pipesPerPackage: Number(options.pipesPerPackage) || 25,
+    costMode: options.costMode || 'median',
+    contractor: options.contractor || null,
+    trafficControl: options.trafficControl !== false,
+    projectInitiation: options.projectInitiation !== false,
+    groupBySuburb: options.groupBySuburb === true,
+    groupingMethod: options.groupingMethod || 'suburb',
+    proximityM: Number(options.proximityM) || null,
+    topupMode: options.topupMode || 'No top up',
+    customSizeGroups: sizeGroups
+  });
+}
+
+function reliningGeneratedSettingsChanged() {
+  if (!lastPackagingGeneration?.options) return false;
+  return reliningOptionsFingerprint(lastPackagingGeneration.options) !== reliningOptionsFingerprint(getReliningPackagingOptions());
+}
+
+function updateReliningGeneratedSettingsWarning() {
+  const warning = document.getElementById('pkgSettingsChangedWarning');
+  if (!warning) return;
+  warning.style.display = reliningGeneratedSettingsChanged() ? '' : 'none';
+}
+
+function confirmReliningGeneratedSettingsCurrent(actionLabel = 'continue') {
+  if (!reliningGeneratedSettingsChanged()) return true;
+  return window.confirm(`Settings have changed since these packages were generated. Re-generate packages before you ${actionLabel}, or continue using the existing generated packages?`);
+}
+
+document.addEventListener('input', event => {
+  if (event.target?.closest?.('#page-relining')) updateReliningGeneratedSettingsWarning();
+});
+
+document.addEventListener('change', event => {
+  if (event.target?.closest?.('#page-relining')) updateReliningGeneratedSettingsWarning();
+});
 
 
 function reliningModeLabel(mode) {
@@ -5242,6 +5290,7 @@ function enforceReliningPackageRadius(packages, options = {}) {
 }
 
 function logReliningPackageDebug(packages, options = {}) {
+  if (localStorage.getItem('nbcReliningDebug') !== '1') return;
   const radiusM = Number(options.proximityM);
   console.groupCollapsed(`[Relining Packaging] ${packages.length} packages generated. Selected radius: ${Number.isFinite(radiusM) ? `${radiusM} m` : 'suburb/no radius'}`);
   packages.forEach(pkg => {
@@ -6127,10 +6176,29 @@ function renderReliningPackagingReasoning(options, preview = null) {
 
 function togglePackagingInputs() {
   const method = document.getElementById('pkgMethod')?.value || 'value';
+  const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   const valueWrap = document.getElementById('pkgValueWrap');
   const countWrap = document.getElementById('pkgCountWrap');
+  const topupRow = document.getElementById('pkgTopupRow');
+  const suburbSelect = document.getElementById('pkgGroupSuburb');
+  const suburbHint = document.getElementById('pkgGroupSuburbHint');
   if (valueWrap) valueWrap.style.display = method === 'count' ? 'none' : '';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
+  if (topupRow) {
+    const disabled = method === 'count';
+    topupRow.style.opacity = disabled ? '0.45' : '';
+    topupRow.querySelectorAll('input[name="pkgTopupMode"]').forEach(input => {
+      input.disabled = disabled;
+    });
+    topupRow.title = disabled ? 'Top-up applies to value and location packaging only.' : '';
+  }
+  if (suburbSelect) {
+    const disabled = groupingMethod !== 'suburb';
+    suburbSelect.disabled = disabled;
+    suburbSelect.title = disabled ? 'Distance grouping uses coordinates, so suburb grouping is ignored.' : '';
+    if (suburbHint) suburbHint.style.display = disabled ? '' : 'none';
+  }
+  updateReliningGeneratedSettingsWarning();
 }
 
 function renderGeneratedPackages(data) {
@@ -6157,6 +6225,7 @@ function renderGeneratedPackages(data) {
     asset_ids: pkg.asset_ids || []
   }));
   const packageHeaders = Object.keys(displayPackages[0]);
+  const settingsChanged = reliningGeneratedSettingsChanged();
   // Update and show sticky bar
   const heroActions = document.getElementById('pkgHeroActions');
   const stickyCount = document.getElementById('pkgStickyCount');
@@ -6170,6 +6239,9 @@ function renderGeneratedPackages(data) {
       </div>
       <div style="font-size:11px;color:var(--text-l)">
         Total length ${Number(data.total_length_m || 0).toLocaleString()} m · Total cost $${Number(data.total_cost || 0).toLocaleString(undefined, {maximumFractionDigits: 2})}
+      </div>
+      <div id="pkgSettingsChangedWarning" style="display:${settingsChanged ? '' : 'none'};margin-top:10px;padding:9px 10px;border:1px solid #f2c94c;background:#fff8dd;color:#7a4d00;border-radius:6px;font-size:12px;font-weight:700">
+        Settings have changed since these packages were generated. Re-generate packages to apply the current controls.
       </div>
       <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
         <button class="export-btn" onclick="downloadReliningPackagesZip()">Download ZIP</button>
@@ -6542,6 +6614,7 @@ function loadFutureWorksFromRelining(shouldSwitch = false) {
     alert('Generate relining packages first, then try again.');
     return;
   }
+  if (!confirmReliningGeneratedSettingsCurrent('load into Future Works')) return;
   futureWorksRows = mapReliningPackagesToFutureWorksRows(lastPackagingGeneration.packages);
   renderFutureWorksTable();
   if (shouldSwitch) switchPage('futureworks');
@@ -6823,6 +6896,7 @@ function exportReliningPackagesCsv() {
     alert('Generate relining packages before exporting.');
     return;
   }
+  if (!confirmReliningGeneratedSettingsCurrent('export')) return;
   const rows = [[
     'package_id',
     'original_package_id',
@@ -8276,6 +8350,7 @@ async function downloadReliningPackagesZip() {
     alert('Generate relining packages before downloading.');
     return;
   }
+  if (!confirmReliningGeneratedSettingsCurrent('download the ZIP')) return;
   if (typeof JSZip === 'undefined') {
     alert('JSZip library not loaded. Please refresh the page and try again.');
     return;
