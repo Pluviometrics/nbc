@@ -12587,4 +12587,31 @@ function renderPriList() {
       <td class="r">${r.deliv.toFixed(1)}</td>
     </tr>`;
   }).join('');
-  document.getElementById('pri-list-table').innerH
+  document.getElementById('pri-list-table').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>#</th><th>Project</th><th>Priority</th><th class="r">Score</th>
+        <th class="r">Impact</th><th class="r">Health</th><th class="r">VFM</th><th class="r">Deliv.</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function priExportCSV() {
+  let csv = 'Rank,Project,Asset Type,Location,Priority,Score,Impact,Asset Health,VFM,Deliverability,Date\n';
+  priList.forEach((r,i) => {
+    csv += `${i+1},"${r.name}","${r.asset}","${r.location || ''}",${r.priority},${r.final.toFixed(1)},${r.impact.toFixed(1)},${r.health.toFixed(1)},${r.vfm.toFixed(1)},${r.deliv.toFixed(1)},${r.saved}\n`;
+  });
+  const a = document.createElement('a');
+  a.href = 'data:text/csv,' + encodeURIComponent(csv);
+  a.download = 'nbc_prioritisation_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+}
+
+origPriUpdate();
+priCalc();
+
+// init() is called lazily by switchPage('aep') on first visit
+</script>
+</body>
+</html>
