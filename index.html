@@ -938,6 +938,7 @@ window.addEventListener('keydown', (event) => {
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="value" selected>Value based</option>
             <option value="count">Pipe count based</option>
+            <option value="location">LOCATION</option>
           </select>
         </div>
         <div class="fg" id="pkgValueWrap">
@@ -948,6 +949,10 @@ window.addEventListener('keydown', (event) => {
           <label for="pkgPipeCount">Pipes Per Package</label>
           <input type="text" id="pkgPipeCount" value="25"/>
         </div>
+        <div class="fg" id="pkgLocationDistanceRow" style="display:none">
+          <label for="pkgLocationDistance">Distance (m)</label>
+          <input type="number" id="pkgLocationDistance" value="3000" min="100" max="50000" step="100" style="width:100%;box-sizing:border-box" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
+        </div>
         <div class="fg">
           <label for="pkgGroupSuburb">Group by Suburb</label>
           <select id="pkgGroupSuburb" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
@@ -957,19 +962,14 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
-          <select id="pkgGroupingMethod" onchange="updateGroupingMethodUI(); renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
+          <select id="pkgGroupingMethod" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="suburb">Suburb (no coordinates)</option>
             <option value="250">250m</option>
             <option value="500">500m</option>
             <option value="1000">1000m</option>
             <option value="2000">2000m</option>
             <option value="3000" selected>3000m</option>
-            <option value="location">LOCATION</option>
           </select>
-        </div>
-        <div class="fg" id="pkgLocationDistanceRow" style="display:none">
-          <label for="pkgLocationDistance">Distance (m)</label>
-          <input type="number" id="pkgLocationDistance" value="3000" min="100" max="50000" step="100" style="width:100%;box-sizing:border-box" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -1629,9 +1629,10 @@ function renderReliningAssetIdsCell(assetIds) {
   return (Array.isArray(assetIds) ? assetIds : String(assetIds ?? '').split(',').map(s => s.trim()).filter(Boolean)).map(uid => {
     const url = buildCiAAssetUrl(uid);
     const color = isReliningPipeLocked(uid) ? '#dc2626' : '#16a34a';
+    const style = 'color:' + color + ' !important;text-decoration:underline';
     return url
-      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="color:' + color + '">' + escapeHtml(uid) + '</a>'
-      : '<span style="color:' + color + '">' + escapeHtml(uid) + '</span>';
+      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
+      : '<span style="color:' + color + ' !important">' + escapeHtml(uid) + '</span>';
   }).join(', ');
 }
 
@@ -4549,8 +4550,9 @@ function getReliningPackagingOptions() {
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
-  const proximityM = groupingMethod === 'suburb' ? null
-    : groupingMethod === 'location' ? (Number(document.getElementById('pkgLocationDistance')?.value) || 3000)
+  const proximityM = method === 'location'
+    ? (Number(document.getElementById('pkgLocationDistance')?.value) || 3000)
+    : groupingMethod === 'suburb' ? null
     : parseInt(groupingMethod, 10);
   return {
     reliningMode,
@@ -4569,11 +4571,6 @@ function getReliningPackagingOptions() {
   };
 }
 
-function updateGroupingMethodUI() {
-  const method = document.getElementById('pkgGroupingMethod')?.value;
-  const distRow = document.getElementById('pkgLocationDistanceRow');
-  if (distRow) distRow.style.display = method === 'location' ? '' : 'none';
-}
 
 function reliningModeLabel(mode) {
   if (mode === 'Condition 8 only') return 'Condition 8';
@@ -5101,6 +5098,17 @@ function splitIntoValuePackagesTwoPass(items, options) {
 
 function splitReliningItemsByValue(items, options) {
   return splitIntoValuePackagesTwoPass(items, options);
+}
+
+function splitReliningItemsByLocation(items, options) {
+  const clustered = assignReliningClusters(items, options.proximityM);
+  let pkgIndex = 0;
+  const clusterToId = new Map();
+  return clustered.map(item => {
+    const key = item._cluster || 'unknown';
+    if (!clusterToId.has(key)) clusterToId.set(key, `RLN_${String(++pkgIndex).padStart(3, '0')}`);
+    return { ...item, package_id: clusterToId.get(key) };
+  });
 }
 
 function maxReliningPackageSpanM(items) {
@@ -6044,8 +6052,10 @@ function togglePackagingInputs() {
   const method = document.getElementById('pkgMethod')?.value || 'value';
   const valueWrap = document.getElementById('pkgValueWrap');
   const countWrap = document.getElementById('pkgCountWrap');
+  const locationRow = document.getElementById('pkgLocationDistanceRow');
   if (valueWrap) valueWrap.style.display = method === 'value' ? '' : 'none';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
+  if (locationRow) locationRow.style.display = method === 'location' ? '' : 'none';
 }
 
 function renderGeneratedPackages(data) {
@@ -6671,6 +6681,8 @@ async function generateReliningPackages() {
     await waitForPaint();
     let packagedItems = options.method === 'count'
       ? splitReliningItemsByCount(preview.costed, options)
+      : options.method === 'location'
+      ? splitReliningItemsByLocation(preview.costed, options)
       : splitReliningItemsByValue(preview.costed, options);
     packagedItems = forceIslandSinglePipePackages(packagedItems);
     setLoadTxt('Building relining packages...');
@@ -6981,7 +6993,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return g.map(function(arr, i) { return 'Group ' + (i+1) + ': ' + (Array.isArray(arr) && arr.length ? arr.join(', ') + ' mm' : '—'); }).filter(function(s){ return s.indexOf(': —') === -1; }).join(' · ') || 'None configured';
   }
   function fmtGroupingMethod(o) {
-    if (o.groupingMethod === 'location') return 'Location — ' + (o.proximityM || 3000).toLocaleString() + ' m';
     if (o.proximityM) return 'Spatial — ' + o.proximityM.toLocaleString() + ' m radius';
     if (o.groupBySuburb) return 'Suburb';
     return 'No grouping';
