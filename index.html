@@ -957,14 +957,19 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
-          <select id="pkgGroupingMethod" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
+          <select id="pkgGroupingMethod" onchange="updateGroupingMethodUI(); renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="suburb">Suburb (no coordinates)</option>
             <option value="250">250m</option>
             <option value="500">500m</option>
             <option value="1000">1000m</option>
             <option value="2000">2000m</option>
             <option value="3000" selected>3000m</option>
+            <option value="location">LOCATION</option>
           </select>
+        </div>
+        <div class="fg" id="pkgLocationDistanceRow" style="display:none">
+          <label for="pkgLocationDistance">Distance (m)</label>
+          <input type="number" id="pkgLocationDistance" value="3000" min="100" max="50000" step="100" style="width:100%;box-sizing:border-box" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -4534,7 +4539,9 @@ function getReliningPackagingOptions() {
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
-  const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
+  const proximityM = groupingMethod === 'suburb' ? null
+    : groupingMethod === 'location' ? (Number(document.getElementById('pkgLocationDistance')?.value) || 3000)
+    : parseInt(groupingMethod, 10);
   return {
     reliningMode,
     method,
@@ -4550,6 +4557,12 @@ function getReliningPackagingOptions() {
     topupMode: (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up'),
     customSizeGroups: getReliningSizeGroups()
   };
+}
+
+function updateGroupingMethodUI() {
+  const method = document.getElementById('pkgGroupingMethod')?.value;
+  const distRow = document.getElementById('pkgLocationDistanceRow');
+  if (distRow) distRow.style.display = method === 'location' ? '' : 'none';
 }
 
 function reliningModeLabel(mode) {
@@ -6868,6 +6881,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return g.map(function(arr, i) { return 'Group ' + (i+1) + ': ' + (Array.isArray(arr) && arr.length ? arr.join(', ') + ' mm' : '—'); }).filter(function(s){ return s.indexOf(': —') === -1; }).join(' · ') || 'None configured';
   }
   function fmtGroupingMethod(o) {
+    if (o.groupingMethod === 'location') return 'Location — ' + (o.proximityM || 3000).toLocaleString() + ' m';
     if (o.proximityM) return 'Spatial — ' + o.proximityM.toLocaleString() + ' m radius';
     if (o.groupBySuburb) return 'Suburb';
     return 'No grouping';
