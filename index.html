@@ -889,21 +889,28 @@ window.addEventListener('keydown', (event) => {
 </div>
 
 <div id="page-relining" style="display:none;flex:1;min-height:0;overflow:auto;background:var(--panel);padding:20px">
-  <!-- Sticky download bar — shown after packages are generated -->
-  <div id="pkgStickyBar" style="display:none;position:sticky;top:0;z-index:100;background:var(--navy);color:white;padding:8px 16px;margin:-20px -20px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-    <span id="pkgStickyCount" style="font-size:12px;font-weight:700;flex:1;white-space:nowrap"></span>
-    <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
-      <input type="checkbox" id="pkgIncludeLocks"> Include lock file
-    </label>
-    <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal)">Download ZIP</button>
-  </div>
   <div class="pkg-shell">
-    <div class="pkg-hero">
-      <div>
+    <div class="pkg-hero" style="position:sticky;top:0;z-index:100">
+      <div style="flex:1;min-width:0">
         <div class="pkg-title">Relining Packaging</div>
-        <div class="pkg-sub">Upload your assets and rates files to use this tool. Files are processed in-browser only — no copy is saved anywhere.</div>
+        <div class="pkg-sub" id="pkgHeroQuote"></div>
       </div>
-      <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0">
+        <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
+        <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
+            <input type="checkbox" id="pkgIncludeLocks"> Include lock file
+          </label>
+          <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
+            Load Locks
+            <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
+          </label>
+        </div>
+      </div>
     </div>
 
     <div class="subtab-bar">
@@ -1034,22 +1041,15 @@ window.addEventListener('keydown', (event) => {
           </label>
         </div>
       </div>
-      <div class="pkg-grid" style="grid-template-columns:auto auto 1fr;margin-top:12px">
+      <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
           <button class="run-btn" style="margin-top:0" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Packages</button>
         </div>
         <div class="fg">
           <label>&nbsp;</label>
-          <label class="run-btn" style="margin-top:0;cursor:pointer;background:var(--navy);display:inline-block;text-align:center" title="Load a locks.json or relining_packages ZIP to restore a previous session">
-            Load Locks
-            <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
-          </label>
-        </div>
-        <div class="fg">
-          <label>&nbsp;</label>
           <div style="font-size:11px;color:var(--text-l);line-height:1.5;padding-top:8px">
-            Packaging runs locally in the browser against the uploaded files. Generated packages now retain package assets, coordinates, cost warnings, and map-ready geometry for review and export.
+            Packaging runs locally in the browser against the uploaded files.
           </div>
         </div>
       </div>
@@ -6157,9 +6157,9 @@ function renderGeneratedPackages(data) {
   }));
   const packageHeaders = Object.keys(displayPackages[0]);
   // Update and show sticky bar
-  const stickyBar = document.getElementById('pkgStickyBar');
+  const heroActions = document.getElementById('pkgHeroActions');
   const stickyCount = document.getElementById('pkgStickyCount');
-  if (stickyBar) stickyBar.style.display = 'flex';
+  if (heroActions) heroActions.style.display = 'flex';
   if (stickyCount) stickyCount.textContent = `${Number(data.package_count || 0).toLocaleString()} packages · ${Number(data.costed_pipe_count || 0).toLocaleString()} pipes · $${Number(data.total_cost || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
   area.className = 'pkg-table-wrap';
   area.innerHTML = `
@@ -6576,8 +6576,8 @@ function clearReliningPackagingOutputs(clearPreview = true) {
     pkgArea.className = 'pkg-empty';
     pkgArea.textContent = 'Generate relining packages to see package counts and cost totals.';
   }
-  const stickyBar = document.getElementById('pkgStickyBar');
-  if (stickyBar) stickyBar.style.display = 'none';
+  const heroActions = document.getElementById('pkgHeroActions');
+  if (heroActions) heroActions.style.display = 'none';
   renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
   renderReliningPackagesMap();
 }
@@ -12500,6 +12500,177 @@ function resetBomGaugeFilters() {
 const PAGES = ['home','aep','criticalassets','bomgauges','prioritisation','costing','relining','cctvpackaging','futureworks'];
 let currentPage = 'home';
 
+const RELINING_HERO_QUOTES = [
+  "'Never interrupt your enemy when he is making a mistake.' – Napoleon Bonaparte",
+  "'It's just a job. Grass grows, birds fly, waves pound the sand. I beat people up.' – Muhammad Ali",
+  "'I think Smithers picked me because of my motivational skills. Everyone says they have to work a lot harder when I'm around.' – Homer Simpson",
+  "'Hard work never killed anybody, but why take a chance?' – Edgar Bergen",
+  "'Oh, you hate your job? Why didn't you say so? There's a support group for that. It's called EVERYBODY, and they meet at the bar.' – Drew Carey",
+  "'Sometimes the best part of my job is that the chair swivels.' – Unknown",
+  "'What I don't like about office Christmas parties is looking for a job the next day.' – Phyllis Diller",
+  "'The brain is a wonderful organ; it starts working the moment you get up in the morning and does not stop until you get into the office.' – Robert Frost",
+  "'The easiest job in the world has to be coroner. Surgery on dead people. What's the worst thing that could happen? If everything went wrong, maybe you'd get a pulse.' – Denise Miller",
+  "'Going to work for a large company is like getting on a train. Are you going sixty miles an hour or is the train going sixty miles an hour and you're just sitting still?' – J. Paul Getty",
+  "'Son, if you really want something in this life, you have to work for it. Now quiet! They're about to announce the lottery numbers.' – Homer Simpson",
+  "'Work is a necessity for man. Man invented the alarm clock.' – Pablo Picasso",
+  "'Why join the navy if you can be a pirate?' – Steve Jobs",
+  "'Failure is not an option — it comes bundled with the software.' – Unknown",
+  "'The higher a monkey climbs, the more you see of its behind.' – Joseph Stilwell",
+  "'Nothing is illegal if a hundred businessmen decide to do it.' – Andrew Young",
+  "'There's no business like show business, but there are several businesses like accounting.' – David Letterman",
+  "'There's an enormous number of managers who have retired on the job.' – Peter Drucker",
+  "'By working faithfully eight hours a day you may eventually get to be boss and work twelve hours a day.' – Robert Frost",
+  "'Accomplishing the impossible means only the boss will add it to your regular duties.' – Doug Larson",
+  "'Lisa, if you don't like your job you don't strike. You just go in every day and do it half-assed. That's the American way.' – Homer Simpson",
+  "'If you would like to know the value of money, try to borrow some.' – Benjamin Franklin",
+  "'Artificial intelligence is no match for natural stupidity.' – Unknown",
+  "'If at first you don't succeed, failure may be your style.' – Quentin Crisp",
+  "'If at first you don't succeed, try management.' – Unknown",
+  "'Aim low, reach your goals, and avoid disappointment.' – Dilbert",
+  "'Life is like a dogsled team. If you ain't the lead dog, the scenery never changes.' – Lewis Grizzard",
+  "'All paid jobs absorb and degrade the mind.' – Aristotle",
+  "'Beware of any enterprise requiring new clothes.' – Henry Thoreau",
+  "'Do not underestimate your abilities. That is your boss's job.' – Unknown",
+  "'Right now, this is a job. If I advance any higher, this would be my career. And if this were my career, I'd have to throw myself in front of a train.' – The Office",
+  "'Victory goes to the player who makes the next-to-last mistake.' – Savielly Tartakower",
+  "'Success is simply a matter of luck. Ask any failure.' – Earl Wilson",
+  "'I'm not the smartest fellow in the world, but I can sure pick smart colleagues.' – Franklin D. Roosevelt",
+  "'One of the symptoms of an approaching nervous breakdown is the belief that one's work is terribly important.' – Bertrand Russell",
+  "'I will always choose a lazy person to do a hard job, because a lazy person will find an easy way to do it.' – Bill Gates",
+  "'Good judgment comes from experience, and experience comes from bad judgment.' – Rita Mae Brown",
+  "'If you're not failing every now and again, it's a sign you're not doing anything very innovative.' – Woody Allen",
+  "'I suppose it is tempting, if the only tool you have is a hammer, to treat everything as if it were a nail.' – Abraham Maslow",
+  "'The best computer is a man, and it's the only one that can be mass-produced by unskilled labour.' – Wernher von Braun",
+  "'Do the best you can until you know better. Then when you know better, do better.' – Maya Angelou",
+  "'The road to success is always under construction.' – Lily Tomlin",
+  "'Strive not to be a success, but rather to be of value.' – Albert Einstein",
+  "'You don't have to be great to start, but you have to start to be great.' – Zig Ziglar",
+  "'Find a job you enjoy doing, and you will never have to work a day in your life.' – Mark Twain",
+  "'Even if you're on the right track, you'll get run over if you just sit there.' – Will Rogers",
+  "'People often say that motivation doesn't last. Well, neither does bathing, that's why we recommend it daily.' – Zig Ziglar",
+  "'Whoever established the high road and how high it should be should be fired.' – Sandra Bullock",
+  "'Have you ever noticed that anybody driving slower than you is an idiot, and anyone going faster than you is a maniac?' – George Carlin",
+  "'If I'm not back in five minutes, just wait longer.' – Ace Ventura",
+  "'The suspense is terrible. I hope it'll last.' – Willy Wonka",
+  "'Why do they call it rush hour when nothing moves?' – Robin Williams",
+  "'Don't be so humble — you're not that great.' – Golda Meir",
+  "'If you can't be kind, at least be vague.' – Judith Martin",
+  "'Always forgive your enemies; nothing annoys them so much.' – Oscar Wilde",
+  "'In real life, I assure you, there is no such thing as algebra.' – Fran Lebowitz",
+  "'Instant gratification takes too long.' – Carrie Fisher",
+  "'Accept who you are. Unless you're a serial killer.' – Ellen DeGeneres",
+  "'Before you criticize someone, walk a mile in their shoes. That way, you'll be a mile from them, and you'll have their shoes.' – Jack Handey",
+  "'I'm sick of following my dreams, man. I'm just going to ask where they're going and hook up with them later.' – Mitch Hedberg",
+  "'I'd love to stand here and talk with you... but I'm not going to.' – Phil Connors",
+  "'All you need is love. But a little chocolate now and then doesn't hurt.' – Charles M. Schulz",
+  "'The trouble with having an open mind is that people will insist on coming along and trying to put things in it.' – Terry Pratchett",
+  "'Those people who think they know everything are a great annoyance to those of us who do.' – Isaac Asimov",
+  "'The reason I talk to myself is because I'm the only one whose answers I accept.' – George Carlin",
+  "'I'm not superstitious… but I am a little stitious.' – Michael Scott",
+  "'Before you marry a person, you should first make them use a computer with slow Internet to see who they really are.' – Will Ferrell",
+  "'I want my children to have all the things I couldn't afford. Then I want to move in with them.' – Phyllis Diller",
+  "'I love being married. It's so great to find that one special person you want to annoy for the rest of your life.' – Rita Rudner",
+  "'When I was a kid my parents moved a lot, but I always found them.' – Rodney Dangerfield",
+  "'There is no such thing as fun for the whole family.' – Jerry Seinfeld",
+  "'Happiness is having a large, loving, caring, close-knit family in another city.' – George Burns",
+  "'The aging process is not gradual or gentle. It rushes up, pushes you over, and runs off laughing.' – John Mortimer",
+  "'You know you're getting old when you get that one candle on the cake. It's like, \"See if you can blow this out.\"' – Jerry Seinfeld",
+  "'I'm at an age when my back goes out more than I do.' – Phyllis Diller",
+  "'You know you're getting old when the candles cost more than the cake.' – Bob Hope",
+  "'At my age, if I want to connect with old friends, I need a Ouija board.' – Betty White",
+  "'As you get older, three things happen. The first is your memory goes, and I can't remember the other two.' – Norman Wisdom",
+  "'The secret of staying young is to live honestly, eat slowly, and lie about your age.' – Lucille Ball",
+  "'Age is something that doesn't matter, unless you are a cheese.' – Luis Buñuel",
+  "'Old age is always fifteen years older than I am.' – Oliver Wendell Holmes",
+  "'Death is nature's way of saying, \"Your table is ready.\"' – Robin Williams",
+  "'I like long walks, especially when they are taken by people who annoy me.' – Noel Coward",
+  "'A day without sunshine is like, you know, night.' – Steve Martin",
+  "'Someone asked me what book I'd bring to a desert island. I said: \"How to Build a Boat.\"' – Steven Wright",
+  "'Reality continues to ruin my life.' – Bill Watterson",
+  "'Sometimes you lie in bed at night and you don't have a single thing to worry about. That always worries me!' – Charlie Brown",
+  "'People can't drive you crazy if you don't give them the keys.' – Mike Bechtle",
+  "'Do not take life too seriously. You will never get out of it alive.' – Elbert Hubbard",
+  "'I became insane, with long intervals of horrible sanity.' – Edgar Allan Poe",
+  "'Never keep up with the Joneses. Drag them down to your level. It's cheaper.' – Quentin Crisp",
+  "'I told my doctor I broke my arm in two places. He told me to keep out of those places.' – Rodney Dangerfield",
+  "'I never feel more alone than when I'm trying to put sunscreen on my back.' – Jimmy Kimmel",
+  "'Every day I get up and look through the Forbes list of the richest people in America. If I'm not there, I go to work.' – Robert Orben",
+  "'I love deadlines. I love the whooshing noise they make as they go by.' – Douglas Adams",
+  "'I always arrive late at the office, but I make up for it by leaving early.' – Charles Lamb",
+  "'I like work. It fascinates me. I can sit and look at it for hours.' – Jerome K. Jerome",
+  "'When a man tells you that he got rich through hard work, ask him: \"Whose?\"' – Don Marquis",
+  "'By all means, move at a glacial pace. You know how that thrills me.' – Miranda Priestly",
+  "'Most people work just hard enough not to get fired and get paid just enough money not to quit.' – George Carlin",
+  "'Trying is the first step toward failure.' – Homer Simpson",
+  "'Work is the greatest thing in the world, so we should always save some of it for tomorrow.' – Don Herold",
+  "'When in doubt, look intelligent.' – Garrison Keillor",
+  "'Anyone can do any amount of work, provided it isn't the work he is supposed to be doing at that moment.' – Robert Benchley",
+  "'An office is a place to live life to the fullest, to the max. An office is a place where dreams come true.' – Michael Scott",
+  "'A common mistake when trying to design something completely foolproof is to underestimate the ingenuity of complete fools.' – Douglas Adams",
+  "'If hard work is the key to success, most people would rather pick the lock.' – Claude MacDonald",
+  "'The only place success comes before work is in the dictionary.' – Vince Lombardi",
+  "'Whatever you do, always give 100% — unless you're donating blood.' – Bill Murray",
+  "'Never put off till tomorrow what may be done day after tomorrow just as well.' – Mark Twain",
+  "'If you had to identify in one word why the human race has never achieved its full potential, that word would be \"meetings.\"' – Dave Barry",
+  "'People say nothing is impossible, but I do nothing every day.' – A.A. Milne",
+  "'No man goes before his time — unless the boss leaves early.' – Groucho Marx",
+  "'There cannot be a crisis next week. My schedule is already full.' – Henry Kissinger",
+  "'Life moves pretty fast. If you don't stop and look around once in a while, you could miss it.' – Ferris Bueller",
+  "'If you can dodge a wrench, you can dodge a ball.' – Dodgeball",
+  "'Just keep swimming.' – Dory",
+  "'Life is hard. After all, it kills you.' – Katharine Hepburn",
+  "'My therapist told me the way to achieve true inner peace is to finish what I start. So far I've finished two bags of M&Ms and a chocolate cake. I feel better already.' – Dave Barry",
+  "'To succeed in life, you need three things: a wishbone, a backbone and a funny bone.' – Reba McEntire",
+  "'You only live once, but if you do it right, once is enough.' – Mae West",
+  "'Life is short. Drive fast and leave a sexy corpse. That's one of my mottos.' – Stanley Hudson, The Office",
+  "'Nobody exists on purpose, nobody belongs anywhere, everybody's gonna die. Come watch TV.' – Morty, Rick and Morty",
+  "'We need to remember what's important in life: friends, waffles, work. Doesn't matter, but work is third.' – Leslie Knope",
+  "'Sometimes I'll start a sentence and I don't even know where it's going. I just hope I'll find it along the way.' – Michael Scott",
+  "'To alcohol! The cause of, and solution to, all of life's problems.' – Homer Simpson",
+  "'Here's some advice I wish I woulda got when I was your age: Live every week like it's Shark Week.' – Tracy Jordan",
+  "'There is nothing better than a friend, unless it is a friend with chocolate.' – Linda Grayson",
+  "'Marriage: a friendship recognized by the police.' – Robert Louis Stevenson",
+  "'Honesty is the key to a relationship. If you can fake that, you're in.' – Richard Jeni",
+  "'If love is the answer, could you please rephrase the question?' – Lily Tomlin",
+  "'True love comes quietly, without banners or flashing lights. If you hear bells, get your ears checked.' – Erich Segal",
+  "'Some people see things and ask \"Why?\" Some people dream of things and ask \"Why not?\" Some people have to go to work and don't have time for all that.' – George Carlin",
+  "'If every instinct you have is wrong, then the opposite would have to be right.' – Jerry Seinfeld",
+  "'Adults are always asking children what they want to be when they grow up because they're looking for ideas.' – Paula Poundstone",
+  "'If at first you don't succeed, try, try again. Then quit. No use being a damn fool about it.' – W.C. Fields",
+  "'It's a shame that the only thing a man can do for eight hours a day is work. He can't eat for eight hours; he can't drink for eight hours; he can't make love for eight hours.' – William Faulkner",
+  "'Your mother was a hamster and your father smelt of elderberries.' – Monty Python",
+  "'I am serious — and don't call me Shirley.' – Airplane!",
+  "'My mama always said life was like a box of chocolates. You never know what you're gonna get.' – Forrest Gump",
+  "'There are only two things I can't stand: people who are intolerant of other people's cultures, and the Dutch.' – Nigel Powers",
+  "'No one lives forever. But with advances in modern science and my high-level income, it's not crazy to think I can live to 245, maybe 300.' – Ricky Bobby",
+  "'Confidence is 10% hard work and 90% delusion.' – Tina Fey",
+];
+
+let _heroQuoteIndex = -1;
+let _heroQuoteTimer = null;
+
+function setReliningHeroQuote() {
+  const el = document.getElementById('pkgHeroQuote');
+  if (!el) return;
+  if (_heroQuoteIndex === -1) {
+    for (let i = RELINING_HERO_QUOTES.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [RELINING_HERO_QUOTES[i], RELINING_HERO_QUOTES[j]] = [RELINING_HERO_QUOTES[j], RELINING_HERO_QUOTES[i]];
+    }
+    _heroQuoteIndex = 0;
+  }
+  el.style.transition = 'opacity 0.4s';
+  el.style.opacity = '0';
+  setTimeout(() => {
+    el.textContent = RELINING_HERO_QUOTES[_heroQuoteIndex];
+    _heroQuoteIndex = (_heroQuoteIndex + 1) % RELINING_HERO_QUOTES.length;
+    el.style.opacity = '1';
+  }, 400);
+  if (!_heroQuoteTimer) {
+    _heroQuoteTimer = setInterval(setReliningHeroQuote, 60000);
+  }
+}
+
 function switchPage(page, options = {}) {
   if (!options.skipAuth && isProtectedPage(page) && !isAuthenticated()) {
     openGate(page);
@@ -12548,6 +12719,7 @@ function switchPage(page, options = {}) {
     }
   }
   if (page === 'relining') {
+    setReliningHeroQuote();
     if (!window._packagingInited) {
       window._packagingInited = true;
       togglePackagingInputs();
