@@ -888,9 +888,8 @@ window.addEventListener('keydown', (event) => {
   </div>
 </div>
 
-<div id="page-relining" style="display:none;flex-direction:column;overflow:auto;padding:0">
-  <!-- Hero sits outside pkg-shell as direct child of scroll container so sticky works -->
-  <div class="pkg-hero" style="position:sticky;top:0;z-index:100;border-radius:0;margin:0">
+<div id="page-relining" style="display:none">
+  <div class="pkg-hero" style="border-radius:0;margin:0;flex-shrink:0">
     <div style="flex:1;min-width:0">
       <div class="pkg-title">Relining Packaging</div>
       <div class="pkg-sub" id="pkgHeroQuote"></div>
@@ -912,6 +911,7 @@ window.addEventListener('keydown', (event) => {
       </div>
     </div>
   </div>
+  <div style="flex:1;min-height:0;overflow:auto">
   <div class="pkg-shell" style="padding:20px">
     <div class="subtab-bar">
       <button class="subtab active" type="button" id="reliningSubtabMain" onclick="switchReliningSubtab('main')">Pipe Relining</button>
@@ -1095,6 +1095,7 @@ window.addEventListener('keydown', (event) => {
       </div>
       <div id="editPackagesArea" class="pkg-empty">Generate packages on the Pipe Relining tab first to enable manual editing.</div>
     </div>
+  </div>
   </div>
 </div>
 
