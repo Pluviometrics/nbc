@@ -889,6 +889,14 @@ window.addEventListener('keydown', (event) => {
 </div>
 
 <div id="page-relining" style="display:none;flex:1;min-height:0;overflow:auto;background:var(--panel);padding:20px">
+  <!-- Sticky download bar — shown after packages are generated -->
+  <div id="pkgStickyBar" style="display:none;position:sticky;top:0;z-index:100;background:var(--navy);color:white;padding:8px 16px;margin:-20px -20px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+    <span id="pkgStickyCount" style="font-size:12px;font-weight:700;flex:1;white-space:nowrap"></span>
+    <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.7);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
+      <input type="checkbox" id="pkgIncludeLocks"> Include lock file
+    </label>
+    <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal)">Download ZIP</button>
+  </div>
   <div class="pkg-shell">
     <div class="pkg-hero">
       <div>
@@ -6148,6 +6156,11 @@ function renderGeneratedPackages(data) {
     asset_ids: pkg.asset_ids || []
   }));
   const packageHeaders = Object.keys(displayPackages[0]);
+  // Update and show sticky bar
+  const stickyBar = document.getElementById('pkgStickyBar');
+  const stickyCount = document.getElementById('pkgStickyCount');
+  if (stickyBar) stickyBar.style.display = 'flex';
+  if (stickyCount) stickyCount.textContent = `${Number(data.package_count || 0).toLocaleString()} packages · ${Number(data.costed_pipe_count || 0).toLocaleString()} pipes · $${Number(data.total_cost || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}`;
   area.className = 'pkg-table-wrap';
   area.innerHTML = `
     <div style="padding:12px;background:white;border-bottom:1px solid var(--border)">
@@ -6561,8 +6574,10 @@ function clearReliningPackagingOutputs(clearPreview = true) {
   const pkgArea = document.getElementById('pkgPackagesArea');
   if (pkgArea) {
     pkgArea.className = 'pkg-empty';
-    pkgArea.textContent = 'Generate relining packages to see package counts, cost totals, and sample package rows.';
+    pkgArea.textContent = 'Generate relining packages to see package counts and cost totals.';
   }
+  const stickyBar = document.getElementById('pkgStickyBar');
+  if (stickyBar) stickyBar.style.display = 'none';
   renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview);
   renderReliningPackagesMap();
 }
@@ -8435,8 +8450,10 @@ async function downloadReliningPackagesZip() {
     }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
-    // locks.json — persist manual moves so the session can be resumed later
-    zip.file('locks.json', JSON.stringify(reliningManualMoves || {}, null, 2));
+    // locks.json — only included if the user opted in (not for contractor ZIPs)
+    if (document.getElementById('pkgIncludeLocks')?.checked) {
+      zip.file('locks.json', JSON.stringify(reliningManualMoves || {}, null, 2));
+    }
 
     // file_list.txt
     const sortedCsvNames = csvNames.slice().sort();
@@ -8508,7 +8525,7 @@ async function downloadReliningPackagesZip() {
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
-    if (!fileNames.includes('locks.json')) throw new Error('ZIP validation failed: locks.json is missing.');
+    // locks.json is optional — only present when user opted in
     const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
     if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
