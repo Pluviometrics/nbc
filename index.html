@@ -28,6 +28,10 @@
      scrolling so wheel events over side / empty areas scroll the page, and
      wheel events over the panel are not trapped inside it. The thead sticks
      to the page-shell scroll context (i.e. the top of the visible area). */
+  #page-relining .pkg-shell,
+  #page-cctvpackaging .pkg-shell {
+    overflow: visible;
+  }
   #pkgPackagesArea.pkg-table-wrap,
   #cctvPkgPackagesArea.pkg-table-wrap {
     overflow: visible;
@@ -1597,8 +1601,18 @@ function buildCiAAssetUrl(assetNumber) {
 
 // Renders a table cell value — hyperlinks asset ID columns to CiA, escapes everything else.
 const CIA_ASSET_HEADERS = new Set(['asset_id', 'Asset', 'asset', 'Asset Number', 'OBJECTID']);
+const CIA_ASSET_LIST_HEADERS = new Set(['asset_ids']);
 function renderPkgCellValue(header, value) {
   const v = Array.isArray(value) ? value.join(', ') : value;
+  if (CIA_ASSET_LIST_HEADERS.has(header)) {
+    // Comma-separated list — link each ID individually
+    return String(v ?? '').split(',').map(id => {
+      const trimmed = id.trim();
+      if (!trimmed) return '';
+      const url = buildCiAAssetUrl(trimmed);
+      return url ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(trimmed) + '</a>' : escapeHtml(trimmed);
+    }).filter(Boolean).join(', ');
+  }
   if (CIA_ASSET_HEADERS.has(header)) {
     const url = buildCiAAssetUrl(v);
     if (url) return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(String(v ?? '')) + '</a>';
@@ -5980,7 +5994,7 @@ function renderGeneratedPackages(data) {
       </thead>
       <tbody>
         ${displayPackages.map(row => `
-          <tr>${packageHeaders.map(h => `<td>${h === 'package_id' ? row[h] : escapeHtml(Array.isArray(row[h]) ? row[h].join(', ') : row[h])}</td>`).join('')}</tr>
+          <tr>${packageHeaders.map(h => `<td>${h === 'package_id' ? row[h] : renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
         `).join('')}
       </tbody>
     </table>
