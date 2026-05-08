@@ -1595,6 +1595,17 @@ function buildCiAAssetUrl(assetNumber) {
   return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + value + '&suite=CES';
 }
 
+// Renders a table cell value — hyperlinks asset ID columns to CiA, escapes everything else.
+const CIA_ASSET_HEADERS = new Set(['asset_id', 'Asset', 'asset', 'Asset Number', 'OBJECTID']);
+function renderPkgCellValue(header, value) {
+  const v = Array.isArray(value) ? value.join(', ') : value;
+  if (CIA_ASSET_HEADERS.has(header)) {
+    const url = buildCiAAssetUrl(v);
+    if (url) return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">' + escapeHtml(String(v ?? '')) + '</a>';
+  }
+  return escapeHtml(String(v ?? ''));
+}
+
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 let allStations = [], selected = null, markers = {}, mode = 'recent';
 let bomRainfallGauges = [], bomRainfallMarkers = {};
@@ -5611,7 +5622,7 @@ function renderEditPackagesPanel() {
       const isMoved = !!reliningManualMoves?.assignments?.[uid];
       return `
         <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
-          <div>${escapeHtml(uid)}${isMoved ? ' <span class="edit-pkg-tag moved">Moved</span>' : ''}</div>
+          <div>${(u => { const h = buildCiAAssetUrl(u); return h ? `<a href="${escapeHtml(h)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>` : escapeHtml(u); })(uid)}${isMoved ? ' <span class="edit-pkg-tag moved">Moved</span>' : ''}</div>
           <div>${escapeHtml(asset.suburb || '')}</div>
           <div>${escapeHtml(String(asset.diameterMm ?? ''))}</div>
           <div>${Number(asset.lengthM || 0).toFixed(1)}</div>
@@ -5871,7 +5882,7 @@ function renderPackagingSamples(streams) {
     area.innerHTML = `
       <table>
         <thead><tr>${headers.map(header => `<th>${escapeHtml(displayTableHeader(header))}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map(row => `<tr>${headers.map(header => `<td>${escapeHtml(row[header])}</td>`).join('')}</tr>`).join('')}</tbody>
+        <tbody>${rows.map(row => `<tr>${headers.map(header => `<td>${renderPkgCellValue(header, row[header])}</td>`).join('')}</tr>`).join('')}</tbody>
       </table>
     `;
     return;
@@ -5895,7 +5906,7 @@ function renderPackagingSamples(streams) {
       </thead>
       <tbody>
         ${firstWithSamples.sample_assets.map(row => `
-          <tr>${headers.map(h => `<td>${escapeHtml(row[h])}</td>`).join('')}</tr>
+          <tr>${headers.map(h => `<td>${renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
         `).join('')}
       </tbody>
     </table>
@@ -5983,7 +5994,7 @@ function renderGeneratedPackages(data) {
         </thead>
         <tbody>
           ${displaySamples.map(row => `
-            <tr>${sampleHeaders.map(h => `<td>${escapeHtml(row[h])}</td>`).join('')}</tr>
+            <tr>${sampleHeaders.map(h => `<td>${renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
           `).join('')}
         </tbody>
       </table>
@@ -7763,9 +7774,13 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     };
 
     function popupHtml(p) {
+      const _ciaHref = buildCiAAssetUrl(p.asset_id);
+      const _assetLabel = esc(p.asset_id || 'Pipe');
+      const _assetMarkup = _ciaHref
+        ? '<a href="' + esc(_ciaHref) + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">' + _assetLabel + '</a>'
+        : _assetLabel;
       return ''
-        + '<strong>' + esc(p.asset_id) + '</strong>'
-        + (p.package_id ? ' <span style="color:#5A6B7A;font-weight:500">· ' + esc(p.package_id) + '</span>' : '')
+        + '<strong>ASSET ID - ' + _assetMarkup + (p.package_id ? ' - ' + esc(p.package_id) : '') + '</strong>'
         + '<br>Suburb: ' + esc(p.suburb || '—')
         + '<br>Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '—')
         + (p.material ? '<br>Material: ' + esc(p.material) : '')
@@ -12572,31 +12587,4 @@ function renderPriList() {
       <td class="r">${r.deliv.toFixed(1)}</td>
     </tr>`;
   }).join('');
-  document.getElementById('pri-list-table').innerHTML = `
-    <table>
-      <thead><tr>
-        <th>#</th><th>Project</th><th>Priority</th><th class="r">Score</th>
-        <th class="r">Impact</th><th class="r">Health</th><th class="r">VFM</th><th class="r">Deliv.</th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table>`;
-}
-
-function priExportCSV() {
-  let csv = 'Rank,Project,Asset Type,Location,Priority,Score,Impact,Asset Health,VFM,Deliverability,Date\n';
-  priList.forEach((r,i) => {
-    csv += `${i+1},"${r.name}","${r.asset}","${r.location || ''}",${r.priority},${r.final.toFixed(1)},${r.impact.toFixed(1)},${r.health.toFixed(1)},${r.vfm.toFixed(1)},${r.deliv.toFixed(1)},${r.saved}\n`;
-  });
-  const a = document.createElement('a');
-  a.href = 'data:text/csv,' + encodeURIComponent(csv);
-  a.download = 'nbc_prioritisation_' + new Date().toISOString().slice(0,10) + '.csv';
-  a.click();
-}
-
-origPriUpdate();
-priCalc();
-
-// init() is called lazily by switchPage('aep') on first visit
-</script>
-</body>
-</html>
+  document.getElementById('pri-list-table').innerH
