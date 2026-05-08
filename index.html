@@ -5593,8 +5593,24 @@ function unlockReliningPipe(uid) {
 
 function lockReliningPackage(anchorId, assets) {
   _ensureLocks();
-  reliningManualMoves.locks.packages[String(anchorId)] = true;
-  (assets || []).forEach(a => lockReliningPipe(String(a.assetId || ''), anchorId));
+  const id = String(anchorId);
+  reliningManualMoves.locks.packages[id] = true;
+  // Register the anchor origin so applyReliningManualMoves creates a stub on rerun
+  if (!reliningManualMoves.anchorOrigins[id]) {
+    const pkg = (lastPackagingGeneration?.packages || []).find(p => p.anchor_id === anchorId);
+    reliningManualMoves.anchorOrigins[id] = {
+      kind: 'existing',
+      created_at: new Date().toISOString(),
+      last_package_id: pkg?.package_id || ''
+    };
+  }
+  // Force-assign all pipes to this anchor (not conditional — lock means absolute)
+  (assets || []).forEach(a => {
+    const u = String(a.assetId || '');
+    if (!u) return;
+    reliningManualMoves.locks.pipes[u] = true;
+    reliningManualMoves.assignments[u] = id;
+  });
   persistReliningManualMoves();
 }
 
