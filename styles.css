@@ -301,6 +301,7 @@ body.busy-ui button,body.busy-ui .run-btn,body.busy-ui .export-btn{cursor:progre
 .edit-pkg-tag.manual{background:#FFE9A8;color:#7A5A00}
 .edit-pkg-tag.empty{background:#FAD2CF;color:#7B2D26}
 .edit-pkg-tag.moved{background:#D8EBE5;color:#0E5C4F}
+.edit-pkg-tag.locked{background:#FEE2E2;color:#991B1B}
 .edit-pkg-asset-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.7fr 0.7fr 0.9fr 2fr 0.7fr 0.5fr;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--border);align-items:center}
 .edit-pkg-asset-row:last-child{border-bottom:none}
 .edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border)}

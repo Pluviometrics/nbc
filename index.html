@@ -5366,20 +5366,21 @@ let reliningManualMoves = loadReliningManualMoves();
 function loadReliningManualMoves() {
   try {
     const raw = localStorage.getItem(RELINING_MANUAL_MOVES_KEY);
-    if (!raw) return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} } };
+    if (!raw) return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} } };
+    if (!parsed || typeof parsed !== 'object') return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
     return {
       assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {},
       anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {},
       locks: {
         pipes: parsed.locks?.pipes && typeof parsed.locks.pipes === 'object' ? parsed.locks.pipes : {},
         packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
-      }
+      },
+      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
     };
   } catch (err) {
     console.warn('[Relining manual edit] load failed', err);
-    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} } };
+    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
   }
 }
 
@@ -5486,7 +5487,9 @@ function moveReliningAssetToPackage(assetUid, targetAnchorId) {
     reliningManualMoves.anchorOrigins[targetAnchorId].last_package_id = targetPkg.package_id;
   }
   if (!reliningManualMoves.locks) reliningManualMoves.locks = { pipes: {}, packages: {} };
+  if (!reliningManualMoves.moveOrigins) reliningManualMoves.moveOrigins = {};
   reliningManualMoves.locks.pipes[uid] = true;
+  reliningManualMoves.moveOrigins[uid] = true;
   persistReliningManualMoves();
   reapplyManualEditsToCurrentGeneration();
 }
@@ -5504,8 +5507,10 @@ function createNewReliningPackageForAsset(assetUid) {
   };
   reliningManualMoves.assignments[uid] = newAnchor;
   if (!reliningManualMoves.locks) reliningManualMoves.locks = { pipes: {}, packages: {} };
+  if (!reliningManualMoves.moveOrigins) reliningManualMoves.moveOrigins = {};
   reliningManualMoves.locks.packages[newAnchor] = true;
   reliningManualMoves.locks.pipes[uid] = true;
+  reliningManualMoves.moveOrigins[uid] = true;
   persistReliningManualMoves();
   reapplyManualEditsToCurrentGeneration();
 }
@@ -5515,6 +5520,8 @@ function clearReliningManualMove(assetUid) {
   const uid = String(assetUid);
   if (!(uid in (reliningManualMoves.assignments || {}))) return;
   delete reliningManualMoves.assignments[uid];
+  if (reliningManualMoves.moveOrigins) delete reliningManualMoves.moveOrigins[uid];
+  if (reliningManualMoves.locks?.pipes) delete reliningManualMoves.locks.pipes[uid];
   persistReliningManualMoves();
   renderEditPackagesPanel();
   renderGeneratedPackages(lastPackagingGeneration);
@@ -5554,6 +5561,7 @@ function unlockReliningPipe(uid) {
   const u = String(uid);
   delete reliningManualMoves.locks.pipes[u];
   delete reliningManualMoves.assignments[u];
+  if (reliningManualMoves.moveOrigins) delete reliningManualMoves.moveOrigins[u];
 }
 
 function lockReliningPackage(anchorId, assets) {
@@ -5589,12 +5597,32 @@ function toggleReliningPackageLock(anchorId) {
   renderGeneratedPackages(lastPackagingGeneration);
 }
 
+function getReliningGlobalLockState() {
+  const allAssets = (lastPackagingGeneration?.packages || []).flatMap(p => p.assets || []);
+  if (!allAssets.length) return 'none';
+  const lockedCount = allAssets.filter(a => isReliningPipeLocked(String(a.assetId || ''))).length;
+  if (lockedCount === allAssets.length) return 'all';
+  if (lockedCount === 0) return 'none';
+  return 'partial';
+}
+
+function toggleReliningAllPackagesLock() {
+  const packages = lastPackagingGeneration?.packages || [];
+  if (getReliningGlobalLockState() === 'all') {
+    packages.forEach(pkg => unlockReliningPackage(pkg.anchor_id, pkg.assets || []));
+  } else {
+    packages.forEach(pkg => lockReliningPackage(pkg.anchor_id, pkg.assets || []));
+  }
+  renderEditPackagesPanel();
+  renderGeneratedPackages(lastPackagingGeneration);
+}
+
 function resetAllReliningManualMoves() {
   const hasAssignments = Object.keys(reliningManualMoves?.assignments || {}).length > 0;
   const hasOrigins = Object.keys(reliningManualMoves?.anchorOrigins || {}).length > 0;
   if (!hasAssignments && !hasOrigins) return;
   if (!confirm('Clear all manual package edits and regenerate from scratch?')) return;
-  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} } };
+  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
     generateReliningPackages();
@@ -5709,12 +5737,19 @@ function renderEditPackagesPanel() {
   const moveCount = manualReliningAssignmentCount();
   const affectedAnchors = new Set(Object.values(reliningManualMoves?.assignments || {}));
 
+  const globalLockState = getReliningGlobalLockState();
+  const globalLockCls = globalLockState === 'all' ? 'locked' : globalLockState === 'partial' ? 'partial' : 'unlocked';
+  const globalLockIcon = globalLockState === 'all' ? '🔒' : '🔓';
+  const globalLockTitle = globalLockState === 'all' ? 'All packages locked — click to unlock all' : 'Click to lock all packages';
   const toolbarHtml = `
     <div class="edit-pkg-toolbar">
-      <div>
-        <strong>${moveCount.toLocaleString()}</strong> manual move${moveCount === 1 ? '' : 's'} active.
-        Affected packages: <strong>${affectedAnchors.size.toLocaleString()}</strong>.
-        Manual moves persist across regenerations.
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="pkg-lock-btn ${globalLockCls}" style="font-size:18px;padding:4px 9px" type="button" onclick="toggleReliningAllPackagesLock()" title="${escapeHtml(globalLockTitle)}">${globalLockIcon}</button>
+        <div>
+          <strong>${moveCount.toLocaleString()}</strong> manual move${moveCount === 1 ? '' : 's'} active.
+          Affected packages: <strong>${affectedAnchors.size.toLocaleString()}</strong>.
+          Manual moves persist across regenerations.
+        </div>
       </div>
       <div style="display:flex;gap:8px">
         <button class="export-btn" type="button" onclick="resetAllReliningManualMoves()">Reset All Manual Edits</button>
@@ -5749,14 +5784,25 @@ function renderEditPackagesPanel() {
     const headRow = `<div class="edit-pkg-asset-row head"><div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div></div>`;
     const rows = assets.map(asset => {
       const uid = String(asset.assetId || '');
-      const isMoved = !!reliningManualMoves?.assignments?.[uid];
       const isLocked = isReliningPipeLocked(uid);
+      const isMoveOrigin = !!(reliningManualMoves?.moveOrigins?.[uid]);
       const lockCls = isLocked ? 'locked' : 'unlocked';
       const lockIcon = isLocked ? '🔒' : '🔓';
       const lockTitle = isLocked ? 'Locked — click to unlock' : 'Unlocked — click to lock';
+      const tagHtml = isLocked
+        ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
+        : '';
+      const assetColor = isLocked ? '#dc2626' : '#16a34a';
+      const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
+      const assetLinkHtml = (u => {
+        const h = buildCiAAssetUrl(u);
+        return h
+          ? `<a href="${escapeHtml(h)}" target="_blank" rel="noopener" style="${assetStyle}">${escapeHtml(u)}</a>`
+          : `<span style="color:${assetColor} !important">${escapeHtml(u)}</span>`;
+      })(uid);
       return `
         <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
-          <div>${(u => { const h = buildCiAAssetUrl(u); return h ? `<a href="${escapeHtml(h)}" target="_blank" rel="noopener">${escapeHtml(u)}</a>` : escapeHtml(u); })(uid)}${isMoved ? ' <span class="edit-pkg-tag moved">Moved</span>' : ''}</div>
+          <div>${assetLinkHtml}${tagHtml}</div>
           <div>${escapeHtml(asset.suburb || '')}</div>
           <div>${escapeHtml(String(asset.diameterMm ?? ''))}</div>
           <div>${Number(asset.lengthM || 0).toFixed(1)}</div>
@@ -5766,7 +5812,7 @@ function renderEditPackagesPanel() {
               ${reliningEditTargetOptionsHtml(pkg.anchor_id)}
             </select>
           </div>
-          <div>${isMoved ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : ''}</div>
+          <div>${isMoveOrigin ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : ''}</div>
           <div><button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button></div>
         </div>
       `;
