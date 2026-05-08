@@ -7242,7 +7242,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       pkgPipes.forEach(function(p) {
         var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
         marker.bindPopup(
-          '<strong>' + linkAssetId(p.asset_id) + '</strong><br>' +
+          '<strong>' + (p.asset_id ? 'ASSET ID - ' + linkAssetId(p.asset_id) : 'Pipe') + (p.package_id ? ' - ' + esc(p.package_id) : '') + '</strong><br>' +
           'Package: ' + esc(p.package_id) + '<br>' +
           'Suburb: ' + esc(p.suburb) + '<br>' +
           'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
@@ -8459,9 +8459,10 @@ function buildPipePopupHtml(item, pkg) {
   const assetMarkup = ciaUrl
     ? `<a href="${escapeHtml(ciaUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${assetLabel}</a>`
     : assetLabel;
+  const titleHead = assetId ? `ASSET ID - ${assetMarkup}` : assetLabel;
   return `
     <div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">
-      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${assetMarkup}${pkgId ? ` <span style="color:var(--text-l);font-weight:500">· ${escapeHtml(pkgId)}</span>` : ''}</div>
+      <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${titleHead}${pkgId ? ` - ${escapeHtml(pkgId)}` : ''}</div>
       <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
       <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
