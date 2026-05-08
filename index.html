@@ -949,10 +949,6 @@ window.addEventListener('keydown', (event) => {
           <label for="pkgPipeCount">Pipes Per Package</label>
           <input type="text" id="pkgPipeCount" value="25"/>
         </div>
-        <div class="fg" id="pkgLocationDistanceRow" style="display:none">
-          <label for="pkgLocationDistance">Distance (m)</label>
-          <input type="number" id="pkgLocationDistance" value="3000" min="100" max="50000" step="100" style="width:100%;box-sizing:border-box" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-        </div>
         <div class="fg">
           <label for="pkgGroupSuburb">Group by Suburb</label>
           <select id="pkgGroupSuburb" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
@@ -4550,10 +4546,7 @@ function getReliningPackagingOptions() {
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
-  const proximityM = method === 'location'
-    ? (Number(document.getElementById('pkgLocationDistance')?.value) || 3000)
-    : groupingMethod === 'suburb' ? null
-    : parseInt(groupingMethod, 10);
+  const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
   return {
     reliningMode,
     method,
@@ -5101,14 +5094,28 @@ function splitReliningItemsByValue(items, options) {
 }
 
 function splitReliningItemsByLocation(items, options) {
+  // Cluster by spatial proximity using the grouping-method distance
   const clustered = assignReliningClusters(items, options.proximityM);
-  let pkgIndex = 0;
-  const clusterToId = new Map();
-  return clustered.map(item => {
-    const key = item._cluster || 'unknown';
-    if (!clusterToId.has(key)) clusterToId.set(key, `RLN_${String(++pkgIndex).padStart(3, '0')}`);
-    return { ...item, package_id: clusterToId.get(key) };
+  const clusterMap = new Map();
+  clustered.forEach(item => {
+    const key = item._cluster ?? 'unknown';
+    if (!clusterMap.has(key)) clusterMap.set(key, []);
+    clusterMap.get(key).push(item);
   });
+  // Within each cluster, split by value (respects max package value)
+  const result = [];
+  let globalPkgIndex = 0;
+  clusterMap.forEach(clusterItems => {
+    const subPackaged = splitReliningItemsByValue(clusterItems, options);
+    const subIdMap = new Map();
+    subPackaged.forEach(item => {
+      if (!subIdMap.has(item.package_id)) {
+        subIdMap.set(item.package_id, `RLN_${String(++globalPkgIndex).padStart(3, '0')}`);
+      }
+      result.push({ ...item, package_id: subIdMap.get(item.package_id) });
+    });
+  });
+  return result;
 }
 
 function maxReliningPackageSpanM(items) {
@@ -5490,6 +5497,19 @@ function moveReliningAssetToPackage(assetUid, targetAnchorId) {
   if (!reliningManualMoves.moveOrigins) reliningManualMoves.moveOrigins = {};
   reliningManualMoves.locks.pipes[uid] = true;
   reliningManualMoves.moveOrigins[uid] = true;
+  // Lock all existing pipes in the target package so it stays intact on rerun
+  if (targetPkg) {
+    (targetPkg.assets || []).forEach(a => {
+      const aUid = String(a.assetId || '');
+      if (aUid && aUid !== uid) {
+        reliningManualMoves.locks.pipes[aUid] = true;
+        if (!reliningManualMoves.assignments[aUid]) {
+          reliningManualMoves.assignments[aUid] = targetAnchorId;
+        }
+      }
+    });
+    reliningManualMoves.locks.packages[targetAnchorId] = true;
+  }
   persistReliningManualMoves();
   reapplyManualEditsToCurrentGeneration();
 }
@@ -6098,10 +6118,8 @@ function togglePackagingInputs() {
   const method = document.getElementById('pkgMethod')?.value || 'value';
   const valueWrap = document.getElementById('pkgValueWrap');
   const countWrap = document.getElementById('pkgCountWrap');
-  const locationRow = document.getElementById('pkgLocationDistanceRow');
   if (valueWrap) valueWrap.style.display = method === 'value' ? '' : 'none';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
-  if (locationRow) locationRow.style.display = method === 'location' ? '' : 'none';
 }
 
 function renderGeneratedPackages(data) {
