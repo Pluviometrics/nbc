@@ -1026,10 +1026,17 @@ window.addEventListener('keydown', (event) => {
           </label>
         </div>
       </div>
-      <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
+      <div class="pkg-grid" style="grid-template-columns:auto auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
           <button class="run-btn" style="margin-top:0" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Packages</button>
+        </div>
+        <div class="fg">
+          <label>&nbsp;</label>
+          <label class="run-btn" style="margin-top:0;cursor:pointer;background:var(--navy);display:inline-block;text-align:center" title="Load a locks.json or relining_packages ZIP to restore a previous session">
+            Load Locks
+            <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
+          </label>
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -1048,7 +1055,7 @@ window.addEventListener('keydown', (event) => {
     <div class="pkg-card-grid" id="pkgCards"></div>
     <div class="pkg-panel">
       <div class="lbl">Generated Packages</div>
-      <div id="pkgPackagesArea" class="pkg-empty">Generate relining packages to see package counts, cost totals, and sample package rows.</div>
+      <div id="pkgPackagesArea" class="pkg-empty">Generate relining packages to see package counts and cost totals.</div>
     </div>
     <div class="pkg-panel">
       <div class="lbl">Package Map</div>
@@ -5637,6 +5644,43 @@ function toggleReliningAllPackagesLock() {
   renderGeneratedPackages(lastPackagingGeneration);
 }
 
+async function loadReliningLocksFile(file) {
+  if (!file) return;
+  try {
+    let json;
+    if (file.name.endsWith('.zip')) {
+      if (typeof JSZip === 'undefined') { alert('JSZip not loaded — refresh and try again.'); return; }
+      const zip = await JSZip.loadAsync(file);
+      const entry = zip.file('locks.json');
+      if (!entry) { alert('No locks.json found in that ZIP.'); return; }
+      json = await entry.async('string');
+    } else {
+      json = await file.text();
+    }
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== 'object') throw new Error('Invalid locks file format.');
+    reliningManualMoves = {
+      assignments:   parsed.assignments   && typeof parsed.assignments   === 'object' ? parsed.assignments   : {},
+      anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {},
+      locks: {
+        pipes:    parsed.locks?.pipes    && typeof parsed.locks.pipes    === 'object' ? parsed.locks.pipes    : {},
+        packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
+      },
+      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
+    };
+    persistReliningManualMoves();
+    if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
+      generateReliningPackages();
+    } else {
+      renderEditPackagesPanel();
+    }
+    const pipeCount = Object.keys(reliningManualMoves.assignments).length;
+    console.info(`[Locks] Loaded ${pipeCount} assignment(s) from ${file.name}`);
+  } catch (err) {
+    alert('Failed to load locks file: ' + (err?.message || err));
+  }
+}
+
 function resetAllReliningManualMoves() {
   const hasAssignments = Object.keys(reliningManualMoves?.assignments || {}).length > 0;
   const hasOrigins = Object.keys(reliningManualMoves?.anchorOrigins || {}).length > 0;
@@ -6056,64 +6100,6 @@ function renderReliningPackagingReasoning(options, preview = null) {
   `;
 }
 
-function renderPackagingSamples(streams) {
-  const area = document.getElementById('pkgSampleArea');
-  if (!area) return;
-  const preview = lastReliningPackagingPreview;
-  if (preview) {
-    if (!preview.eligible.length) {
-      area.className = 'pkg-empty';
-      area.textContent = 'No eligible relining candidates were found with the current rules.';
-      return;
-    }
-    const rows = preview.eligible.slice(0, 12).map(item => ({
-      asset_id: item.assetId,
-      suburb: item.suburb,
-      condition: item.conditionLabel,
-      diameter_mm: item.diameterMm ?? '',
-      length_m: Number(item.lengthM || 0).toFixed(1),
-      rate_per_m: Number.isFinite(item.ratePerM) ? formatCurrency(item.ratePerM) : '',
-      pipe_cost: Number.isFinite(item.pipeCost) ? formatCurrency(item.pipeCost) : '',
-      cost_status: item.costStatus,
-      cost_reason: item.costReason,
-      coordinate_source: item.coordinateSource || ''
-    }));
-    const headers = Object.keys(rows[0]);
-    area.className = 'pkg-table-wrap';
-    area.innerHTML = `
-      <table>
-        <thead><tr>${headers.map(header => `<th>${escapeHtml(displayTableHeader(header))}</th>`).join('')}</tr></thead>
-        <tbody>${rows.map(row => `<tr>${headers.map(header => `<td>${renderPkgCellValue(header, row[header])}</td>`).join('')}</tr>`).join('')}</tbody>
-      </table>
-    `;
-    return;
-  }
-  const firstWithSamples = (streams || []).find(s => (s.sample_assets || []).length);
-  if (!firstWithSamples) {
-    area.className = 'pkg-empty';
-    area.textContent = 'No eligible relining candidates were found with the current rules.';
-    return;
-  }
-
-  const headers = Object.keys(firstWithSamples.sample_assets[0]);
-  area.className = 'pkg-table-wrap';
-  area.innerHTML = `
-    <div style="padding:12px;font-size:12px;font-weight:700;color:var(--navy);background:white;border-bottom:1px solid var(--border)">
-      ${escapeHtml(firstWithSamples.name)}
-    </div>
-    <table>
-      <thead>
-        <tr>${headers.map(h => `<th>${escapeHtml(displayTableHeader(h))}</th>`).join('')}</tr>
-      </thead>
-      <tbody>
-        ${firstWithSamples.sample_assets.map(row => `
-          <tr>${headers.map(h => `<td>${renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
-        `).join('')}
-      </tbody>
-    </table>
-  `;
-}
-
 function togglePackagingInputs() {
   const method = document.getElementById('pkgMethod')?.value || 'value';
   const valueWrap = document.getElementById('pkgValueWrap');
@@ -6145,21 +6131,7 @@ function renderGeneratedPackages(data) {
     coordinate_sources: pkg.coordinate_sources || '',
     asset_ids: pkg.asset_ids || []
   }));
-  const firstPackage = data.packages[0];
-  const displaySamples = (firstPackage?.assets || []).slice(0, 12).map(asset => ({
-    package_id: firstPackage.package_id,
-    asset_id: asset.assetId,
-    suburb: asset.suburb,
-    condition: asset.conditionLabel,
-    diameter_mm: asset.diameterMm ?? '',
-    length_m: Number(asset.lengthM || 0).toFixed(1),
-    rate_per_m: Number.isFinite(asset.ratePerM) ? formatCurrency(asset.ratePerM) : '',
-    pipe_cost: Number.isFinite(asset.pipeCost) ? formatCurrency(asset.pipeCost) : '',
-    coordinate_source: asset.coordinateSource || '',
-    centre_distance_m: asset.package_center_distance_m != null ? asset.package_center_distance_m.toFixed(0) : ''
-  }));
   const packageHeaders = Object.keys(displayPackages[0]);
-  const sampleHeaders = displaySamples.length ? Object.keys(displaySamples[0]) : [];
   area.className = 'pkg-table-wrap';
   area.innerHTML = `
     <div style="padding:12px;background:white;border-bottom:1px solid var(--border)">
@@ -6185,21 +6157,6 @@ function renderGeneratedPackages(data) {
         `).join('')}
       </tbody>
     </table>
-    ${sampleHeaders.length ? `
-      <div style="padding:12px;font-size:12px;font-weight:700;color:var(--navy);background:white;border-top:1px solid var(--border);border-bottom:1px solid var(--border)">
-        Sample package assets
-      </div>
-      <table>
-        <thead>
-          <tr>${sampleHeaders.map(h => `<th>${escapeHtml(displayTableHeader(h))}</th>`).join('')}</tr>
-        </thead>
-        <tbody>
-          ${displaySamples.map(row => `
-            <tr>${sampleHeaders.map(h => `<td>${h === 'asset_id' ? renderReliningAssetIdsCell([row[h]]) : renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
-          `).join('')}
-        </tbody>
-      </table>
-    ` : ''}
   `;
 }
 
@@ -6582,11 +6539,6 @@ function clearReliningPackagingOutputs(clearPreview = true) {
   lastPackagingGeneration = null;
   if (clearPreview) {
     lastReliningPackagingPreview = null;
-    const sample = document.getElementById('pkgSampleArea');
-    if (sample) {
-      sample.className = 'pkg-empty';
-      sample.textContent = 'Upload files and run the preview to see eligible relining candidates.';
-    }
     const cards = document.getElementById('pkgCards');
     if (cards) cards.innerHTML = '';
   }
@@ -6714,7 +6666,6 @@ async function loadPackagingPreview() {
     renderPackagingPaths();
     renderPackagingCards(data.streams);
     renderReliningPackagingReasoning(options, data);
-    renderPackagingSamples(data.streams);
     const pkgArea = document.getElementById('pkgPackagesArea');
     if (pkgArea) {
       pkgArea.className = 'pkg-empty';
@@ -6722,11 +6673,7 @@ async function loadPackagingPreview() {
     }
   } catch (e) {
     setPackagingStatus(false, 'Preview failed');
-    const area = document.getElementById('pkgSampleArea');
-    if (area) {
-      area.className = 'pkg-empty';
-      area.textContent = String(e.message || e);
-    }
+    console.error('[Preview]', e);
   } finally {
     hideLoad();
   }
@@ -6798,7 +6745,6 @@ async function generateReliningPackages() {
     });
     renderReliningPackagingReasoning(options, preview);
     renderPackagingCards(preview.streams);
-    renderPackagingSamples(preview.streams);
     renderGeneratedPackages(data);
     renderReliningPackagesMap();
     renderEditPackagesPanel();
@@ -8473,6 +8419,9 @@ async function downloadReliningPackagesZip() {
     }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
+    // locks.json — persist manual moves so the session can be resumed later
+    zip.file('locks.json', JSON.stringify(reliningManualMoves || {}, null, 2));
+
     // file_list.txt
     const sortedCsvNames = csvNames.slice().sort();
     zip.file('file_list.txt', ['PACKAGE FILE LIST', '='.repeat(60), '', ...sortedCsvNames].join('\n'));
@@ -8543,6 +8492,7 @@ async function downloadReliningPackagesZip() {
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
+    if (!fileNames.includes('locks.json')) throw new Error('ZIP validation failed: locks.json is missing.');
     const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
     if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
