@@ -951,19 +951,19 @@ window.addEventListener('keydown', (event) => {
         <div class="fg">
           <label for="pkgGroupSuburb">Group by Suburb</label>
           <select id="pkgGroupSuburb" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-            <option value="yes" selected>Yes</option>
-            <option value="no">No</option>
+            <option value="yes">Yes</option>
+            <option value="no" selected>No</option>
           </select>
         </div>
         <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
           <select id="pkgGroupingMethod" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-            <option value="suburb" selected>Suburb (no coordinates)</option>
+            <option value="suburb">Suburb (no coordinates)</option>
             <option value="250">250m</option>
             <option value="500">500m</option>
             <option value="1000">1000m</option>
             <option value="2000">2000m</option>
-            <option value="3000">3000m</option>
+            <option value="3000" selected>3000m</option>
           </select>
         </div>
         <div class="fg">
@@ -1011,9 +1011,9 @@ window.addEventListener('keydown', (event) => {
       <div id="pkgTopupRow" style="margin-top:10px">
         <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top up underfilled packages</div>
         <div style="display:flex;gap:20px;font-size:12px;align-items:center">
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
+          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
         </div>
       </div>
       <div id="pkgCostAdjustmentsRow" style="margin-top:14px">
