@@ -970,7 +970,6 @@ window.addEventListener('keydown', (event) => {
             <option value="yes">Yes</option>
             <option value="no" selected>No</option>
           </select>
-          <div id="pkgGroupSuburbHint" style="display:none;font-size:10px;color:var(--text-l);line-height:1.35;margin-top:4px">Disabled when a distance grouping method is selected.</div>
         </div>
         <div class="fg">
           <label for="pkgGroupingMethod">Grouping Method</label>
@@ -6181,7 +6180,6 @@ function togglePackagingInputs() {
   const countWrap = document.getElementById('pkgCountWrap');
   const topupRow = document.getElementById('pkgTopupRow');
   const suburbSelect = document.getElementById('pkgGroupSuburb');
-  const suburbHint = document.getElementById('pkgGroupSuburbHint');
   if (valueWrap) valueWrap.style.display = method === 'count' ? 'none' : '';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
   if (topupRow) {
@@ -6193,10 +6191,7 @@ function togglePackagingInputs() {
     topupRow.title = disabled ? 'Top-up applies to value and location packaging only.' : '';
   }
   if (suburbSelect) {
-    const disabled = groupingMethod !== 'suburb';
-    suburbSelect.disabled = disabled;
-    suburbSelect.title = disabled ? 'Distance grouping uses coordinates, so suburb grouping is ignored.' : '';
-    if (suburbHint) suburbHint.style.display = disabled ? '' : 'none';
+    suburbSelect.disabled = false;
   }
   updateReliningGeneratedSettingsWarning();
 }
