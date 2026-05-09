@@ -932,18 +932,18 @@ window.addEventListener('keydown', (event) => {
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0">
       <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
-      <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
-        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
-          <input type="checkbox" id="pkgIncludeLocks"> Include lock file
-        </label>
-        <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
-      </div>
-      <div style="display:flex;gap:8px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
         <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
           Load Locks
           <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
         </label>
+        <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
+          <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
+            <input type="checkbox" id="pkgIncludeLocks"> Include lock file
+          </label>
+          <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
+        </div>
       </div>
     </div>
   </div>
