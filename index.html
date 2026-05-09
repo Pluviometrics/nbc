@@ -894,21 +894,19 @@ window.addEventListener('keydown', (event) => {
       <div class="pkg-title">Relining Packaging</div>
       <div class="pkg-sub" id="pkgHeroQuote"></div>
     </div>
-    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;flex-shrink:0">
-      <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
-      <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+    <div style="display:flex;flex-direction:row;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+      <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center">
         <span id="pkgStickyCount" style="font-size:11px;color:rgba(255,255,255,.72);white-space:nowrap"></span>
         <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
           <input type="checkbox" id="pkgIncludeLocks"> Include lock file
         </label>
         <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
       </div>
-      <div style="display:flex;gap:8px">
-        <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
-          Load Locks
-          <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
-        </label>
-      </div>
+      <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
+      <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
+        Load Locks
+        <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
+      </label>
     </div>
   </div>
   <div style="flex:1;min-height:0;overflow:auto">
@@ -7626,7 +7624,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     'main.pkg-shell { max-width:1480px; margin:0 auto; padding:20px; display:flex; flex-direction:column; gap:16px; }',
     '.lbl { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text-l); margin-bottom:8px; }',
     '.lbl-mini { display:block; font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-l); margin-bottom:2px; }',
-    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:22px 24px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }',
+    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:10px 24px; display:flex; align-items:center; justify-content:space-between; gap:16px; }',
     '.pkg-title { font-size:24px; font-weight:800; margin-bottom:4px; }',
     '.pkg-sub { font-size:12px; color:rgba(255,255,255,.72); line-height:1.5; max-width:780px; }',
     '.pkg-status-chip { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }',
@@ -8250,7 +8248,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '.report-app-right { font-size:11px; color:#6B8A99; }',
     'main.pkg-shell { max-width:1200px; margin:0 auto; padding:20px; display:flex; flex-direction:column; gap:16px; }',
     '.lbl { font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--text-l); margin-bottom:8px; }',
-    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:22px 24px; display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }',
+    '.pkg-hero { background:var(--navy); color:#fff; border-radius:var(--r); padding:10px 24px; display:flex; align-items:center; justify-content:space-between; gap:16px; }',
     '.pkg-title { font-size:22px; font-weight:800; margin-bottom:4px; }',
     '.pkg-sub { font-size:12px; color:rgba(255,255,255,.72); line-height:1.5; max-width:780px; }',
     '.pkg-status-chip { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; background:rgba(255,255,255,.08); font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; white-space:nowrap; }',
