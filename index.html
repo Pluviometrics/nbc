@@ -1655,15 +1655,13 @@ function renderReliningAssetIdsCell(input) {
   const ordered = reorderAssetsByC6Anchor(assets);
   const cellHtml = ordered.map(asset => {
     const uid = String(asset.assetId);
-    const url = buildCiAAssetUrl(uid);
     const isC6 = asset.is_c6_addon || asset.condition === 6;
     const isLocked = !isC6 && isReliningPipeLocked(uid);
     const color = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
     const weight = isC6 ? ';font-weight:700' : '';
-    const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' + weight;
-    return url
-      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '" title="' + (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + '">' + escapeHtml(uid) + '</a>'
-      : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' + weight + '">' + escapeHtml(uid) + '</span>';
+    const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer' + weight;
+    const title = (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + ' — click to show on map';
+    return '<a href="#reliningPackagesMap" data-relining-asset-id="' + encodeURIComponent(uid) + '" style="' + style + '" title="' + title + '">' + escapeHtml(uid) + '</a>';
   }).join('');
   // 4-column grid with tight column gap so RLN-XXXXX-X IDs fit at floor width.
   return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 4px;align-items:start">' + cellHtml + '</div>';
@@ -6196,12 +6194,7 @@ function renderEditPackagesPanel() {
       const tagHtml = lockedTag + c6Tag;
       const assetColor = isLocked ? '#dc2626' : '#16a34a';
       const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
-      const assetLinkHtml = (u => {
-        const h = buildCiAAssetUrl(u);
-        return h
-          ? `<a href="${escapeHtml(h)}" target="_blank" rel="noopener" style="${assetStyle}">${escapeHtml(u)}</a>`
-          : `<span style="color:${assetColor} !important">${escapeHtml(u)}</span>`;
-      })(uid);
+      const assetLinkHtml = `<a href="#reliningPackagesMap" data-relining-asset-id="${encodeURIComponent(uid)}" style="${assetStyle};cursor:pointer" title="Show this pipe on the map">${escapeHtml(uid)}</a>`;
       const moveCellHtml = isC6
         ? `<button class="export-btn" type="button" data-relining-c6-remove data-asset-uid="${escapeHtml(uid)}" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>`
         : `<select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">${reliningEditTargetOptionsHtml(pkg.anchor_id)}</select>`;
@@ -7275,6 +7268,43 @@ document.addEventListener('click', (event) => {
   event.preventDefault();
   focusReliningPackageOnMap(decodeURIComponent(link.getAttribute('data-relining-package-id') || ''));
 });
+
+document.addEventListener('click', (event) => {
+  const link = event.target?.closest?.('[data-relining-asset-id]');
+  if (!link) return;
+  event.preventDefault();
+  focusReliningAssetOnMap(decodeURIComponent(link.getAttribute('data-relining-asset-id') || ''));
+});
+
+function focusReliningAssetOnMap(assetId) {
+  const id = String(assetId || '');
+  if (!id) return;
+  const packages = lastPackagingGeneration?.packages || [];
+  let foundPkg = null;
+  let foundAsset = null;
+  for (const pkg of packages) {
+    const asset = (pkg.assets || []).find(a => String(a.assetId) === id);
+    if (asset) { foundPkg = pkg; foundAsset = asset; break; }
+  }
+  if (!foundPkg || !foundAsset) return;
+  switchPage('relining');
+  ensureReliningPackagesMap();
+  selectReliningPackage(foundPkg.package_id);
+  const mapEl = document.getElementById('reliningPackagesMap');
+  if (mapEl) mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => {
+    if (!reliningPackagesMap) return;
+    const lat = Number(foundAsset.lat);
+    const lon = Number(foundAsset.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    const targetZoom = Math.max(reliningPackagesMap.getZoom(), 18);
+    reliningPackagesMap.setView([lat, lon], targetZoom, { animate: true });
+    L.popup({ closeButton: true, autoPan: true })
+      .setLatLng([lat, lon])
+      .setContent(buildPipePopupHtml(foundAsset, foundPkg))
+      .openOn(reliningPackagesMap);
+  }, 200);
+}
 
 function exportReliningPackagesCsv() {
   const packages = lastPackagingGeneration?.packages || [];
@@ -9502,6 +9532,7 @@ function buildPipePopupHtml(item, pkg) {
       <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
       <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
+      ${ciaUrl ? `<div style="margin-top:6px"><a href="${escapeHtml(ciaUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open Asset in CiA ↗</a></div>` : ''}
       ${streetViewUrl ? `<div style="margin-top:6px"><a href="${escapeHtml(streetViewUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open in Google Street View ↗</a></div>` : ''}
     </div>`;
 }
