@@ -6304,7 +6304,7 @@ function renderGeneratedPackages(data) {
     condition_8_count: pkg.condition_8_count,
     total_length_m: Number(pkg.total_length_m || 0).toFixed(1),
     total_cost: formatCurrency(pkg.total_cost),
-    diameters_mm: (pkg.diameters_mm || []).join(', '),
+    diameters_mm: (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', '),
     max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
     asset_ids: pkg.asset_ids || []
   }));
@@ -9948,6 +9948,10 @@ function displayTableHeader(value) {
   if (key === 'assetsuburb') return 'Asset Suburb';
   if (key === 'locationsuburb') return 'Location - Suburb';
   if (key === 'assetids') return 'Asset IDs';
+  if (key === 'packageid') return 'Package ID';
+  if (key === 'totallengthm') return 'Total Length m';
+  if (key === 'diametersmm') return 'Diameters mm';
+  if (key === 'maxspanm') return 'Max Separation m';
   return String(value || '')
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
