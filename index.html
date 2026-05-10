@@ -1624,8 +1624,8 @@ function renderReliningAssetIdsCell(assetIds) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
       : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(uid) + '</span>';
   }).join('');
-  // 3-column grid; column has min-width 340px in the table, so 3 IDs fit.
-  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
+  // 4-column grid with tight column gap so RLN-XXXXX-X IDs fit at floor width.
+  return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 4px;align-items:start">' + cellHtml + '</div>';
 }
 
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
