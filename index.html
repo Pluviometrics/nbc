@@ -897,7 +897,7 @@ window.addEventListener('keydown', (event) => {
     <div id="relining-subpage-main">
     <div class="pkg-panel">
       <div class="lbl">Upload Required Files</div>
-      <div class="pkg-grid" style="grid-template-columns:auto auto 1fr">
+      <div class="pkg-grid" style="grid-template-columns:auto auto">
         <label class="export-btn" style="display:inline-flex;align-items:center;justify-content:center">
           Upload Asset Register
           <input type="file" id="pkgAssetsFile" accept=".csv" style="display:none" onchange="loadReliningAssetsFile(event)"/>
@@ -906,9 +906,6 @@ window.addEventListener('keydown', (event) => {
           Upload Panel Rates
           <input type="file" id="pkgRatesFile" accept=".xlsx,.xls" style="display:none" onchange="loadReliningRatesFile(event)"/>
         </label>
-        <div style="font-size:12px;color:var(--text-l);align-self:center;padding-left:8px">
-          <span id="pkgAssetsStatus">Assets: not loaded</span> &nbsp;·&nbsp; <span id="pkgRatesStatus">Rates: not loaded</span>
-        </div>
       </div>
     </div>
 
@@ -962,58 +959,63 @@ window.addEventListener('keydown', (event) => {
           <button class="run-btn" style="margin-top:0" id="pkgPreviewBtn" onclick="loadPackagingPreview()">Preview Candidates</button>
         </div>
       </div>
-      <div id="pkgSizeGroupsRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Earlier groups win if they overlap.</div>
-        <div class="pkg-grid" style="grid-template-columns:1fr 1fr 1fr 1fr">
-          <div class="fg">
-            <label for="size-group-1-select">Group 1</label>
-            <div style="display:flex;gap:6px">
-              <select id="size-group-1-select" style="font-size:12px;min-width:0;flex:1"></select>
-              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(0)">Add</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">
+        <div></div>
+        <div>
+          <div id="pkgSizeGroupsRow">
+            <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Earlier groups win if they overlap.</div>
+            <div class="pkg-grid" style="grid-template-columns:1fr 1fr">
+              <div class="fg">
+                <label for="size-group-1-select">Group 1</label>
+                <div style="display:flex;gap:6px">
+                  <select id="size-group-1-select" style="font-size:12px;min-width:0;flex:1"></select>
+                  <button class="export-btn" type="button" onclick="addReliningSizeToGroup(0)">Add</button>
+                </div>
+                <div class="size-pill-row" id="size-group-1-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
+              </div>
+              <div class="fg">
+                <label for="size-group-2-select">Group 2</label>
+                <div style="display:flex;gap:6px">
+                  <select id="size-group-2-select" style="font-size:12px;min-width:0;flex:1"></select>
+                  <button class="export-btn" type="button" onclick="addReliningSizeToGroup(1)">Add</button>
+                </div>
+                <div class="size-pill-row" id="size-group-2-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
+              </div>
+              <div class="fg">
+                <label for="size-group-3-select">Group 3</label>
+                <div style="display:flex;gap:6px">
+                  <select id="size-group-3-select" style="font-size:12px;min-width:0;flex:1"></select>
+                  <button class="export-btn" type="button" onclick="addReliningSizeToGroup(2)">Add</button>
+                </div>
+                <div class="size-pill-row" id="size-group-3-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
+              </div>
+              <div class="fg">
+                <label for="size-group-4-select">Group 4</label>
+                <div style="display:flex;gap:6px">
+                  <select id="size-group-4-select" style="font-size:12px;min-width:0;flex:1"></select>
+                  <button class="export-btn" type="button" onclick="addReliningSizeToGroup(3)">Add</button>
+                </div>
+                <div class="size-pill-row" id="size-group-4-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
+              </div>
             </div>
-            <div class="size-pill-row" id="size-group-1-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
-          <div class="fg">
-            <label for="size-group-2-select">Group 2</label>
-            <div style="display:flex;gap:6px">
-              <select id="size-group-2-select" style="font-size:12px;min-width:0;flex:1"></select>
-              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(1)">Add</button>
+          <div id="pkgTopupRow" style="margin-top:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top-up rule for underfilled packages</div>
+            <div style="display:flex;gap:14px;font-size:12px;align-items:center;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
             </div>
-            <div class="size-pill-row" id="size-group-2-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
-          <div class="fg">
-            <label for="size-group-3-select">Group 3</label>
-            <div style="display:flex;gap:6px">
-              <select id="size-group-3-select" style="font-size:12px;min-width:0;flex:1"></select>
-              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(2)">Add</button>
+          <div id="pkgCostAdjustmentsRow" style="margin-top:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Cost Modifiers</div>
+            <div style="display:flex;gap:24px;font-size:12px;align-items:center;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
+                Apply project initiation multiplier (×1.15)
+              </label>
             </div>
-            <div class="size-pill-row" id="size-group-3-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
           </div>
-          <div class="fg">
-            <label for="size-group-4-select">Group 4</label>
-            <div style="display:flex;gap:6px">
-              <select id="size-group-4-select" style="font-size:12px;min-width:0;flex:1"></select>
-              <button class="export-btn" type="button" onclick="addReliningSizeToGroup(3)">Add</button>
-            </div>
-            <div class="size-pill-row" id="size-group-4-pills" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-l)"></div>
-          </div>
-        </div>
-      </div>
-      <div id="pkgTopupRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top-up rule for underfilled packages</div>
-        <div style="display:flex;gap:20px;font-size:12px;align-items:center">
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
-          <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition first, lower condition if needed" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition first, lower condition if needed</label>
-        </div>
-      </div>
-      <div id="pkgCostAdjustmentsRow" style="margin-top:14px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Cost Modifiers</div>
-        <div style="display:flex;gap:24px;font-size:12px;align-items:center;flex-wrap:wrap">
-          <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-            <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
-            Apply project initiation multiplier (×1.15)
-          </label>
         </div>
       </div>
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
@@ -1402,7 +1404,7 @@ window.addEventListener('keydown', (event) => {
           </label>
           <button class="export-btn" onclick="loadCriticalAssetsDefaults()">Show source paths</button>
         </div>
-        <div class="ca-note" style="margin-top:12px">Current working source folder: <code>D:\Packaging\data</code>. Because the site runs in the browser, these files are loaded by upload for now rather than auto-reading from disk.</div>
+        <div class="ca-note" style="margin-top:12px">Source files are loaded by upload because this static site cannot read local folders. The legacy <code>D:\Packaging</code> prototype is stale; this page is the packaging source of truth.</div>
       </div>
 
       <div>
@@ -6109,11 +6111,15 @@ function renderPackagingMeta(meta) {
   if (!el) return;
   const preview = lastReliningPackagingPreview;
   const generatedPackages = lastPackagingGeneration?.packages?.length || 0;
+  const totalCostNum = Number(lastPackagingGeneration?.total_cost);
+  const totalCostStr = Number.isFinite(totalCostNum)
+    ? totalCostNum.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 })
+    : 'Not generated';
   const rows = [
     ['Assets File', reliningAssetsFileName || 'Required'],
     ['Rates File', reliningRatesFileName || 'Required'],
     ['Assets Loaded', meta?.asset_count?.toLocaleString?.() ?? '-'],
-    ['Suburb Column', meta?.suburb_column ? displayTableHeader(meta.suburb_column) : '-'],
+    ['Total Cost', totalCostStr],
     ['Eligible Candidates', preview ? preview.eligible.length.toLocaleString() : 'Run preview'],
     ['Costed Pipes', preview ? preview.costed.length.toLocaleString() : 'Run preview'],
     ['Uncosted Pipes', preview ? preview.uncosted.length.toLocaleString() : 'Run preview'],
