@@ -9582,14 +9582,15 @@ function renderReliningSelectedMapOverlay() {
     reliningSelectedLeaderSvg.style.display = 'none';
     return;
   }
-  const assetList = (pkg.assets || []).slice(0, 8).map(item => item.assetId).join(', ');
+  const c6Count = Number.isFinite(Number(pkg.c6_addon_count))
+    ? Number(pkg.c6_addon_count)
+    : (pkg.assets || []).filter(a => a.is_c6_addon).length;
   reliningSelectedOverlayCard.innerHTML = `
     <div class="title">${escapeHtml(pkg.package_id)}</div>
     <div class="meta">
-      <div><strong>Suburbs:</strong> ${escapeHtml((pkg.suburbs || [pkg.suburb]).join(', '))}</div>
-      <div><strong>Pipes:</strong> ${pkg.pipe_count} · <strong>Span:</strong> ${Number(pkg.max_span_m || 0).toFixed(0)} m</div>
+      <div><strong>Pipes:</strong> ${pkg.pipe_count} · <strong>Spread:</strong> ${Number(pkg.max_span_m || 0).toFixed(0)} m</div>
       <div><strong>Length:</strong> ${Number(pkg.total_length_m || 0).toFixed(1)} m · <strong>Cost:</strong> ${formatCurrency(pkg.total_cost || 0)}</div>
-      <div><strong>Assets:</strong> ${escapeHtml(assetList || 'None')}</div>
+      <div><strong>Number of Condition 6 Pipes:</strong> ${c6Count}</div>
     </div>
   `;
   reliningSelectedOverlayCard.style.display = 'block';
