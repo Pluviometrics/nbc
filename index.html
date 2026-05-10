@@ -1658,7 +1658,7 @@ function renderReliningAssetIdsCell(input) {
     const url = buildCiAAssetUrl(uid);
     const isC6 = asset.is_c6_addon || asset.condition === 6;
     const isLocked = !isC6 && isReliningPipeLocked(uid);
-    const color = isC6 ? '#ea580c' : (isLocked ? '#dc2626' : '#16a34a');
+    const color = isC6 ? '#d97706' : (isLocked ? '#dc2626' : '#16a34a');
     const weight = isC6 ? ';font-weight:700' : '';
     const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' + weight;
     return url
