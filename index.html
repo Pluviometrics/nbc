@@ -1610,18 +1610,53 @@ function renderPkgCellValue(header, value) {
   return escapeHtml(String(v ?? ''));
 }
 
-function renderReliningAssetIdsCell(assetIds) {
-  const items = Array.isArray(assetIds)
-    ? assetIds
-    : String(assetIds ?? '').split(',').map(s => s.trim()).filter(Boolean);
-  if (!items.length) return '';
-  const cellHtml = items.map(uid => {
+function renderReliningAssetIdsCell(input) {
+  // Accept either an array of asset objects (preferred) or a flat list/string of IDs (legacy)
+  let assets;
+  if (Array.isArray(input) && input.length && typeof input[0] === 'object') {
+    assets = input;
+  } else {
+    const ids = Array.isArray(input)
+      ? input
+      : String(input ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    assets = ids.map(id => ({ assetId: id, condition: null, is_c6_addon: false, c6_anchor_asset_id: null }));
+  }
+  if (!assets.length) return '';
+  // Reorder so each C6 add-on sits immediately after its anchor C7/C8 pipe
+  const c6ByAnchor = new Map();
+  const c6Orphans = [];
+  const nonC6 = [];
+  assets.forEach(a => {
+    const isC6 = a.is_c6_addon || a.condition === 6;
+    if (isC6) {
+      if (a.c6_anchor_asset_id) {
+        if (!c6ByAnchor.has(a.c6_anchor_asset_id)) c6ByAnchor.set(a.c6_anchor_asset_id, []);
+        c6ByAnchor.get(a.c6_anchor_asset_id).push(a);
+      } else {
+        c6Orphans.push(a);
+      }
+    } else {
+      nonC6.push(a);
+    }
+  });
+  const ordered = [];
+  nonC6.forEach(a => {
+    ordered.push(a);
+    const followers = c6ByAnchor.get(String(a.assetId));
+    if (followers) ordered.push(...followers);
+  });
+  ordered.push(...c6Orphans);
+  const cellHtml = ordered.map(asset => {
+    const uid = String(asset.assetId);
     const url = buildCiAAssetUrl(uid);
-    const color = isReliningPipeLocked(uid) ? '#dc2626' : '#16a34a';
-    const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    const isC6 = asset.is_c6_addon || asset.condition === 6;
+    const isLocked = !isC6 && isReliningPipeLocked(uid);
+    const color = isC6 ? '#ea580c' : (isLocked ? '#dc2626' : '#16a34a');
+    const weight = isC6 ? ';font-weight:700' : '';
+    const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' + weight;
     return url
-      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
-      : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(uid) + '</span>';
+      ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '" title="' + (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + '">' + escapeHtml(uid) + '</a>'
+      : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' + weight + '">' + escapeHtml(uid) + '</span>';
   }).join('');
   // 4-column grid with tight column gap so RLN-XXXXX-X IDs fit at floor width.
   return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 4px;align-items:start">' + cellHtml + '</div>';
@@ -5528,7 +5563,12 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
     });
     for (const pkgIdx of candidates) {
       if (pkgDiameters[pkgIdx].has(dia)) {
-        additions[pkgIdx].push({ ...c6, is_c6_addon: true });
+        const anchorAsset = (packages[pkgIdx].assets || []).find(a =>
+          Number(a.diameterMm) === dia &&
+          ((c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
+           (c6.dsPit && (a.usPit === c6.dsPit || a.dsPit === c6.dsPit)))
+        );
+        additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_anchor_asset_id: anchorAsset?.assetId || null });
         used.add(c6.assetId);
         break;
       }
@@ -5542,7 +5582,11 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
     if (!c6) return;
     const pkgIdx = packages.findIndex(p => p.anchor_id === anchorId);
     if (pkgIdx === -1) return;
-    additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_manual_include: true });
+    const anchorAsset = (packages[pkgIdx].assets || []).find(a =>
+      (c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
+      (c6.dsPit && (a.usPit === c6.dsPit || a.dsPit === c6.dsPit))
+    );
+    additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_manual_include: true, c6_anchor_asset_id: anchorAsset?.assetId || null });
     used.add(assetId);
   });
   const totalAttached = additions.reduce((s, arr) => s + arr.length, 0);
@@ -6542,7 +6586,7 @@ function renderGeneratedPackages(data) {
     row.total_cost = formatCurrency(pkg.total_cost);
     row.diameters_mm = (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', ');
     row.max_span_m = Number(pkg.max_span_m || 0).toFixed(0);
-    row.asset_ids = pkg.asset_ids || [];
+    row.asset_ids = pkg.assets || [];
     return row;
   });
   const packageHeaders = Object.keys(displayPackages[0]);
