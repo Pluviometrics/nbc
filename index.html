@@ -6335,11 +6335,17 @@ function renderGeneratedPackages(data) {
     </div>
     <table>
       <thead>
-        <tr>${packageHeaders.map(h => `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`).join('')}</tr>
+        <tr>${packageHeaders.map(h => {
+          const narrow = h === 'suburb' ? ' width:90px;max-width:90px;white-space:normal;word-break:break-word;' : '';
+          return `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none;${narrow}" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`;
+        }).join('')}</tr>
       </thead>
       <tbody>
         ${displayPackages.map(row => `
-          <tr>${packageHeaders.map(h => `<td>${h === 'package_id' ? row[h] : h === 'asset_ids' ? renderReliningAssetIdsCell(row[h]) : renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
+          <tr>${packageHeaders.map(h => {
+            const narrow = h === 'suburb' ? ' style="width:90px;max-width:90px;white-space:normal;word-break:break-word"' : '';
+            return `<td${narrow}>${h === 'package_id' ? row[h] : h === 'asset_ids' ? renderReliningAssetIdsCell(row[h]) : renderPkgCellValue(h, row[h])}</td>`;
+          }).join('')}</tr>
         `).join('')}
       </tbody>
     </table>
@@ -9941,6 +9947,7 @@ function displayTableHeader(value) {
   if (key === 'suburb') return 'Suburb';
   if (key === 'assetsuburb') return 'Asset Suburb';
   if (key === 'locationsuburb') return 'Location - Suburb';
+  if (key === 'assetids') return 'Asset IDs';
   return String(value || '')
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
