@@ -959,8 +959,18 @@ window.addEventListener('keydown', (event) => {
           <button class="run-btn" style="margin-top:0" id="pkgPreviewBtn" onclick="loadPackagingPreview()">Preview Candidates</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px">
-        <div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;align-items:start">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Run Packaging</div>
+          <button class="run-btn" style="margin:0;width:100%" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Work Order Packages</button>
+          <div style="font-size:11px;color:var(--text-l);line-height:1.5;margin-top:6px">
+            Packaging runs locally in the browser against the uploaded files.
+          </div>
+          <div class="pkg-assumptions" id="pkgReasoning" style="margin-top:10px">
+            <strong>Packaging Reasoning:</strong>
+            Upload files and preview candidates to see the current relining rules applied to the data.
+          </div>
+        </div>
         <div>
           <div id="pkgSizeGroupsRow">
             <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Size Groups — diameters in the same group can share packages. Earlier groups win if they overlap.</div>
@@ -1018,25 +1028,9 @@ window.addEventListener('keydown', (event) => {
           </div>
         </div>
       </div>
-      <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
-        <div class="fg">
-          <label>&nbsp;</label>
-          <button class="run-btn" style="margin-top:0" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Work Order Packages</button>
-        </div>
-        <div class="fg">
-          <label>&nbsp;</label>
-          <div style="font-size:11px;color:var(--text-l);line-height:1.5;padding-top:8px">
-            Packaging runs locally in the browser against the uploaded files.
-          </div>
-        </div>
-      </div>
-      <div class="pkg-assumptions" id="pkgReasoning">
-        <strong>Packaging Reasoning:</strong>
-        Upload files and preview candidates to see the current relining rules applied to the data.
-      </div>
     </div>
 
-    <div class="pkg-meta" id="pkgMeta"></div>
+    <div class="pkg-meta" id="pkgMeta" style="grid-template-columns:repeat(5,1fr)"></div>
     <div class="pkg-card-grid" id="pkgCards"></div>
     <div class="pkg-panel">
       <div class="lbl">Generated Packages</div>
@@ -6109,7 +6103,6 @@ function samplePackageAssets(rows, suburbCol) {
 function renderPackagingMeta(meta) {
   const el = document.getElementById('pkgMeta');
   if (!el) return;
-  const preview = lastReliningPackagingPreview;
   const generatedPackages = lastPackagingGeneration?.packages?.length || 0;
   const totalCostNum = Number(lastPackagingGeneration?.total_cost);
   const totalCostStr = Number.isFinite(totalCostNum)
@@ -6120,9 +6113,6 @@ function renderPackagingMeta(meta) {
     ['Rates File', reliningRatesFileName || 'Required'],
     ['Assets Loaded', meta?.asset_count?.toLocaleString?.() ?? '-'],
     ['Total Cost', totalCostStr],
-    ['Eligible Candidates', preview ? preview.eligible.length.toLocaleString() : 'Run preview'],
-    ['Costed Pipes', preview ? preview.costed.length.toLocaleString() : 'Run preview'],
-    ['Uncosted Pipes', preview ? preview.uncosted.length.toLocaleString() : 'Run preview'],
     ['Total Packages', generatedPackages ? generatedPackages.toLocaleString() : 'Not generated']
   ];
   el.innerHTML = rows.map(([label, value]) => `
