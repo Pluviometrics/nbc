@@ -5370,10 +5370,11 @@ function reliningPackagePriorityCompare(a, b) {
 function reliningDiameterWeight(value) {
   const d = Number(value) || 0;
   if (d < 225) return 1.0;
-  if (d < 300) return 1.2;
-  if (d < 375) return 1.5;
-  if (d < 525) return 1.8;
-  return 2.2;
+  if (d < 300) return 1.3;
+  if (d < 375) return 1.7;
+  if (d < 525) return 2.3;
+  if (d < 750) return 3.2;
+  return 4.5;
 }
 
 function addPackagePriority(packages) {
@@ -5395,18 +5396,28 @@ function addPackagePriority(packages) {
       };
     });
     const package_total_pipe_priority = assets.reduce((s, a) => s + (Number(a.pipe_priority_score) || 0), 0);
+    const package_max_pipe_priority = Math.max(0, ...assets.map(a => Number(a.pipe_priority_score) || 0));
     const package_high_crit_count = assets.reduce((s, a) => s + (Number(a.is_high_criticality) || 0), 0);
     const package_large_diam_count = assets.reduce((s, a) => s + (Number(a.is_large_diameter) || 0), 0);
+    const package_xlarge_diam_count = assets.filter(a => (Number(a.diameterMm) || 0) >= 525).length;
     const package_worst_condition = Math.max(0, ...assets.map(a => Number(a.condition_score) || 0));
     const package_total_length = assets.reduce((s, a) => s + (Number(a.lengthM) || 0), 0);
     const package_pipe_count = assets.length;
-    const package_priority_score = package_total_pipe_priority + 5 * package_high_crit_count + 3 * package_large_diam_count + 2 * package_worst_condition;
+    const package_priority_score =
+        package_total_pipe_priority
+      + 3 * package_max_pipe_priority
+      + 5 * package_high_crit_count
+      + 5 * package_large_diam_count
+      + 8 * package_xlarge_diam_count
+      + 2 * package_worst_condition;
     return {
       ...pkg,
       assets,
       package_total_pipe_priority,
+      package_max_pipe_priority,
       package_high_crit_count,
       package_large_diam_count,
+      package_xlarge_diam_count,
       package_worst_condition,
       package_total_length,
       package_pipe_count,
@@ -5418,8 +5429,10 @@ function addPackagePriority(packages) {
     assets: (pkg.assets || []).map(asset => ({
       ...asset,
       package_total_pipe_priority: pkg.package_total_pipe_priority,
+      package_max_pipe_priority: pkg.package_max_pipe_priority,
       package_high_crit_count: pkg.package_high_crit_count,
       package_large_diam_count: pkg.package_large_diam_count,
+      package_xlarge_diam_count: pkg.package_xlarge_diam_count,
       package_worst_condition: pkg.package_worst_condition,
       package_total_length: pkg.package_total_length,
       package_pipe_count: pkg.package_pipe_count,
