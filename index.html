@@ -6498,7 +6498,7 @@ window.sortPackagesByColumn = function(kind, column) {
     state.column = column;
     // Numeric columns: biggest-first usually more useful. Text columns: A→Z.
     const numericCols = new Set([
-      'pipe_count','condition_7_count','condition_8_count',
+      'pipe_count','condition_6_count','condition_7_count','condition_8_count',
       'total_length_m','total_cost','cctv_hours','cctv_rate',
       'max_span_m','max_spread_m','asset_ids'
     ]);
@@ -6520,18 +6520,23 @@ function renderGeneratedPackages(data) {
     return;
   }
 
-  const displayPackages = _sortPackages(data.packages, 'relining').map(pkg => ({
-    package_id: renderReliningPackageIdLink(pkg.package_id),
-    suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
-    pipe_count: pkg.pipe_count,
-    condition_7_count: pkg.condition_7_count,
-    condition_8_count: pkg.condition_8_count,
-    total_length_m: Number(pkg.total_length_m || 0).toFixed(1),
-    total_cost: formatCurrency(pkg.total_cost),
-    diameters_mm: (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', '),
-    max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
-    asset_ids: pkg.asset_ids || []
-  }));
+  const showC6Col = (data.packages || []).some(p => Number(p.condition_6_count) > 0);
+  const displayPackages = _sortPackages(data.packages, 'relining').map(pkg => {
+    const row = {
+      package_id: renderReliningPackageIdLink(pkg.package_id),
+      suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
+      pipe_count: pkg.pipe_count
+    };
+    if (showC6Col) row.condition_6_count = pkg.condition_6_count || 0;
+    row.condition_7_count = pkg.condition_7_count;
+    row.condition_8_count = pkg.condition_8_count;
+    row.total_length_m = Number(pkg.total_length_m || 0).toFixed(1);
+    row.total_cost = formatCurrency(pkg.total_cost);
+    row.diameters_mm = (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', ');
+    row.max_span_m = Number(pkg.max_span_m || 0).toFixed(0);
+    row.asset_ids = pkg.asset_ids || [];
+    return row;
+  });
   const packageHeaders = Object.keys(displayPackages[0]);
   const settingsChanged = reliningGeneratedSettingsChanged();
   // Update and show sticky bar
@@ -6560,9 +6565,9 @@ function renderGeneratedPackages(data) {
     <table style="width:100%;min-width:1500px;table-layout:fixed">
       <colgroup>${packageHeaders.map(h => `<col style="width:${({
         package_id: 8.7, suburb: 12.0, pipe_count: 5.7,
-        condition_7_count: 8.3, condition_8_count: 8.3,
-        total_length_m: 7.7, total_cost: 7.3,
-        diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 22.7
+        condition_6_count: 7.5, condition_7_count: 7.5, condition_8_count: 7.5,
+        total_length_m: 7.0, total_cost: 7.0,
+        diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 19.8
       })[h] || 10}%">`).join('')}</colgroup>
       <thead>
         <tr>${packageHeaders.map(h => `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none;white-space:normal;word-break:break-word" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`).join('')}</tr>
