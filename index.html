@@ -1624,8 +1624,8 @@ function renderReliningAssetIdsCell(assetIds) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
       : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(uid) + '</span>';
   }).join('');
-  // 2-column grid so RLN-XXXXX-X style IDs don't collide / ellipsis-truncate.
-  return '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
+  // 3-column grid; column has min-width 340px in the table, so 3 IDs fit.
+  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
 }
 
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -6333,19 +6333,19 @@ function renderGeneratedPackages(data) {
         <button class="export-btn" onclick="loadFutureWorksFromRelining(true)">Load Into Future Works Plan</button>
       </div>
     </div>
-    <table>
+    <table style="width:100%;min-width:1500px;table-layout:fixed">
+      <colgroup>${packageHeaders.map(h => `<col style="width:${({
+        package_id: 8.7, suburb: 12.0, pipe_count: 5.7,
+        condition_7_count: 8.3, condition_8_count: 8.3,
+        total_length_m: 7.7, total_cost: 7.3,
+        diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 22.7
+      })[h] || 10}%">`).join('')}</colgroup>
       <thead>
-        <tr>${packageHeaders.map(h => {
-          const narrow = h === 'suburb' ? ' width:140px;max-width:140px;white-space:normal;word-break:break-word;' : '';
-          return `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none;${narrow}" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`;
-        }).join('')}</tr>
+        <tr>${packageHeaders.map(h => `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none;white-space:normal;word-break:break-word" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`).join('')}</tr>
       </thead>
       <tbody>
         ${displayPackages.map(row => `
-          <tr>${packageHeaders.map(h => {
-            const narrow = h === 'suburb' ? ' style="width:140px;max-width:140px;white-space:normal;word-break:break-word"' : '';
-            return `<td${narrow}>${h === 'package_id' ? row[h] : h === 'asset_ids' ? renderReliningAssetIdsCell(row[h]) : renderPkgCellValue(h, row[h])}</td>`;
-          }).join('')}</tr>
+          <tr>${packageHeaders.map(h => `<td style="word-break:break-word;white-space:normal;vertical-align:top">${h === 'package_id' ? row[h] : h === 'asset_ids' ? renderReliningAssetIdsCell(row[h]) : renderPkgCellValue(h, row[h])}</td>`).join('')}</tr>
         `).join('')}
       </tbody>
     </table>
