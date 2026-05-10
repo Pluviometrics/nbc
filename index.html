@@ -918,6 +918,7 @@ window.addEventListener('keydown', (event) => {
             <option>Condition 8 only</option>
             <option>Condition 7 only</option>
             <option selected>Condition 7 and 8</option>
+            <option>Condition 6, 7 and 8</option>
           </select>
         </div>
         <div class="fg">
@@ -4639,7 +4640,13 @@ document.addEventListener('change', event => {
 function reliningModeLabel(mode) {
   if (mode === 'Condition 8 only') return 'Condition 8';
   if (mode === 'Condition 7 only') return 'Condition 7';
+  if (mode === 'Condition 6, 7 and 8') return 'Condition 7 and 8 (with adjacent Condition 6 add-ons)';
   return 'Condition 7 and Condition 8';
+}
+
+function normaliseReliningPit(value) {
+  const s = String(value ?? '').trim();
+  return s ? s.toUpperCase() : null;
 }
 
 function resolveReliningCoordinate(row) {
@@ -4672,7 +4679,11 @@ function resolveReliningSuburb(row, suburbCol) {
 
 function normaliseReliningCandidateRow(row, index, options, suburbCol) {
   const condition = getReliningConditionNumber(row);
-  const allowed = options.reliningMode === 'Condition 8 only' ? new Set([8]) : (options.reliningMode === 'Condition 7 only' ? new Set([7]) : new Set([7, 8]));
+  let allowed;
+  if (options.reliningMode === '__C6_POOL__') allowed = new Set([6]);
+  else if (options.reliningMode === 'Condition 8 only') allowed = new Set([8]);
+  else if (options.reliningMode === 'Condition 7 only') allowed = new Set([7]);
+  else allowed = new Set([7, 8]);
   if (!allowed.has(condition)) return null;
   const rawDiameter = getReliningDiameterValue(row);
   if (!Number.isFinite(rawDiameter) || rawDiameter < MIN_RELINING_DIAMETER_MM) return null;
@@ -4690,10 +4701,14 @@ function normaliseReliningCandidateRow(row, index, options, suburbCol) {
   const assetId = String(getValueByAliases(row, ['Asset', 'Asset Number', 'Asset_Number', 'OBJECTID', 'MAPKEY', 'CATLG_ID']) || `asset-${index + 1}`).trim();
   const criticalityScore = resolveReliningCriticalityScore(row);
   const suburb = resolveReliningSuburb(row, suburbCol);
+  const usPit = normaliseReliningPit(getValueByAliases(row, ['US_Pit', 'US Pit']));
+  const dsPit = normaliseReliningPit(getValueByAliases(row, ['DS_Pit', 'DS Pit']));
   return {
     assetId,
     suburb,
     condition,
+    usPit,
+    dsPit,
     conditionLabel: String(condition || ''),
     diameterMm,
     lengthM,
@@ -4734,6 +4749,12 @@ function buildReliningPackagingPreview(assetRows, options) {
   const uncosted = eligible.filter(item => !Number.isFinite(item.pipeCost));
   const withCoords = eligible.filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lon));
   const noCoords = eligible.filter(item => !Number.isFinite(item.lat) || !Number.isFinite(item.lon));
+  let c6Pool = [];
+  if (options.reliningMode === 'Condition 6, 7 and 8') {
+    c6Pool = (assetRows || [])
+      .map((row, index) => normaliseReliningCandidateRow(row, index, { ...options, reliningMode: '__C6_POOL__' }, suburbCol))
+      .filter(Boolean);
+  }
   return {
     asset_count: assetRows?.length || 0,
     suburb_column: suburbCol,
@@ -4742,7 +4763,8 @@ function buildReliningPackagingPreview(assetRows, options) {
     costed,
     uncosted,
     withCoords,
-    noCoords
+    noCoords,
+    c6Pool
   };
 }
 
@@ -5231,8 +5253,10 @@ function buildReliningPackageObject(packageId, items, options = {}, existing = {
     primary_suburb: suburbs[0] || 'Unknown',
     suburbs: suburbs.length ? suburbs : ['Unknown'],
     pipe_count: items.length,
+    condition_6_count: items.filter(item => item.condition === 6).length,
     condition_7_count: items.filter(item => item.condition === 7).length,
     condition_8_count: items.filter(item => item.condition === 8).length,
+    c6_addon_count: items.filter(item => item.is_c6_addon).length,
     total_length_m: Number(totalLengthM.toFixed(1)),
     total_cost: Number(totalCost.toFixed(2)),
     diameters_mm: diameters,
@@ -5381,22 +5405,23 @@ function addPackagePriority(packages) {
       const rawConditionForPriority = getValueByAliases(asset.raw || {}, ['SW_Condition']);
       const condition_score = Math.max(cleanNumber(rawConditionForPriority) || 0, 0);
       const diameter_weight = reliningDiameterWeight(asset.diameterMm);
-      const pipe_priority_score = condition_score * diameter_weight * (1 + criticality_1dp);
+      const isC6 = condition_score === 6;
+      const pipe_priority_score = condition_score * diameter_weight * (1 + criticality_1dp) * (isC6 ? 0.25 : 1);
       return {
         ...asset,
         criticality_1dp,
         diameter_weight,
         condition_score,
         pipe_priority_score,
-        is_high_criticality: criticality_1dp >= 4.0 ? 1 : 0,
-        is_large_diameter: (Number(asset.diameterMm) || 0) >= 525 ? 1 : 0
+        is_high_criticality: !isC6 && criticality_1dp >= 4.0 ? 1 : 0,
+        is_large_diameter: !isC6 && (Number(asset.diameterMm) || 0) >= 525 ? 1 : 0
       };
     });
     const package_total_pipe_priority = assets.reduce((s, a) => s + (Number(a.pipe_priority_score) || 0), 0);
     const package_max_pipe_priority = Math.max(0, ...assets.map(a => Number(a.pipe_priority_score) || 0));
     const package_high_crit_count = assets.reduce((s, a) => s + (Number(a.is_high_criticality) || 0), 0);
     const package_large_diam_count = assets.reduce((s, a) => s + (Number(a.is_large_diameter) || 0), 0);
-    const package_xlarge_diam_count = assets.filter(a => (Number(a.diameterMm) || 0) >= 900).length;
+    const package_xlarge_diam_count = assets.filter(a => a.condition_score !== 6 && (Number(a.diameterMm) || 0) >= 900).length;
     const package_worst_condition = Math.max(0, ...assets.map(a => Number(a.condition_score) || 0));
     const package_total_length = assets.reduce((s, a) => s + (Number(a.lengthM) || 0), 0);
     const package_pipe_count = assets.length;
@@ -5447,6 +5472,53 @@ function prioritiseAndRenumberReliningPackages(packages) {
       package_id: `RLN_${String(index + 1).padStart(3, '0')}`,
       assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: `RLN_${String(index + 1).padStart(3, '0')}` }))
     }));
+}
+
+function attachC6AddOns(packages, c6Pool, options = {}) {
+  if (!Array.isArray(c6Pool) || c6Pool.length === 0) return packages;
+  const pitToPackages = new Map();
+  packages.forEach((pkg, pkgIdx) => {
+    (pkg.assets || []).forEach(asset => {
+      [asset.usPit, asset.dsPit].forEach(pit => {
+        if (!pit) return;
+        if (!pitToPackages.has(pit)) pitToPackages.set(pit, new Set());
+        pitToPackages.get(pit).add(pkgIdx);
+      });
+    });
+  });
+  const pkgDiameters = packages.map(pkg => {
+    const set = new Set();
+    (pkg.assets || []).forEach(a => {
+      const d = Number(a.diameterMm);
+      if (Number.isFinite(d)) set.add(d);
+    });
+    return set;
+  });
+  const additions = packages.map(() => []);
+  const used = new Set();
+  c6Pool.forEach(c6 => {
+    if (used.has(c6.assetId)) return;
+    const dia = Number(c6.diameterMm);
+    if (!Number.isFinite(dia)) return;
+    const candidates = new Set();
+    [c6.usPit, c6.dsPit].forEach(pit => {
+      if (!pit) return;
+      const set = pitToPackages.get(pit);
+      if (set) set.forEach(idx => candidates.add(idx));
+    });
+    for (const pkgIdx of candidates) {
+      if (pkgDiameters[pkgIdx].has(dia)) {
+        additions[pkgIdx].push({ ...c6, is_c6_addon: true });
+        used.add(c6.assetId);
+        break;
+      }
+    }
+  });
+  return packages.map((pkg, idx) => {
+    if (additions[idx].length === 0) return pkg;
+    const combinedItems = [...(pkg.assets || []), ...additions[idx]];
+    return buildReliningPackageObject(pkg.package_id, combinedItems, options, pkg);
+  });
 }
 
 // Manual package editing: each generated package gets an opaque anchor_id;
@@ -6926,6 +6998,12 @@ async function generateReliningPackages() {
     packages = ensurePackageAnchors(packages);
     packages = applyReliningManualMoves(packages, options);
     packages = prioritiseAndRenumberReliningPackages(packages);
+    if (options.reliningMode === 'Condition 6, 7 and 8' && Array.isArray(preview.c6Pool) && preview.c6Pool.length) {
+      setLoadTxt('Attaching adjacent Condition 6 pipes...');
+      await waitForPaint();
+      packages = attachC6AddOns(packages, preview.c6Pool, options);
+      packages = prioritiseAndRenumberReliningPackages(packages);
+    }
     logReliningPackageDebug(packages, options);
     const totalLength = packages.reduce((sum, pkg) => sum + (Number(pkg.total_length_m) || 0), 0);
     const totalCost = packages.reduce((sum, pkg) => sum + (Number(pkg.total_cost) || 0), 0);
