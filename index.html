@@ -5367,10 +5367,11 @@ function reliningDiameterWeight(value) {
   const d = Number(value) || 0;
   if (d < 225) return 1.0;
   if (d < 300) return 1.2;
-  if (d < 375) return 1.5;
-  if (d < 525) return 2.0;
+  if (d < 450) return 1.5;
+  if (d < 525) return 1.8;
   if (d < 750) return 2.5;
-  return 3.0;
+  if (d < 900) return 2.8;
+  return 3.3;
 }
 
 function addPackagePriority(packages) {
@@ -5388,14 +5389,14 @@ function addPackagePriority(packages) {
         condition_score,
         pipe_priority_score,
         is_high_criticality: criticality_1dp >= 4.0 ? 1 : 0,
-        is_large_diameter: (Number(asset.diameterMm) || 0) >= 375 ? 1 : 0
+        is_large_diameter: (Number(asset.diameterMm) || 0) >= 525 ? 1 : 0
       };
     });
     const package_total_pipe_priority = assets.reduce((s, a) => s + (Number(a.pipe_priority_score) || 0), 0);
     const package_max_pipe_priority = Math.max(0, ...assets.map(a => Number(a.pipe_priority_score) || 0));
     const package_high_crit_count = assets.reduce((s, a) => s + (Number(a.is_high_criticality) || 0), 0);
     const package_large_diam_count = assets.reduce((s, a) => s + (Number(a.is_large_diameter) || 0), 0);
-    const package_xlarge_diam_count = assets.filter(a => (Number(a.diameterMm) || 0) >= 525).length;
+    const package_xlarge_diam_count = assets.filter(a => (Number(a.diameterMm) || 0) >= 900).length;
     const package_worst_condition = Math.max(0, ...assets.map(a => Number(a.condition_score) || 0));
     const package_total_length = assets.reduce((s, a) => s + (Number(a.lengthM) || 0), 0);
     const package_pipe_count = assets.length;
