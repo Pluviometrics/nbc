@@ -4756,6 +4756,13 @@ function buildReliningPackagingPreview(assetRows, options) {
     c6Pool = (assetRows || [])
       .map((row, index) => normaliseReliningCandidateRow(row, index, { ...options, reliningMode: '__C6_POOL__' }, suburbCol))
       .filter(Boolean);
+    const totalC6Raw = (assetRows || []).filter(r => getReliningConditionNumber(r) === 6).length;
+    const withPits = c6Pool.filter(c => c.usPit || c.dsPit).length;
+    console.info(`[C6] Asset rows with condition=6: ${totalC6Raw}. After diameter ≥ ${MIN_RELINING_DIAMETER_MM}mm filter: ${c6Pool.length}. With pit IDs: ${withPits}/${c6Pool.length}.`);
+    if (totalC6Raw > 0 && c6Pool.length > 0 && withPits === 0) {
+      const sampleKeys = Object.keys((assetRows || []).find(r => getReliningConditionNumber(r) === 6) || {});
+      console.warn('[C6] Pool has zero rows with US_Pit/DS_Pit. Available columns on first C6 row:', sampleKeys);
+    }
   }
   return {
     asset_count: assetRows?.length || 0,
@@ -5477,7 +5484,10 @@ function prioritiseAndRenumberReliningPackages(packages) {
 }
 
 function attachC6AddOns(packages, c6Pool, options = {}) {
-  if (!Array.isArray(c6Pool) || c6Pool.length === 0) return packages;
+  if (!Array.isArray(c6Pool) || c6Pool.length === 0) {
+    console.info('[C6] attachC6AddOns: empty pool, nothing to attach.');
+    return packages;
+  }
   const excluded = new Set(Object.keys(reliningManualMoves?.c6Excluded || {}));
   const includedMap = reliningManualMoves?.c6Included || {};
   const pitToPackages = new Map();
@@ -5531,6 +5541,20 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
     additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_manual_include: true });
     used.add(assetId);
   });
+  const totalAttached = additions.reduce((s, arr) => s + arr.length, 0);
+  const packagesWithPits = packages.filter(p => (p.assets || []).some(a => a.usPit || a.dsPit)).length;
+  console.info(`[C6] Attached ${totalAttached} C6 pipe(s) across ${packages.length} packages. Packages with any pit data: ${packagesWithPits}/${packages.length}. Pool size: ${c6Pool.length}.`);
+  if (totalAttached === 0) {
+    const c6WithPits = c6Pool.filter(c => c.usPit || c.dsPit);
+    const c6PitOverlapping = c6WithPits.filter(c =>
+      [c.usPit, c.dsPit].some(pit => pit && pitToPackages.has(pit))
+    );
+    console.warn(`[C6 diagnostic] No attachments. C6 with pit IDs: ${c6WithPits.length}/${c6Pool.length}. Of those sharing a pit with any packaged pipe: ${c6PitOverlapping.length}. Likely cause: ${
+      c6WithPits.length === 0 ? 'C6 rows missing US_Pit/DS_Pit (column-name mismatch?)'
+      : c6PitOverlapping.length === 0 ? 'Pit IDs read but no overlap with packaged pipes'
+      : 'Pit overlap exists but no diameter match in any package'
+    }`);
+  }
   return packages.map((pkg, idx) => {
     if (additions[idx].length === 0) return pkg;
     const combinedItems = [...(pkg.assets || []), ...additions[idx]];
