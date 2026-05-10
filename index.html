@@ -1610,28 +1610,19 @@ function renderPkgCellValue(header, value) {
   return escapeHtml(String(v ?? ''));
 }
 
-function renderReliningAssetIdsCell(input) {
-  // Accept either an array of asset objects (preferred) or a flat list/string of IDs (legacy)
-  let assets;
-  if (Array.isArray(input) && input.length && typeof input[0] === 'object') {
-    assets = input;
-  } else {
-    const ids = Array.isArray(input)
-      ? input
-      : String(input ?? '').split(',').map(s => s.trim()).filter(Boolean);
-    assets = ids.map(id => ({ assetId: id, condition: null, is_c6_addon: false, c6_anchor_asset_id: null }));
-  }
-  if (!assets.length) return '';
-  // Reorder so each C6 add-on sits immediately after its anchor C7/C8 pipe
+function reorderAssetsByC6Anchor(assets) {
+  // Place each C6 add-on immediately after its anchor C7/C8 pipe.
+  // C6 with no resolvable anchor go to the end.
   const c6ByAnchor = new Map();
   const c6Orphans = [];
   const nonC6 = [];
-  assets.forEach(a => {
+  (assets || []).forEach(a => {
     const isC6 = a.is_c6_addon || a.condition === 6;
     if (isC6) {
-      if (a.c6_anchor_asset_id) {
-        if (!c6ByAnchor.has(a.c6_anchor_asset_id)) c6ByAnchor.set(a.c6_anchor_asset_id, []);
-        c6ByAnchor.get(a.c6_anchor_asset_id).push(a);
+      const anchorId = a.c6_anchor_asset_id != null ? String(a.c6_anchor_asset_id) : null;
+      if (anchorId) {
+        if (!c6ByAnchor.has(anchorId)) c6ByAnchor.set(anchorId, []);
+        c6ByAnchor.get(anchorId).push(a);
       } else {
         c6Orphans.push(a);
       }
@@ -1646,6 +1637,22 @@ function renderReliningAssetIdsCell(input) {
     if (followers) ordered.push(...followers);
   });
   ordered.push(...c6Orphans);
+  return ordered;
+}
+
+function renderReliningAssetIdsCell(input) {
+  // Accept either an array of asset objects (preferred) or a flat list/string of IDs (legacy)
+  let assets;
+  if (Array.isArray(input) && input.length && typeof input[0] === 'object') {
+    assets = input;
+  } else {
+    const ids = Array.isArray(input)
+      ? input
+      : String(input ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    assets = ids.map(id => ({ assetId: id, condition: null, is_c6_addon: false, c6_anchor_asset_id: null }));
+  }
+  if (!assets.length) return '';
+  const ordered = reorderAssetsByC6Anchor(assets);
   const cellHtml = ordered.map(asset => {
     const uid = String(asset.assetId);
     const url = buildCiAAssetUrl(uid);
@@ -6174,7 +6181,7 @@ function renderEditPackagesPanel() {
       return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>`;
     }
     const headRow = `<div class="edit-pkg-asset-row head"><div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div></div>`;
-    const rows = assets.map(asset => {
+    const rows = reorderAssetsByC6Anchor(assets).map(asset => {
       const uid = String(asset.assetId || '');
       const isC6 = !!asset.is_c6_addon;
       const isLocked = isReliningPipeLocked(uid);
