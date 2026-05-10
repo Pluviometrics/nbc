@@ -6367,6 +6367,14 @@ function renderPackagingCards(streams) {
       ['Uncosted Pipes', preview.uncosted.length, uncostedReasons.size ? `${uncostedReasons.size} costing issue type${uncostedReasons.size === 1 ? '' : 's'}` : 'No costing gaps'],
       ['With Location', preview.withCoords.length, 'Can be shown on the package map']
     ];
+    const c6Active = lastPackagingGeneration?.options?.reliningMode === 'Condition 6, 7 and 8';
+    const c6Attached = c6Active
+      ? (lastPackagingGeneration?.packages || []).reduce((s, p) => s + (Number(p.c6_addon_count) || 0), 0)
+      : 0;
+    if (c6Active && c6Attached > 0) {
+      const c6PoolSize = (preview.c6Pool || []).length;
+      cards.push(['Condition 6 Add-Ons', c6Attached, `Of ${c6PoolSize.toLocaleString()} C6 pipes in dataset · attached via shared pit + matching diameter`]);
+    }
     el.innerHTML = cards.map(([title, value, sub]) => `
       <div class="pkg-card">
         <div class="pkg-card-title">${escapeHtml(title)}</div>
