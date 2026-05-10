@@ -1624,9 +1624,8 @@ function renderReliningAssetIdsCell(assetIds) {
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
       : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(uid) + '</span>';
   }).join('');
-  // Force a 4-column grid so the cell layout doesn't flip between 1 / 2 cols
-  // depending on container width or asset-ID count.
-  return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
+  // 2-column grid so RLN-XXXXX-X style IDs don't collide / ellipsis-truncate.
+  return '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
 }
 
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
