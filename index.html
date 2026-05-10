@@ -6225,6 +6225,85 @@ function togglePackagingInputs() {
   updateReliningGeneratedSettingsWarning();
 }
 
+// --- Sortable Generated Packages headers ----------------------------------
+// State per table kind ('relining' | 'cctv'). When state.column is null the
+// packages render in original (engine priority) order. Click a header to
+// sort by that column; click again to flip direction.
+const _packageSortState = {
+  relining: { column: null, dir: 'asc' },
+  cctv:     { column: null, dir: 'asc' }
+};
+
+// Pull the RAW underlying value from a package for sorting — never the
+// formatted display string ("$1,234" sorts wrong lexically).
+function _getPackageSortValue(pkg, column) {
+  switch (column) {
+    case 'package_id':         return String(pkg.package_id || '');
+    case 'suburb':             return (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ');
+    case 'pipe_count':         return Number(pkg.pipe_count) || 0;
+    case 'condition_7_count':  return Number(pkg.condition_7_count) || 0;
+    case 'condition_8_count':  return Number(pkg.condition_8_count) || 0;
+    case 'total_length_m':     return Number(pkg.total_length_m) || 0;
+    case 'total_cost':         return Number(pkg.total_cost) || 0;
+    case 'cctv_hours':         return Number(pkg.cctv_hours) || 0;
+    case 'cctv_rate':          return Number(pkg.cctv_rate) || 0;
+    case 'max_span_m':
+    case 'max_spread_m':       return Number(pkg.max_span_m) || 0;
+    case 'diameters_mm':       return (pkg.diameters_mm || []).join(', ');
+    case 'asset_ids':          return Array.isArray(pkg.asset_ids) ? pkg.asset_ids.length : 0;
+    default:                   return pkg[column];
+  }
+}
+
+function _sortPackages(packages, kind) {
+  const state = _packageSortState[kind];
+  if (!state || !state.column) return packages.slice();
+  const dir = state.dir === 'desc' ? -1 : 1;
+  return packages.slice().sort((a, b) => {
+    const av = _getPackageSortValue(a, state.column);
+    const bv = _getPackageSortValue(b, state.column);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;        // nulls always last, regardless of direction
+    if (bv == null) return -1;
+    let cmp;
+    if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    else cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
+    return cmp * dir;
+  });
+}
+
+function _packageSortIndicator(kind, column) {
+  const state = _packageSortState[kind];
+  if (!state || state.column !== column) {
+    return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+  }
+  return state.dir === 'desc'
+    ? '<span style="font-size:11px;margin-left:4px;color:var(--teal)">▾</span>'
+    : '<span style="font-size:11px;margin-left:4px;color:var(--teal)">▴</span>';
+}
+
+window.sortPackagesByColumn = function(kind, column) {
+  const state = _packageSortState[kind];
+  if (!state) return;
+  if (state.column === column) {
+    state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    state.column = column;
+    // Numeric columns: biggest-first usually more useful. Text columns: A→Z.
+    const numericCols = new Set([
+      'pipe_count','condition_7_count','condition_8_count',
+      'total_length_m','total_cost','cctv_hours','cctv_rate',
+      'max_span_m','max_spread_m','asset_ids'
+    ]);
+    state.dir = numericCols.has(column) ? 'desc' : 'asc';
+  }
+  if (kind === 'relining' && typeof renderGeneratedPackages === 'function' && typeof lastPackagingGeneration !== 'undefined') {
+    renderGeneratedPackages(lastPackagingGeneration);
+  } else if (kind === 'cctv' && typeof renderGeneratedCctvPackages === 'function') {
+    renderGeneratedCctvPackages((typeof lastCctvPackagingGeneration !== 'undefined' && lastCctvPackagingGeneration?.packages) || []);
+  }
+};
+
 function renderGeneratedPackages(data) {
   const area = document.getElementById('pkgPackagesArea');
   if (!area) return;
@@ -6234,7 +6313,7 @@ function renderGeneratedPackages(data) {
     return;
   }
 
-  const displayPackages = data.packages.map(pkg => ({
+  const displayPackages = _sortPackages(data.packages, 'relining').map(pkg => ({
     package_id: renderReliningPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
     pipe_count: pkg.pipe_count,
@@ -6275,7 +6354,7 @@ function renderGeneratedPackages(data) {
     </div>
     <table>
       <thead>
-        <tr>${packageHeaders.map(h => `<th>${escapeHtml(displayTableHeader(h))}</th>`).join('')}</tr>
+        <tr>${packageHeaders.map(h => `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`).join('')}</tr>
       </thead>
       <tbody>
         ${displayPackages.map(row => `
@@ -10576,7 +10655,7 @@ function renderGeneratedCctvPackages(packages) {
     area.textContent = 'No packages could be created from the current eligible set.';
     return;
   }
-  const summaryRows = packages.map(pkg => ({
+  const summaryRows = _sortPackages(packages, 'cctv').map(pkg => ({
     package_id: renderCctvPackageIdLink(pkg.package_id),
     suburb: (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', '),
     pipe_count: pkg.pipe_count,
@@ -10619,7 +10698,7 @@ function renderGeneratedCctvPackages(packages) {
       </div>
     </div>
     <table>
-      <thead><tr>${summaryHeaders.map(header => `<th>${escapeHtml(displayTableHeader(header))}</th>`).join('')}</tr></thead>
+      <thead><tr>${summaryHeaders.map(header => `<th onclick="sortPackagesByColumn('cctv', '${header}')" style="cursor:pointer;user-select:none" title="Click to sort by ${escapeHtml(displayTableHeader(header))}">${escapeHtml(displayTableHeader(header))}${_packageSortIndicator('cctv', header)}</th>`).join('')}</tr></thead>
       <tbody>${summaryRows.map(row => `<tr>${summaryHeaders.map(header => `<td>${header === 'package_id' ? row[header] : escapeHtml(row[header])}</td>`).join('')}</tr>`).join('')}</tbody>
     </table>
     ${sampleHeaders.length ? `
