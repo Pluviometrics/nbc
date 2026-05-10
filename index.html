@@ -5478,6 +5478,8 @@ function prioritiseAndRenumberReliningPackages(packages) {
 
 function attachC6AddOns(packages, c6Pool, options = {}) {
   if (!Array.isArray(c6Pool) || c6Pool.length === 0) return packages;
+  const excluded = new Set(Object.keys(reliningManualMoves?.c6Excluded || {}));
+  const includedMap = reliningManualMoves?.c6Included || {};
   const pitToPackages = new Map();
   packages.forEach((pkg, pkgIdx) => {
     (pkg.assets || []).forEach(asset => {
@@ -5498,8 +5500,10 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
   });
   const additions = packages.map(() => []);
   const used = new Set();
+  // Auto-attach pass: pit-share + diameter match, skipping excluded
   c6Pool.forEach(c6 => {
     if (used.has(c6.assetId)) return;
+    if (excluded.has(c6.assetId)) return;
     const dia = Number(c6.diameterMm);
     if (!Number.isFinite(dia)) return;
     const candidates = new Set();
@@ -5516,6 +5520,17 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
       }
     }
   });
+  // Manual include pass: force-attach to chosen package regardless of diameter rule
+  Object.entries(includedMap).forEach(([assetId, anchorId]) => {
+    if (used.has(assetId)) return;
+    if (excluded.has(assetId)) return;
+    const c6 = c6Pool.find(c => c.assetId === assetId);
+    if (!c6) return;
+    const pkgIdx = packages.findIndex(p => p.anchor_id === anchorId);
+    if (pkgIdx === -1) return;
+    additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_manual_include: true });
+    used.add(assetId);
+  });
   return packages.map((pkg, idx) => {
     if (additions[idx].length === 0) return pkg;
     const combinedItems = [...(pkg.assets || []), ...additions[idx]];
@@ -5531,11 +5546,12 @@ const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
 let reliningManualMoves = loadReliningManualMoves();
 
 function loadReliningManualMoves() {
+  const empty = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
   try {
     const raw = localStorage.getItem(RELINING_MANUAL_MOVES_KEY);
-    if (!raw) return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+    if (!raw) return empty;
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+    if (!parsed || typeof parsed !== 'object') return empty;
     return {
       assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {},
       anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {},
@@ -5543,11 +5559,13 @@ function loadReliningManualMoves() {
         pipes: parsed.locks?.pipes && typeof parsed.locks.pipes === 'object' ? parsed.locks.pipes : {},
         packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
       },
-      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
+      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {},
+      c6Excluded: parsed.c6Excluded && typeof parsed.c6Excluded === 'object' ? parsed.c6Excluded : {},
+      c6Included: parsed.c6Included && typeof parsed.c6Included === 'object' ? parsed.c6Included : {}
     };
   } catch (err) {
     console.warn('[Relining manual edit] load failed', err);
-    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+    return empty;
   }
 }
 
@@ -5707,6 +5725,54 @@ function clearReliningManualMove(assetUid) {
   renderGeneratedPackages(lastPackagingGeneration);
 }
 
+function _ensureC6OverrideMaps() {
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  if (!reliningManualMoves.c6Excluded) reliningManualMoves.c6Excluded = {};
+  if (!reliningManualMoves.c6Included) reliningManualMoves.c6Included = {};
+}
+
+function excludeReliningC6AddOn(assetId) {
+  _ensureC6OverrideMaps();
+  const id = String(assetId);
+  if (!id) return;
+  reliningManualMoves.c6Excluded[id] = true;
+  delete reliningManualMoves.c6Included[id];
+  persistReliningManualMoves();
+  reapplyManualEditsToCurrentGeneration();
+}
+
+function includeReliningC6Pipe(assetId, anchorId) {
+  _ensureC6OverrideMaps();
+  const id = String(assetId);
+  const anchor = String(anchorId);
+  if (!id || !anchor) return;
+  reliningManualMoves.c6Included[id] = anchor;
+  delete reliningManualMoves.c6Excluded[id];
+  persistReliningManualMoves();
+  reapplyManualEditsToCurrentGeneration();
+}
+
+function getQualifyingC6ForPackage(pkg) {
+  const c6Pool = lastReliningPackagingPreview?.c6Pool || [];
+  if (!c6Pool.length) return [];
+  const excluded = new Set(Object.keys(reliningManualMoves?.c6Excluded || {}));
+  const packagedC6 = new Set();
+  (lastPackagingGeneration?.packages || []).forEach(p =>
+    (p.assets || []).forEach(a => { if (a.is_c6_addon) packagedC6.add(String(a.assetId)); })
+  );
+  const pkgPits = new Set();
+  (pkg.assets || []).forEach(a => {
+    if (a.usPit) pkgPits.add(a.usPit);
+    if (a.dsPit) pkgPits.add(a.dsPit);
+  });
+  if (!pkgPits.size) return [];
+  return c6Pool.filter(c =>
+    !packagedC6.has(String(c.assetId)) &&
+    !excluded.has(String(c.assetId)) &&
+    ((c.usPit && pkgPits.has(c.usPit)) || (c.dsPit && pkgPits.has(c.dsPit)))
+  );
+}
+
 function _ensureLocks() {
   if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} } };
   if (!reliningManualMoves.locks) reliningManualMoves.locks = { pipes: {}, packages: {} };
@@ -5853,9 +5919,11 @@ async function loadReliningLocksFile(file) {
 function resetAllReliningManualMoves() {
   const hasAssignments = Object.keys(reliningManualMoves?.assignments || {}).length > 0;
   const hasOrigins = Object.keys(reliningManualMoves?.anchorOrigins || {}).length > 0;
-  if (!hasAssignments && !hasOrigins) return;
+  const hasC6Excluded = Object.keys(reliningManualMoves?.c6Excluded || {}).length > 0;
+  const hasC6Included = Object.keys(reliningManualMoves?.c6Included || {}).length > 0;
+  if (!hasAssignments && !hasOrigins && !hasC6Excluded && !hasC6Included) return;
   if (!confirm('Clear all manual package edits and regenerate from scratch?')) return;
-  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
     generateReliningPackages();
@@ -5873,8 +5941,14 @@ function reapplyManualEditsToCurrentGeneration() {
   const options = lastPackagingGeneration.options || (typeof getReliningPackagingOptions === 'function' ? getReliningPackagingOptions() : {});
   let packages = (lastPackagingGeneration.packages || []).map(pkg => ({ ...pkg }));
   packages = ensurePackageAnchors(packages);
+  // Strip any C6 add-ons before re-running manual moves; they'll be re-attached below.
+  packages = packages.map(pkg => ({ ...pkg, assets: (pkg.assets || []).filter(a => !a.is_c6_addon) }));
   packages = applyReliningManualMoves(packages, options);
   packages = prioritiseAndRenumberReliningPackages(packages);
+  if (options.reliningMode === 'Condition 6, 7 and 8' && Array.isArray(lastReliningPackagingPreview?.c6Pool) && lastReliningPackagingPreview.c6Pool.length) {
+    packages = attachC6AddOns(packages, lastReliningPackagingPreview.c6Pool, options);
+    packages = prioritiseAndRenumberReliningPackages(packages);
+  }
   packages.forEach(pkg => {
     if (reliningManualMoves.anchorOrigins[pkg.anchor_id]) {
       reliningManualMoves.anchorOrigins[pkg.anchor_id].last_package_id = pkg.package_id;
@@ -5934,17 +6008,28 @@ function attachReliningEditPanelListeners() {
   _reliningEditPanelListenersAttached = true;
   document.addEventListener('change', (event) => {
     const select = event.target?.closest?.('select[data-relining-edit-target]');
-    if (!select) return;
-    const value = select.value;
-    const assetUid = select.getAttribute('data-asset-uid') || '';
-    const currentAnchor = select.getAttribute('data-current-anchor') || '';
-    if (!value || value === currentAnchor) return;
-    if (value === '__NEW__') createNewReliningPackageForAsset(assetUid);
-    else moveReliningAssetToPackage(assetUid, value);
+    if (select) {
+      const value = select.value;
+      const assetUid = select.getAttribute('data-asset-uid') || '';
+      const currentAnchor = select.getAttribute('data-current-anchor') || '';
+      if (!value || value === currentAnchor) return;
+      if (value === '__NEW__') createNewReliningPackageForAsset(assetUid);
+      else moveReliningAssetToPackage(assetUid, value);
+      return;
+    }
+    const c6AddSelect = event.target?.closest?.('select[data-relining-c6-add]');
+    if (c6AddSelect) {
+      const assetUid = c6AddSelect.value;
+      const anchorId = c6AddSelect.getAttribute('data-anchor-id') || '';
+      if (assetUid && anchorId) includeReliningC6Pipe(assetUid, anchorId);
+      c6AddSelect.value = '';
+    }
   });
   document.addEventListener('click', (event) => {
     const btn = event.target?.closest?.('button[data-relining-edit-clear]');
     if (btn) { event.preventDefault(); clearReliningManualMove(btn.getAttribute('data-asset-uid') || ''); return; }
+    const c6Remove = event.target?.closest?.('button[data-relining-c6-remove]');
+    if (c6Remove) { event.preventDefault(); excludeReliningC6AddOn(c6Remove.getAttribute('data-asset-uid') || ''); return; }
     const lockPipeBtn = event.target?.closest?.('button[data-relining-lock-pipe]');
     if (lockPipeBtn) { event.preventDefault(); toggleReliningPipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-anchor-id') || ''); return; }
     const lockPkgBtn = event.target?.closest?.('button[data-relining-lock-pkg]');
@@ -6017,14 +6102,17 @@ function renderEditPackagesPanel() {
     const headRow = `<div class="edit-pkg-asset-row head"><div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div></div>`;
     const rows = assets.map(asset => {
       const uid = String(asset.assetId || '');
+      const isC6 = !!asset.is_c6_addon;
       const isLocked = isReliningPipeLocked(uid);
       const isMoveOrigin = !!(reliningManualMoves?.moveOrigins?.[uid]);
       const lockCls = isLocked ? 'locked' : 'unlocked';
       const lockIcon = isLocked ? '🔒' : '🔓';
       const lockTitle = isLocked ? 'Locked — click to unlock' : 'Unlocked — click to lock';
-      const tagHtml = isLocked
+      const lockedTag = isLocked
         ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
         : '';
+      const c6Tag = isC6 ? ' <span class="edit-pkg-tag" style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe">C6' + (asset.c6_manual_include ? ' · manual' : '') + '</span>' : '';
+      const tagHtml = lockedTag + c6Tag;
       const assetColor = isLocked ? '#dc2626' : '#16a34a';
       const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
       const assetLinkHtml = (u => {
@@ -6033,6 +6121,11 @@ function renderEditPackagesPanel() {
           ? `<a href="${escapeHtml(h)}" target="_blank" rel="noopener" style="${assetStyle}">${escapeHtml(u)}</a>`
           : `<span style="color:${assetColor} !important">${escapeHtml(u)}</span>`;
       })(uid);
+      const moveCellHtml = isC6
+        ? `<button class="export-btn" type="button" data-relining-c6-remove data-asset-uid="${escapeHtml(uid)}" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>`
+        : `<select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">${reliningEditTargetOptionsHtml(pkg.anchor_id)}</select>`;
+      const clearCellHtml = isC6 ? '' : (isMoveOrigin ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : '');
+      const lockCellHtml = isC6 ? '' : `<button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button>`;
       return `
         <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
           <div>${assetLinkHtml}${tagHtml}</div>
@@ -6040,17 +6133,36 @@ function renderEditPackagesPanel() {
           <div>${escapeHtml(String(asset.diameterMm ?? ''))}</div>
           <div>${Number(asset.lengthM || 0).toFixed(1)}</div>
           <div>${Number.isFinite(asset.pipeCost) ? escapeHtml(formatCurrency(asset.pipeCost)) : ''}</div>
-          <div>
-            <select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">
-              ${reliningEditTargetOptionsHtml(pkg.anchor_id)}
-            </select>
-          </div>
-          <div>${isMoveOrigin ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : ''}</div>
-          <div><button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button></div>
+          <div>${moveCellHtml}</div>
+          <div>${clearCellHtml}</div>
+          <div>${lockCellHtml}</div>
         </div>
       `;
     }).join('');
-    return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}${headRow}${rows}</div>`;
+    let c6FooterHtml = '';
+    const c6Active = lastPackagingGeneration?.options?.reliningMode === 'Condition 6, 7 and 8';
+    if (c6Active) {
+      const qualifying = getQualifyingC6ForPackage(pkg);
+      if (qualifying.length) {
+        const opts = qualifying
+          .slice()
+          .sort((a, b) => String(a.assetId).localeCompare(String(b.assetId)))
+          .map(c => `<option value="${escapeHtml(String(c.assetId))}">${escapeHtml(String(c.assetId))} · ${escapeHtml(String(c.diameterMm ?? '?'))} mm · ${escapeHtml(c.suburb || '')}</option>`)
+          .join('');
+        c6FooterHtml = `
+          <div class="edit-pkg-asset-row" style="grid-template-columns:1fr;background:#f8fafc;border-top:1px dashed #cbd5e1">
+            <div style="display:flex;align-items:center;gap:10px;font-size:12px">
+              <span style="font-weight:700;color:#3730a3">+ Add C6 pipe</span>
+              <select data-relining-c6-add data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" style="font-size:12px;flex:1;max-width:420px">
+                <option value="">Choose adjacent C6 pipe (${qualifying.length.toLocaleString()} candidate${qualifying.length === 1 ? '' : 's'})…</option>
+                ${opts}
+              </select>
+            </div>
+          </div>
+        `;
+      }
+    }
+    return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}${headRow}${rows}${c6FooterHtml}</div>`;
   }).join('');
 
   area.className = '';
