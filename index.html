@@ -920,18 +920,17 @@ window.addEventListener('keydown', (event) => {
       <div class="lbl">Upload Required Files</div>
       <div class="pkg-grid" style="grid-template-columns:auto auto 1fr">
         <label class="export-btn" style="display:inline-flex;align-items:center;justify-content:center">
-          Upload Assets CSV
+          Upload Asset Register
           <input type="file" id="pkgAssetsFile" accept=".csv" style="display:none" onchange="loadReliningAssetsFile(event)"/>
         </label>
         <label class="export-btn" style="display:inline-flex;align-items:center;justify-content:center">
-          Upload Panel_Rates.xlsx
+          Upload Panel Rates
           <input type="file" id="pkgRatesFile" accept=".xlsx,.xls" style="display:none" onchange="loadReliningRatesFile(event)"/>
         </label>
         <div style="font-size:12px;color:var(--text-l);align-self:center;padding-left:8px">
           <span id="pkgAssetsStatus">Assets: not loaded</span> &nbsp;·&nbsp; <span id="pkgRatesStatus">Rates: not loaded</span>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--text-l);margin-top:10px">Expected files: <code>assets_with_coords.csv</code> or <code>assets.csv</code>, and <code>Panel_Rates.xlsx</code>. Neither file is stored — they are held in memory for this session only.</div>
     </div>
 
     <div class="pkg-panel">
@@ -1249,18 +1248,17 @@ window.addEventListener('keydown', (event) => {
       <div class="lbl">Upload Required Files</div>
       <div class="pkg-grid" style="grid-template-columns:auto auto 1fr">
         <label class="export-btn" style="display:inline-flex;align-items:center;justify-content:center">
-          Upload Assets CSV
+          Upload Asset Register
           <input type="file" id="cctvPkgAssetsFile" accept=".csv" style="display:none" onchange="loadCctvPackagingAssetsFile(event)"/>
         </label>
         <label class="export-btn" style="display:inline-flex;align-items:center;justify-content:center">
-          Upload Panel_Rates.xlsx
+          Upload Panel Rates
           <input type="file" id="cctvPkgRatesFile" accept=".xlsx,.xls" style="display:none" onchange="loadCctvPackagingRatesFile(event)"/>
         </label>
         <div style="font-size:12px;color:var(--text-l);align-self:center;padding-left:8px">
           <span id="cctvPkgAssetsStatus">Assets: not loaded</span> &nbsp;·&nbsp; <span id="cctvPkgRatesStatus">Rates: not loaded</span>
         </div>
       </div>
-      <div style="font-size:11px;color:var(--text-l);margin-top:10px">Expected inputs: an assets CSV containing condition, CCTV date, and location columns, plus the panel rates workbook with CCTV survey rates.</div>
     </div>
 
     <div class="pkg-panel">
@@ -1635,14 +1633,21 @@ function renderPkgCellValue(header, value) {
 }
 
 function renderReliningAssetIdsCell(assetIds) {
-  return (Array.isArray(assetIds) ? assetIds : String(assetIds ?? '').split(',').map(s => s.trim()).filter(Boolean)).map(uid => {
+  const items = Array.isArray(assetIds)
+    ? assetIds
+    : String(assetIds ?? '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!items.length) return '';
+  const cellHtml = items.map(uid => {
     const url = buildCiAAssetUrl(uid);
     const color = isReliningPipeLocked(uid) ? '#dc2626' : '#16a34a';
-    const style = 'color:' + color + ' !important;text-decoration:underline';
+    const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     return url
       ? '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" style="' + style + '">' + escapeHtml(uid) + '</a>'
-      : '<span style="color:' + color + ' !important">' + escapeHtml(uid) + '</span>';
-  }).join(', ');
+      : '<span style="color:' + color + ' !important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + escapeHtml(uid) + '</span>';
+  }).join('');
+  // Force a 4-column grid so the cell layout doesn't flip between 1 / 2 cols
+  // depending on container width or asset-ID count.
+  return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 10px;align-items:start">' + cellHtml + '</div>';
 }
 
 // â"€â"€ State â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
@@ -6323,8 +6328,6 @@ function renderGeneratedPackages(data) {
     total_cost: formatCurrency(pkg.total_cost),
     diameters_mm: (pkg.diameters_mm || []).join(', '),
     max_span_m: Number(pkg.max_span_m || 0).toFixed(0),
-    distance_warning: pkg.distance_warning || '',
-    coordinate_sources: pkg.coordinate_sources || '',
     asset_ids: pkg.asset_ids || []
   }));
   const packageHeaders = Object.keys(displayPackages[0]);
@@ -8894,7 +8897,7 @@ async function downloadReliningPackagesZip() {
       '-'.repeat(60),
       ''
     ];
-    const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Length (m)', 'Cost ($)', 'Asset IDs']];
+    const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Cond 7', 'Cond 8', 'Length (m)', 'Cost ($)', 'Asset IDs']];
 
     packages.forEach((pkg, index) => {
       const assets = pkg.assets || [];
@@ -8966,6 +8969,8 @@ async function downloadReliningPackagesZip() {
       summaryLines.push(`Suburb:     ${suburbs}`);
       summaryLines.push(`Diameters:  ${diametersStr}`);
       summaryLines.push(`Pipes:      ${assets.length}`);
+      summaryLines.push(`Cond 7:     ${Number(pkg.condition_7_count || 0)}`);
+      summaryLines.push(`Cond 8:     ${Number(pkg.condition_8_count || 0)}`);
       summaryLines.push(`Length:     ${totalLengthM.toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}m`);
       summaryLines.push(`Max Dist:   ${maxDist}`);
       summaryLines.push(`Cost:       $${totalCost.toLocaleString('en-AU', {minimumFractionDigits:0, maximumFractionDigits:0})}`);
@@ -8977,6 +8982,8 @@ async function downloadReliningPackagesZip() {
         packageDiametersText(pkg),
         maxDist,
         assets.length,
+        Number(pkg.condition_7_count || 0),
+        Number(pkg.condition_8_count || 0),
         Math.round(totalLengthM * 10) / 10,
         Math.round(totalCost),
         assets.map(a => a.assetId).join(', ')
