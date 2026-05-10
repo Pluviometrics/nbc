@@ -5370,11 +5370,11 @@ function reliningPackagePriorityCompare(a, b) {
 function reliningDiameterWeight(value) {
   const d = Number(value) || 0;
   if (d < 225) return 1.0;
-  if (d < 300) return 1.3;
-  if (d < 375) return 1.7;
-  if (d < 525) return 2.3;
-  if (d < 750) return 3.2;
-  return 4.5;
+  if (d < 300) return 1.2;
+  if (d < 375) return 1.5;
+  if (d < 525) return 2.0;
+  if (d < 750) return 2.5;
+  return 3.0;
 }
 
 function addPackagePriority(packages) {
@@ -5405,10 +5405,10 @@ function addPackagePriority(packages) {
     const package_pipe_count = assets.length;
     const package_priority_score =
         package_total_pipe_priority
-      + 3 * package_max_pipe_priority
+      + 1 * package_max_pipe_priority
       + 5 * package_high_crit_count
-      + 5 * package_large_diam_count
-      + 8 * package_xlarge_diam_count
+      + 3 * package_large_diam_count
+      + 4 * package_xlarge_diam_count
       + 2 * package_worst_condition;
     return {
       ...pkg,
