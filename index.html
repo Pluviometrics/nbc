@@ -1050,6 +1050,8 @@ window.addEventListener('keydown', (event) => {
             <button class="export-btn" onclick="fitReliningPackagesMap()">Fit Packages</button>
             <button class="export-btn" onclick="refreshReliningPackagesMap()">Refresh Map</button>
             <button class="export-btn" onclick="clearReliningPackageSelection()">Clear Selection</button>
+            <label class="export-btn" id="reliningC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowC6AddOns" checked onchange="renderReliningPackagesMap({fit:false})" style="margin:0"> Show package C6 add-ons</label>
+            <label class="export-btn" id="reliningC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowOtherC6" onchange="renderReliningPackagesMap({fit:false})" style="margin:0"> Show all other C6</label>
           </div>
         </div>
         <div id="reliningPackagesMap"></div>
@@ -9399,8 +9401,26 @@ function getReliningPipeCentreLatLng(item) {
   return getPackagePipeCentreLatLng(item);
 }
 
+function updateReliningC6ToggleVisibility() {
+  const mode = lastPackagingGeneration?.options?.reliningMode;
+  const c6Active = mode === 'Condition 6, 7 and 8';
+  const packages = lastPackagingGeneration?.packages || [];
+  const hasC6Addon = c6Active && packages.some(p => Number(p.c6_addon_count) > 0);
+  const packagedC6Ids = new Set();
+  if (c6Active) {
+    packages.forEach(p => (p.assets || []).forEach(a => { if (a.is_c6_addon) packagedC6Ids.add(a.assetId); }));
+  }
+  const c6Pool = lastReliningPackagingPreview?.c6Pool || [];
+  const hasOtherC6 = c6Active && c6Pool.some(c => !packagedC6Ids.has(c.assetId));
+  const addOnEl = document.getElementById('reliningC6AddOnsToggle');
+  const otherEl = document.getElementById('reliningC6OtherToggle');
+  if (addOnEl) addOnEl.style.display = hasC6Addon ? 'inline-flex' : 'none';
+  if (otherEl) otherEl.style.display = hasOtherC6 ? 'inline-flex' : 'none';
+}
+
 function renderReliningPackagesMap(options = {}) {
   ensureReliningPackagesMap();
+  updateReliningC6ToggleVisibility();
   const subtitle = document.getElementById('reliningMapSubtitle');
   const selectedBanner = document.getElementById('reliningSelectedPackageBanner');
   if (!reliningPackagesMap || !reliningPackagesLayer) {
@@ -9433,6 +9453,9 @@ function renderReliningPackagesMap(options = {}) {
     if (!d || isNaN(d) || d <= 0) return 2;
     return Math.max(2, Math.min(12, d / 50));
   };
+  const c6Active = lastPackagingGeneration?.options?.reliningMode === 'Condition 6, 7 and 8';
+  const showC6AddOns = c6Active && document.getElementById('reliningShowC6AddOns')?.checked !== false;
+  const showOtherC6 = c6Active && document.getElementById('reliningShowOtherC6')?.checked === true;
   const mapPackages = selectedReliningPackageId
     ? packages.filter(pkg => pkg.package_id !== selectedReliningPackageId).concat(packages.filter(pkg => pkg.package_id === selectedReliningPackageId))
     : packages;
@@ -9473,6 +9496,7 @@ function renderReliningPackagesMap(options = {}) {
       }
     }
     assets.forEach(item => {
+      if (item.is_c6_addon && !showC6AddOns) return;
       const raw = item.raw || {};
       const startPair = resolveLineCoordinatePair(raw, true);
       const endPair = resolveLineCoordinatePair(raw, false);
@@ -9481,11 +9505,13 @@ function renderReliningPackagesMap(options = {}) {
         && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
         && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
       const baseWeight = reliningPipeWeight(item.diameterMm);
+      const c6LineOpts = item.is_c6_addon ? { dashArray: '6 5', opacity: style.isSelected ? 0.85 : (style.isDimmed ? 0.45 : 0.7) } : null;
       if (hasLine) {
         const line = L.polyline([[startPair.lat, startPair.lon], [endPair.lat, endPair.lon]], {
           color,
           weight: style.isSelected ? baseWeight + 2 : baseWeight,
-          opacity: style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.92)
+          opacity: c6LineOpts ? c6LineOpts.opacity : (style.isSelected ? 1 : (style.isDimmed ? 0.65 : 0.92)),
+          dashArray: c6LineOpts ? c6LineOpts.dashArray : undefined
         }).on('click', (e) => {
           // Open popup via L.popup() on the map so it survives the layerGroup
           // clearLayers() that runs during the package re-render below.
@@ -9524,9 +9550,38 @@ function renderReliningPackagesMap(options = {}) {
       }
     });
   });
+  let otherC6Drawn = 0;
+  if (showOtherC6) {
+    const packagedC6Ids = new Set();
+    packages.forEach(p => (p.assets || []).forEach(a => { if (a.is_c6_addon) packagedC6Ids.add(a.assetId); }));
+    const c6Pool = lastReliningPackagingPreview?.c6Pool || [];
+    c6Pool.forEach(item => {
+      if (packagedC6Ids.has(item.assetId)) return;
+      const raw = item.raw || {};
+      const startPair = resolveLineCoordinatePair(raw, true);
+      const endPair = resolveLineCoordinatePair(raw, false);
+      const baseWeight = reliningPipeWeight(item.diameterMm);
+      const hasLine = startPair && endPair
+        && Number.isFinite(startPair.lat) && Number.isFinite(startPair.lon)
+        && Number.isFinite(endPair.lat) && Number.isFinite(endPair.lon)
+        && !(startPair.lat === endPair.lat && startPair.lon === endPair.lon);
+      if (hasLine) {
+        L.polyline([[startPair.lat, startPair.lon], [endPair.lat, endPair.lon]], {
+          color: '#9ca3af', weight: baseWeight, opacity: 0.5, dashArray: '4 4', interactive: false
+        }).addTo(reliningPackagesLayer);
+        otherC6Drawn += 1;
+      } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+        L.circleMarker([item.lat, item.lon], {
+          radius: 4, color: '#9ca3af', weight: 1, fillColor: '#9ca3af', fillOpacity: 0.45, opacity: 0.55, interactive: false
+        }).addTo(reliningPackagesLayer);
+        otherC6Drawn += 1;
+      }
+    });
+  }
   if (subtitle) {
     const fallbackNote = pointFallback ? ` (${pointFallback.toLocaleString()} drawn as fallback markers — missing endpoints).` : '';
-    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${lineDrawn.toLocaleString()} pipe line${lineDrawn === 1 ? '' : 's'}${fallbackNote}${selectedReliningPackageId ? ` ${selectedReliningPackageId} is highlighted.` : ''}`;
+    const otherC6Note = otherC6Drawn ? ` Plus ${otherC6Drawn.toLocaleString()} unattached C6 in grey.` : '';
+    subtitle.textContent = `${packages.length.toLocaleString()} package${packages.length === 1 ? '' : 's'} mapped with ${lineDrawn.toLocaleString()} pipe line${lineDrawn === 1 ? '' : 's'}${fallbackNote}${selectedReliningPackageId ? ` ${selectedReliningPackageId} is highlighted.` : ''}${otherC6Note}`;
   }
   if (lineDrawn + pointFallback > 0) console.info('[relining-map] drew ' + lineDrawn + ' line(s), ' + pointFallback + ' fallback marker(s)');
   renderReliningSelectedMapOverlay();
