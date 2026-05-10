@@ -158,8 +158,8 @@ window.addEventListener('keydown', (event) => {
   <button class="pnav-btn" data-page="bomgauges" onclick="switchPage('bomgauges')">BOM Gauges</button>
   <button class="pnav-btn" data-page="prioritisation" onclick="switchPage('prioritisation')">Prioritisation Tool</button>
   <button class="pnav-btn" data-page="costing" onclick="switchPage('costing')">Costing Tool</button>
-  <button class="pnav-btn" data-page="relining" onclick="switchPage('relining')">Relining Packaging</button>
-  <button class="pnav-btn" data-page="cctvpackaging" onclick="switchPage('cctvpackaging')">CCTV Packaging</button>
+  <button class="pnav-btn" data-page="relining" onclick="switchPage('relining')">Relining Work Orders</button>
+  <button class="pnav-btn" data-page="cctvpackaging" onclick="switchPage('cctvpackaging')">CCTV Work Orders</button>
   <button class="pnav-btn" data-page="futureworks" onclick="switchPage('futureworks')">Future Works Plan</button>
   <button class="pnav-btn pnav-home" onclick="switchPage('home')">Home</button>
 </div>
@@ -899,7 +899,7 @@ window.addEventListener('keydown', (event) => {
         <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:rgba(255,255,255,0.6);cursor:pointer;white-space:nowrap" title="Include locks.json in the ZIP to resume this session later. Leave unchecked for ZIPs sent to contractors.">
           <input type="checkbox" id="pkgIncludeLocks"> Include lock file
         </label>
-        <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Download ZIP</button>
+        <button class="export-btn" onclick="downloadReliningPackagesZip()" style="background:var(--teal);margin:0">Export Work Order Pack (ZIP)</button>
       </div>
       <div class="pkg-status-chip"><span class="pkg-dot" id="pkgDot"></span><span id="pkgStatusText">No files loaded</span></div>
       <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Load a locks.json or relining_packages ZIP to restore a previous session">
@@ -1022,7 +1022,7 @@ window.addEventListener('keydown', (event) => {
         </div>
       </div>
       <div id="pkgTopupRow" style="margin-top:10px">
-        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top up underfilled packages</div>
+        <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top-up rule for underfilled packages</div>
         <div style="display:flex;gap:20px;font-size:12px;align-items:center">
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
           <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
@@ -1041,7 +1041,7 @@ window.addEventListener('keydown', (event) => {
       <div class="pkg-grid" style="grid-template-columns:auto 1fr;margin-top:12px">
         <div class="fg">
           <label>&nbsp;</label>
-          <button class="run-btn" style="margin-top:0" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Packages</button>
+          <button class="run-btn" style="margin-top:0" id="pkgGenerateBtn" onclick="generateReliningPackages()">Generate Work Order Packages</button>
         </div>
         <div class="fg">
           <label>&nbsp;</label>
@@ -1239,8 +1239,8 @@ window.addEventListener('keydown', (event) => {
   <div class="pkg-shell">
     <div class="pkg-hero">
       <div>
-        <div class="pkg-title">CCTV Packaging</div>
-        <div class="pkg-sub">Separate tool from relining packaging. This workflow filters condition 1 to 6 pipes, excludes assets with CCTV in the last 4 years, then builds proximity-first packages with only a light criticality influence. The engine is kept portable so it can move into ESRI cleanly later.</div>
+        <div class="pkg-title">CCTV Work Order Packaging</div>
+        <div class="pkg-sub">Separate tool from relining packaging. This workflow filters condition 1 to 6 components, excludes assets with CCTV in the last 4 years, then builds proximity-first packages with only a light criticality influence. The engine is kept portable so it can move into ESRI / TechnologyOne CiA cleanly later.</div>
       </div>
       <div class="pkg-status-chip"><span class="pkg-dot" id="cctvPkgDot"></span><span id="cctvPkgStatusText">No files loaded</span></div>
     </div>
@@ -1326,7 +1326,7 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div class="fg">
           <label>&nbsp;</label>
-          <button class="run-btn" style="margin-top:0" onclick="generateCctvPackages()">Generate Packages</button>
+          <button class="run-btn" style="margin-top:0" onclick="generateCctvPackages()">Generate Work Order Packages</button>
         </div>
       </div>
       <div class="pkg-grid" style="grid-template-columns:1fr 1fr 2fr;margin-top:12px">
@@ -4616,6 +4616,38 @@ function confirmReliningGeneratedSettingsCurrent(actionLabel = 'continue') {
   return window.confirm(`Settings have changed since these packages were generated. Re-generate packages before you ${actionLabel}, or continue using the existing generated packages?`);
 }
 
+// CCTV mirror of the relining settings-guard plumbing. Same shape (fingerprint
+// → changed? → confirm), different field set per getCctvPackagingOptions().
+function cctvOptionsFingerprint(options) {
+  if (!options) return null;
+  const conditions = Array.isArray(options.conditionGroups)
+    ? options.conditionGroups.slice().sort().join(',')
+    : '';
+  return JSON.stringify({
+    conditionGroups: conditions,
+    targetMode: options.targetMode || 'length',
+    lookbackYears: Number(options.lookbackYears) || 0,
+    proximityM: Number(options.proximityM) || 0,
+    targetLengthM: Number(options.targetLengthM) || 0,
+    pipesPerPackage: Number(options.pipesPerPackage) || 0,
+    metresPerHour: Number(options.metresPerHour) || 0,
+    cctvRatePerHour: Number(options.cctvRatePerHour) || 0,
+    criticalityWeight: Number(options.criticalityWeight) || 0,
+    consolidateSmallPackages: !!options.consolidateSmallPackages,
+    consolidateSmallDistanceM: Number(options.consolidateSmallDistanceM) || 0
+  });
+}
+
+function cctvGeneratedSettingsChanged() {
+  if (!lastCctvPackagingGeneration?.options) return false;
+  return cctvOptionsFingerprint(lastCctvPackagingGeneration.options) !== cctvOptionsFingerprint(getCctvPackagingOptions());
+}
+
+function confirmCctvGeneratedSettingsCurrent(actionLabel = 'continue') {
+  if (!cctvGeneratedSettingsChanged()) return true;
+  return window.confirm(`CCTV packaging settings have changed since these packages were generated. Re-generate packages before you ${actionLabel}, or continue using the existing generated packages?`);
+}
+
 document.addEventListener('input', event => {
   if (event.target?.closest?.('#page-relining')) updateReliningGeneratedSettingsWarning();
 });
@@ -7766,6 +7798,326 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ].join('\n');
 }
 
+// CCTV-flavoured package_report.html — slim v1, parity with relining on the
+// high-value 80% (options strip, package cards, embedded map with CiAnywhere
+// asset deep-links, packages table). Per-package written reasoning narratives
+// and the filterable pipes table are deferred to a follow-up pass.
+function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) {
+  packages = packages || [];
+  options = options || {};
+
+  const reportPackages = packages.map(pkg => {
+    const assets = pkg.assets || [];
+    const coords = assets
+      .filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon))
+      .map(a => [a.lat, a.lon]);
+    let centroid = null;
+    if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
+      centroid = [Number(pkg.lat), Number(pkg.lon)];
+    } else if (coords.length) {
+      centroid = [
+        coords.reduce((s, c) => s + c[0], 0) / coords.length,
+        coords.reduce((s, c) => s + c[1], 0) / coords.length
+      ];
+    }
+    const conditionMix = {};
+    const diameterMix = {};
+    assets.forEach(a => {
+      const cond = a.conditionLabel || a.condition || (a.raw || {})['SW_Condition'] || 'Unknown';
+      conditionMix[cond] = (conditionMix[cond] || 0) + 1;
+      const d = Math.round(Number(a.diameterMm) || 0) || 'Unknown';
+      diameterMix[d] = (diameterMix[d] || 0) + 1;
+    });
+    const safeId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
+    return {
+      id: pkg.package_id,
+      suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
+      pipe_count: assets.length,
+      total_length_m: Number(pkg.total_length_m || 0),
+      cctv_hours: Number(pkg.cctv_hours || 0),
+      cctv_rate: Number(pkg.cctv_rate || 0),
+      total_cost: Number(pkg.total_cost || 0),
+      max_span_m: Number(pkg.max_span_m || 0),
+      asset_ids: assets.map(a => a.assetId).filter(Boolean),
+      centroid,
+      conditionMix,
+      diameterMix,
+      dedicated_map_url: `./package_maps/${safeId}_map.html`
+    };
+  });
+
+  const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
+    const raw = item.raw || {};
+    return {
+      asset_id: item.assetId || '',
+      package_id: pkg.package_id,
+      suburb: String(item.suburb || pkg.suburb || '').toUpperCase(),
+      diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
+      condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
+      length_m: Number(item.lengthM) || 0,
+      address: String(raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || '').trim(),
+      lat: Number.isFinite(item.lat) ? item.lat : null,
+      lon: Number.isFinite(item.lon) ? item.lon : null
+    };
+  }));
+
+  const reportData = {
+    generated_at: new Date().toISOString(),
+    options: options,
+    summary: {
+      package_count: reportPackages.length,
+      pipe_count: reportPipes.length,
+      total_length_m: Number(summary?.total_length_m || 0),
+      total_cctv_hours: Number(summary?.total_cctv_hours || 0),
+      total_cost: Number(summary?.total_cost || 0)
+    },
+    packages: reportPackages,
+    pipes: reportPipes
+  };
+  const json = JSON.stringify(reportData).replace(/<\/script/gi, '<\\/script');
+
+  const runtimeJs = `
+(function(){
+  'use strict';
+  var data;
+  try { data = JSON.parse(document.getElementById('report-data').textContent); }
+  catch (err) {
+    document.body.innerHTML = '<div style="padding:40px;color:#b91c1c;font-family:Segoe UI,system-ui,sans-serif">Report data could not be parsed: ' + (err && err.message || '') + '</div>';
+    return;
+  }
+  var options = data.options || {};
+  var pipes = data.pipes || [];
+  var packages = data.packages || [];
+  var summary = data.summary || {};
+  var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
+  var pkgIndex = {};
+  packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+
+  function colorFor(id) { var i = pkgIndex[id]; if (i == null) i = 0; return PALETTE[i % PALETTE.length]; }
+  function fmtNum(n, dp) { if (n == null || !isFinite(n)) return ''; return Number(n).toLocaleString('en-AU', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
+  function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+  function buildCiAAssetUrl(id) {
+    var v = String(id == null ? '' : id).trim();
+    if (!v || !/^\\d+$/.test(v)) return '';
+    return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
+  }
+  function linkAssetId(id) {
+    var label = esc(id);
+    var url = buildCiAAssetUrl(id);
+    if (!url) return label;
+    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+  }
+  function linkAssetIdList(ids) {
+    if (!ids || !ids.length) return '';
+    return ids.map(function(id) { return linkAssetId(id); }).join(', ');
+  }
+
+  document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
+  document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' CCTV package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
+
+  var meta = [
+    { label: 'Total Packages', value: fmtNum(summary.package_count, 0) || String(packages.length) },
+    { label: 'Total Pipes', value: fmtNum(summary.pipe_count, 0) || String(pipes.length) },
+    { label: 'Total Length', value: (fmtNum(summary.total_length_m, 1) || '0') + ' m' },
+    { label: 'Total CCTV Hours', value: fmtNum(summary.total_cctv_hours, 1) || '0' },
+    { label: 'Estimated Cost', value: fmtCurrency(summary.total_cost) || '$0' }
+  ];
+  document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
+    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+  }).join('');
+
+  var opt = [
+    { label: 'Condition Selection', value: (options.conditionGroups || []).join(', ') || '—' },
+    { label: 'Lookback Exclusion', value: options.lookbackYears != null ? options.lookbackYears + ' years' : '—' },
+    { label: 'Target Proximity', value: options.proximityM != null ? Number(options.proximityM).toLocaleString() + ' m' : '—' },
+    { label: 'Package Target', value: options.targetMode === 'count' ? 'Pipe count' : (options.targetMode === 'both' ? 'Length and count' : 'Total length') },
+    { label: 'Target Length / Count', value: options.targetMode === 'count' ? (options.pipesPerPackage + ' pipes') : (options.targetMode === 'both' ? (options.targetLengthM + ' m + ' + options.pipesPerPackage + ' pipes') : (options.targetLengthM + ' m')) },
+    { label: 'CCTV Production Rate', value: options.metresPerHour != null ? options.metresPerHour + ' m/hr' : '—' },
+    { label: 'CCTV Rate', value: options.cctvRatePerHour != null ? '$' + options.cctvRatePerHour + '/hr' : '—' },
+    { label: 'Criticality Influence', value: options.criticalityWeight != null ? String(options.criticalityWeight) : '—' },
+    { label: 'Consolidation', value: options.consolidateSmallPackages ? '<5 pipes consolidated within ' + (options.consolidateSmallDistanceM || 500) + ' m' : 'Off' }
+  ];
+  document.getElementById('optionsStrip').innerHTML = opt.map(function(s) {
+    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+  }).join('');
+
+  var ovBullets = [];
+  ovBullets.push('Pipes filtered to condition tiers: <strong>' + esc((options.conditionGroups || []).join(', ') || '—') + '</strong>.');
+  ovBullets.push('Assets surveyed within the last <strong>' + esc(String(options.lookbackYears || 4)) + ' years</strong> are excluded from CCTV scheduling.');
+  ovBullets.push('Packages built proximity-first within a <strong>' + esc(String(options.proximityM || 500)) + ' m</strong> radius.');
+  if (options.targetMode === 'count') {
+    ovBullets.push('Packages target <strong>~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
+  } else if (options.targetMode === 'both') {
+    ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m AND ~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
+  } else {
+    ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m</strong> of total pipe length.');
+  }
+  ovBullets.push('CCTV survey hours computed at <strong>' + esc(String(options.metresPerHour || 80)) + ' m/hr</strong> production rate.');
+  ovBullets.push('Cost estimated at <strong>$' + esc(String(options.cctvRatePerHour || 205)) + '/hr</strong> applied to package hours.');
+  ovBullets.push('Criticality weighting (<strong>' + esc(String(options.criticalityWeight || 0.1)) + '</strong>) gently nudges priority order; primary ordering remains spatial.');
+  if (options.consolidateSmallPackages) {
+    ovBullets.push('Post-processing: small packages (<5 pipes) consolidated into the nearest larger package within ' + esc(String(options.consolidateSmallDistanceM || 500)) + ' m.');
+  }
+  ovBullets.push('Methodology note: CCTV outputs are inspection-priority triage, NOT a failure prediction or AEP classification.');
+  document.getElementById('overallReasoning').innerHTML = '<ul>' + ovBullets.map(function(b){ return '<li>' + b + '</li>'; }).join('') + '</ul>';
+
+  var cardsHtml = packages.map(function(pkg) {
+    var color = colorFor(pkg.id);
+    var diam = Object.keys(pkg.diameterMix || {}).map(function(d){ return d + 'mm'; }).join(', ');
+    return '<div class="pkg-card" data-package-id="' + esc(pkg.id) + '">' +
+      '<div class="pkg-card-head">' +
+        '<span class="pipe-color" style="background:' + color + '"></span>' +
+        '<div class="pkg-card-title">' + esc(pkg.id) + '</div>' +
+      '</div>' +
+      '<div class="pkg-card-val">' + fmtNum(pkg.pipe_count, 0) + '<span class="pkg-card-val-unit"> pipes</span></div>' +
+      '<div class="pkg-card-sub">' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
+      '<dl class="pkg-card-dl">' +
+        '<dt>Length</dt><dd>' + esc(fmtNum(pkg.total_length_m, 1)) + ' m</dd>' +
+        '<dt>CCTV hrs</dt><dd>' + esc(fmtNum(pkg.cctv_hours, 1)) + '</dd>' +
+        '<dt>Cost</dt><dd>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</dd>' +
+        '<dt>Diameters</dt><dd>' + esc(diam || '—') + '</dd>' +
+        '<dt>Max span</dt><dd>' + (pkg.max_span_m ? esc((pkg.max_span_m / 1000).toFixed(2)) + ' km' : '—') + '</dd>' +
+      '</dl>' +
+      '<div class="pkg-card-actions">' +
+        '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener">Open map ↗</a>' +
+      '</div>' +
+      '</div>';
+  }).join('');
+  document.getElementById('packageCards').innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
+
+  var packagesTbl = document.getElementById('packagesTable');
+  packagesTbl.innerHTML =
+    '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="r">Pipes</th>' +
+    '<th class="r">Length (m)</th><th class="r">CCTV hrs</th><th class="r">Cost</th><th>Asset IDs (first 12)</th></tr></thead>' +
+    '<tbody>' + (packages.length ? packages.map(function(pkg) {
+      var diam = Object.keys(pkg.diameterMix || {}).map(function(d){ return d + 'mm'; }).join(', ');
+      var ids = (pkg.asset_ids || []).slice(0, 12);
+      var more = (pkg.asset_ids || []).length > 12 ? ' …' : '';
+      return '<tr class="package-row" data-package-id="' + esc(pkg.id) + '">' +
+        '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
+        '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
+        '<td>' + esc(diam) + '</td>' +
+        '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
+        '<td class="r">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
+        '<td class="r">' + fmtNum(pkg.cctv_hours, 1) + '</td>' +
+        '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
+        '<td style="font-size:11px;color:#5A6B7A">' + linkAssetIdList(ids) + more + '</td>' +
+        '</tr>';
+    }).join('') : '<tr><td colspan="8" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
+
+  var map = null;
+  function initMap() {
+    var mapEl = document.getElementById('map');
+    if (typeof L === 'undefined') {
+      document.getElementById('mapPanel').insertAdjacentHTML('beforeend', '<div class="map-warning">Leaflet failed to load — map disabled. Tables remain functional.</div>');
+      return;
+    }
+    map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
+    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Spatial Services NSW', maxZoom: 21 });
+    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 });
+    sixAerial.addTo(map);
+    L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(map);
+    var allPoints = [];
+    packages.forEach(function(pkg) {
+      var color = colorFor(pkg.id);
+      var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
+      pkgPipes.forEach(function(p) { allPoints.push([p.lat, p.lon]); });
+      pkgPipes.forEach(function(p) {
+        var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
+        marker.bindPopup(
+          '<strong>ASSET ID - ' + linkAssetId(p.asset_id) + ' - ' + esc(p.package_id) + '</strong><br>' +
+          'Suburb: ' + esc(p.suburb) + '<br>' +
+          'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '—') + '<br>' +
+          'Condition: ' + esc(p.condition || '—') + '<br>' +
+          'Length: ' + fmtNum(p.length_m, 1) + ' m' +
+          (p.address ? '<br>Address: ' + esc(p.address) : '') +
+          (p.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '')
+        );
+        marker.addTo(map);
+      });
+    });
+    if (allPoints.length) map.fitBounds(L.latLngBounds(allPoints).pad(0.1));
+    else {
+      map.setView([-33.75, 151.27], 11);
+      var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
+      n.textContent = 'No pipe coordinates available — map shows default extent only.';
+      mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
+    }
+  }
+  initMap();
+})();
+`;
+
+  return [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<title>NBC CCTV Work Order Package Report</title>',
+    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">',
+    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\\/script>',
+    '<style>',
+    'body{margin:0;font-family:Segoe UI,system-ui,sans-serif;color:#1A2B3C;background:#F4F0E8}',
+    'header{background:#071B2A;color:#fff;padding:18px 28px}',
+    '.h-title{font-size:20px;font-weight:800}',
+    '.h-meta{font-size:12px;color:rgba(255,255,255,0.65);margin-top:4px}',
+    '.h-status{font-size:12px;color:#00C4BE;margin-top:4px;font-weight:600}',
+    '.shell{padding:24px 28px;max-width:1400px;margin:0 auto}',
+    '.panel{background:#fff;border-radius:8px;padding:18px 22px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,0.06)}',
+    '.panel-lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#5A6B7A;margin-bottom:10px}',
+    '.pkg-meta-item{display:inline-block;margin-right:24px;margin-bottom:8px;vertical-align:top}',
+    '.pkg-meta-lbl{font-size:10px;color:#5A6B7A;text-transform:uppercase;letter-spacing:.04em}',
+    '.pkg-meta-val{font-size:14px;font-weight:700;color:#1A2B3C;margin-top:2px}',
+    '.pkg-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}',
+    '.pkg-card{background:#fff;border:1px solid #DDE3E8;border-radius:6px;padding:12px}',
+    '.pkg-card-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}',
+    '.pipe-color{display:inline-block;width:10px;height:10px;border-radius:50%}',
+    '.pkg-card-title{font-size:13px;font-weight:700}',
+    '.pkg-card-val{font-size:22px;font-weight:800;color:#00847F}',
+    '.pkg-card-val-unit{font-size:11px;color:#5A6B7A;font-weight:500}',
+    '.pkg-card-sub{font-size:11px;color:#5A6B7A;margin-bottom:8px}',
+    '.pkg-card-dl{margin:0;font-size:11px;color:#5A6B7A;display:grid;grid-template-columns:auto 1fr;gap:2px 8px}',
+    '.pkg-card-dl dt{font-weight:600}',
+    '.pkg-card-dl dd{margin:0;text-align:right;color:#1A2B3C}',
+    '.pkg-card-actions{margin-top:8px;display:flex;gap:6px}',
+    '.pkg-card-link-btn{font-size:10px;padding:4px 8px;background:#1A2B3C;color:#fff;border-radius:3px;text-decoration:none;font-weight:600}',
+    '.pkg-card-link-primary{background:#00847F}',
+    'table{width:100%;border-collapse:collapse;font-size:12px}',
+    'th{text-align:left;padding:8px 10px;background:#F4F0E8;color:#5A6B7A;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.04em}',
+    'td{padding:8px 10px;border-top:1px solid #EEF1F4;vertical-align:top}',
+    '.r{text-align:right}',
+    '#map{height:480px;width:100%;border-radius:6px}',
+    '.map-warning{padding:12px;background:#FEF3C7;color:#92400E;border-radius:4px;margin-top:8px;font-size:12px}',
+    '.pkg-empty,.pkg-empty-cell{padding:40px;text-align:center;color:#5A6B7A;font-style:italic}',
+    'a{color:#00847F;text-decoration:none}',
+    'a:hover{text-decoration:underline}',
+    'ul{padding-left:20px}',
+    'ul li{margin-bottom:4px;line-height:1.5}',
+    '</style>',
+    '</head>',
+    '<body>',
+    '<header>',
+    '<div class="h-title">NBC CCTV Work Order Package Report</div>',
+    '<div class="h-meta" id="generatedMeta">Generated —</div>',
+    '<div class="h-status" id="reportStatusText">—</div>',
+    '</header>',
+    '<div class="shell">',
+    '<div class="panel"><div class="panel-lbl">Run Summary</div><div id="metaStrip"></div></div>',
+    '<div class="panel"><div class="panel-lbl">Packaging Rules Used</div><div id="optionsStrip"></div></div>',
+    '<div class="panel"><div class="panel-lbl">Overall Reasoning</div><div id="overallReasoning"></div></div>',
+    '<div class="panel"><div class="panel-lbl">Packages</div><div id="packageCards" class="pkg-card-grid"></div></div>',
+    '<div class="panel" id="mapPanel"><div class="panel-lbl">Package Map</div><div id="map"></div></div>',
+    '<div class="panel"><div class="panel-lbl">Packages Table</div><div style="overflow:auto"><table id="packagesTable"></table></div></div>',
+    '</div>',
+    '<script id="report-data" type="application/json">' + json + '<\\/script>',
+    '<script>' + runtimeJs + '<\\/script>',
+    '</body>',
+    '</html>'
+  ].join('\n');
+}
+
 // Per-package KML for Google My Maps import. Polyline geometry where pipe
 // endpoints are available, point fallback where only a centroid is known.
 function buildPipeKml(pkg, packageColor) {
@@ -8336,6 +8688,36 @@ function reliningPackageMapFilename(pkg) {
   return `package_maps/${safe}_map.html`;
 }
 
+// --- Provenance footer (audit trail for CiA / contractor handover) ---------
+// Bump PACKAGER_VERSION when the engine logic changes (cost rules, top-up,
+// proximity, criticality weighting). Pure UI tweaks do not require a bump.
+const PACKAGER_VERSION = '1.0.0';
+
+function buildProvenanceLines({ toolKind, packageCount }) {
+  const operator = (localStorage.getItem('packagerOperator') || '').trim()
+    || 'unset (run: localStorage.setItem("packagerOperator","mark.ocallaghan@northernbeaches.nsw.gov.au"))';
+  const assetsName =
+    document.getElementById('pkgAssetsFile')?.files?.[0]?.name
+    || document.getElementById('cctvPkgAssetsFile')?.files?.[0]?.name
+    || '(not tracked)';
+  const ratesName =
+    document.getElementById('pkgRatesFile')?.files?.[0]?.name
+    || document.getElementById('cctvPkgRatesFile')?.files?.[0]?.name
+    || '(not tracked)';
+  const ts = new Date().toLocaleString('en-AU', {
+    timeZone: 'Australia/Sydney',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  return [
+    'Source:  ' + assetsName + '  +  ' + ratesName,
+    'Engine:  NBC Stormwater Packager v' + PACKAGER_VERSION + ' (' + toolKind + ')',
+    'Run:     ' + ts + ' AEST  ·  Operator: ' + operator,
+    'Output:  ' + packageCount + ' package(s)  ·  Round-trip target: TechnologyOne CiA Work Order import',
+    'Method:  IPWEA Practice Note 12.1 condition-grade prioritisation; deterministic packaging engine'
+  ];
+}
+
 async function downloadReliningPackagesZip() {
   const packages = lastPackagingGeneration?.packages || [];
   if (!packages.length) {
@@ -8347,6 +8729,8 @@ async function downloadReliningPackagesZip() {
     alert('JSZip library not loaded. Please refresh the page and try again.');
     return;
   }
+
+  const _provLines = buildProvenanceLines({ toolKind: 'Relining', packageCount: packages.length });
 
   try {
     const HEADERS = [
@@ -8423,7 +8807,14 @@ async function downloadReliningPackagesZip() {
 
     const zip = new JSZip();
     const csvNames = [];
-    const summaryLines = ['PACKAGE SUMMARY', '='.repeat(60), ''];
+    const summaryLines = [
+      'PACKAGE SUMMARY',
+      '='.repeat(60),
+      '',
+      ..._provLines,
+      '-'.repeat(60),
+      ''
+    ];
     const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Length (m)', 'Cost ($)', 'Asset IDs']];
 
     packages.forEach((pkg, index) => {
@@ -8525,7 +8916,18 @@ async function downloadReliningPackagesZip() {
 
     // file_list.txt
     const sortedCsvNames = csvNames.slice().sort();
-    zip.file('file_list.txt', ['PACKAGE FILE LIST', '='.repeat(60), '', ...sortedCsvNames].join('\n'));
+    zip.file('file_list.txt', [
+      'PACKAGE FILE LIST',
+      '='.repeat(60),
+      '',
+      ..._provLines,
+      '-'.repeat(60),
+      '',
+      ...sortedCsvNames
+    ].join('\n'));
+
+    // provenance.txt — single canonical audit record (also embedded in summary + file_list headers)
+    zip.file('provenance.txt', _provLines.join('\n') + '\n');
 
     // package_report.html — standalone shareable read-only view
     try {
@@ -10212,7 +10614,7 @@ function renderGeneratedCctvPackages(packages) {
         Total length ${totalLength.toLocaleString(undefined, { maximumFractionDigits: 1 })} m · Estimated CCTV cost ${formatCurrency(totalCost)}
       </div>
       <div style="margin-top:10px">
-        <button class="export-btn" onclick="downloadCctvPackagesZip()">Download ZIP</button>
+        <button class="export-btn" onclick="downloadCctvPackagesZip()">Export Work Order Pack (ZIP)</button>
         <button class="export-btn" onclick="exportCctvPackagesCsv()">Export ESRI CSV</button>
       </div>
     </div>
@@ -10318,10 +10720,13 @@ async function downloadCctvPackagesZip() {
     alert('Generate CCTV packages before downloading.');
     return;
   }
+  if (!confirmCctvGeneratedSettingsCurrent('download the ZIP')) return;
   if (typeof JSZip === 'undefined') {
     alert('JSZip library not loaded. Please refresh the page and try again.');
     return;
   }
+
+  const _provLines = buildProvenanceLines({ toolKind: 'CCTV', packageCount: packages.length });
 
   try {
     const HEADERS = [
@@ -10388,7 +10793,14 @@ async function downloadCctvPackagesZip() {
 
     const zip = new JSZip();
     const csvNames = [];
-    const summaryLines = ['CCTV PACKAGE SUMMARY', '='.repeat(60), ''];
+    const summaryLines = [
+      'CCTV PACKAGE SUMMARY',
+      '='.repeat(60),
+      '',
+      ..._provLines,
+      '-'.repeat(60),
+      ''
+    ];
     const summaryRows = [['Package ID', 'Suburb', 'Diameters (mm)', 'Max Distance Between Pipes (km)', 'Pipes', 'Length (m)', 'CCTV Hours', 'Cost ($)', 'Asset IDs']];
 
     packages.forEach((pkg, index) => {
@@ -10483,7 +10895,36 @@ async function downloadCctvPackagesZip() {
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
     const sortedCsvNames = csvNames.slice().sort();
-    zip.file('file_list.txt', ['CCTV PACKAGE FILE LIST', '='.repeat(60), '', ...sortedCsvNames].join('\n'));
+    zip.file('file_list.txt', [
+      'CCTV PACKAGE FILE LIST',
+      '='.repeat(60),
+      '',
+      ..._provLines,
+      '-'.repeat(60),
+      '',
+      ...sortedCsvNames
+    ].join('\n'));
+
+    // provenance.txt — single canonical audit record (also embedded in summary + file_list headers)
+    zip.file('provenance.txt', _provLines.join('\n') + '\n');
+
+    // package_report.html — standalone shareable read-only view (CiA-linked)
+    try {
+      const reportHtml = buildCctvPackageReportHtml(
+        packages,
+        packages.flatMap(pkg => pkg.assets || []),
+        lastCctvPackagingGeneration?.options || null,
+        {
+          total_length_m: packages.reduce((s, p) => s + Number(p.total_length_m || 0), 0),
+          total_cctv_hours: packages.reduce((s, p) => s + Number(p.cctv_hours || 0), 0),
+          total_cost: packages.reduce((s, p) => s + Number(p.total_cost || 0), 0)
+        }
+      );
+      zip.file('package_report.html', reportHtml);
+    } catch (reportErr) {
+      console.error('[CCTV ZIP] Failed to build package_report.html:', reportErr);
+      throw new Error('package_report.html could not be built: ' + (reportErr && reportErr.message || reportErr));
+    }
 
     const PKG_MAP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
     const expectedMapNames = [];
@@ -10520,14 +10961,21 @@ async function downloadCctvPackagesZip() {
     const checkZip = await JSZip.loadAsync(blob);
     const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
     const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
+    console.info(`[CCTV ZIP] Package CSVs assembled: ${csvNames.length}; CSVs in generated ZIP: ${zipCsvNames.length}.`);
+    if (!csvNames.length) console.warn('[CCTV ZIP] No package CSV files were assembled — ZIP will contain no CCTV_*.csv entries.');
     const zipCsvSet = new Set(zipCsvNames);
+    const csvNamesSet = new Set(csvNames);
     const missingFromZip = csvNames.filter(name => !zipCsvSet.has(name));
+    const extraInZip = zipCsvNames.filter(name => !csvNamesSet.has(name));
+    if (missingFromZip.length) console.warn('[CCTV ZIP] file_list.txt entries missing from generated ZIP:', missingFromZip);
+    if (extraInZip.length) console.warn('[CCTV ZIP] CSVs present in generated ZIP but absent from file_list.txt:', extraInZip);
     if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
     if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package CSV file(s) listed in file_list.txt are missing from the generated ZIP.`);
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
+    if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
     const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
-    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing.`);
+    if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
     for (const name of zipCsvNames) {
       const csvText = await checkZip.file(name).async('string');
       const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
