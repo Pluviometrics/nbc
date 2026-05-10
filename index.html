@@ -153,10 +153,7 @@ window.addEventListener('keydown', (event) => {
 
 <!-- Page Nav (hidden on home) -->
 <div id="page-nav" style="display:none">
-  <button class="pnav-btn active" data-page="aep" onclick="switchPage('aep')">Rainfall Calculator</button>
-  <button class="pnav-btn" data-page="criticalassets" onclick="switchPage('criticalassets')">Critical Assets</button>
-  <button class="pnav-btn" data-page="bomgauges" onclick="switchPage('bomgauges')">BOM Gauges</button>
-  <button class="pnav-btn" data-page="prioritisation" onclick="switchPage('prioritisation')">Prioritisation Tool</button>
+  <button class="pnav-btn active" data-page="prioritisation" onclick="switchPage('prioritisation')">Prioritisation Tool</button>
   <button class="pnav-btn" data-page="costing" onclick="switchPage('costing')">Costing Tool</button>
   <button class="pnav-btn" data-page="relining" onclick="switchPage('relining')">Relining Work Orders</button>
   <button class="pnav-btn" data-page="cctvpackaging" onclick="switchPage('cctvpackaging')">CCTV Work Orders</button>
@@ -171,12 +168,6 @@ window.addEventListener('keydown', (event) => {
     <p>Northern Beaches Council - Stormwater Engineering</p>
   </div>
   <div class="home-cards">
-    <div class="home-card" onclick="switchPage('aep')">
-      <div class="hc-icon">Rainfall</div>
-      <div class="hc-title">Rainfall</div>
-      <div class="hc-desc">Live 5-minute gauge data with BoM IFD AEP analysis across official stations, plus BOM reference gauges by LGA.</div>
-      <div><span class="hc-badge live">Live</span></div>
-    </div>
     <div class="home-card" onclick="switchPage('prioritisation')">
       <div class="hc-icon">Prioritisation</div>
       <div class="hc-title">Prioritisation</div>
@@ -206,18 +197,6 @@ window.addEventListener('keydown', (event) => {
       <div class="hc-title">Future Works Plan</div>
       <div class="hc-desc">Backlog and delivery planning workspace that will become the SharePoint-backed program sheet.</div>
       <div><span class="hc-badge live">In Progress</span></div>
-    </div>
-    <div class="home-card" onclick="switchPage('criticalassets')">
-      <div class="hc-icon">Assets</div>
-      <div class="hc-title">Critical Assets</div>
-      <div class="hc-desc">Aerial asset map for critical stormwater assets with class filters, pipe geometry and inspection compliance status.</div>
-      <div><span class="hc-badge live">In Progress</span></div>
-    </div>
-    <div class="home-card" onclick="switchPage('bomgauges')">
-      <div class="hc-icon">BOM</div>
-      <div class="hc-title">BOM Gauges</div>
-      <div class="hc-desc">BOM Climate Data Online and National Flood Gauge Network records captured across NSW, with LGA filtering.</div>
-      <div><span class="hc-badge live">Live</span></div>
     </div>
   </div>
 </div>
@@ -891,7 +870,7 @@ window.addEventListener('keydown', (event) => {
 <div id="page-relining" style="display:none">
   <div class="pkg-hero" style="border-radius:0;margin:0;flex-shrink:0">
     <div style="flex:1;min-width:0">
-      <div class="pkg-title">Relining Packaging</div>
+      <div class="pkg-title">Relining Work Orders</div>
     </div>
     <div style="display:flex;flex-direction:row;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
       <div id="pkgHeroActions" style="display:none;gap:8px;align-items:center">
