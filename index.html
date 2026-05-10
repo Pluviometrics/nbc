@@ -4703,8 +4703,8 @@ function normaliseReliningCandidateRow(row, index, options, suburbCol) {
   const assetId = String(getValueByAliases(row, ['Asset', 'Asset Number', 'Asset_Number', 'OBJECTID', 'MAPKEY', 'CATLG_ID']) || `asset-${index + 1}`).trim();
   const criticalityScore = resolveReliningCriticalityScore(row);
   const suburb = resolveReliningSuburb(row, suburbCol);
-  const usPit = normaliseReliningPit(getValueByAliases(row, ['US_Pit', 'US Pit']));
-  const dsPit = normaliseReliningPit(getValueByAliases(row, ['DS_Pit', 'DS Pit']));
+  const usPit = normaliseReliningPit(getValueByAliases(row, ['SW_Upstream_Node', 'US_Pit', 'US Pit', 'Upstream_Node']));
+  const dsPit = normaliseReliningPit(getValueByAliases(row, ['SW_Downstream_Node', 'DS_Pit', 'DS Pit', 'Downstream_Node']));
   return {
     assetId,
     suburb,
