@@ -4760,8 +4760,12 @@ function buildReliningPackagingPreview(assetRows, options) {
     const withPits = c6Pool.filter(c => c.usPit || c.dsPit).length;
     console.info(`[C6] Asset rows with condition=6: ${totalC6Raw}. After diameter ≥ ${MIN_RELINING_DIAMETER_MM}mm filter: ${c6Pool.length}. With pit IDs: ${withPits}/${c6Pool.length}.`);
     if (totalC6Raw > 0 && c6Pool.length > 0 && withPits === 0) {
-      const sampleKeys = Object.keys((assetRows || []).find(r => getReliningConditionNumber(r) === 6) || {});
-      console.warn('[C6] Pool has zero rows with US_Pit/DS_Pit. Available columns on first C6 row:', sampleKeys);
+      const sampleRow = (assetRows || []).find(r => getReliningConditionNumber(r) === 6) || {};
+      const allKeys = Object.keys(sampleRow);
+      const pitLike = allKeys.filter(k => /pit|manhole|node|junction|upstream|downstream|us[_ ]|ds[_ ]|from|to|start|end/i.test(k));
+      console.warn('[C6] Pool has zero rows with US_Pit/DS_Pit. Pit-like columns found:', pitLike);
+      console.warn('[C6] Sample values for pit-like columns:', Object.fromEntries(pitLike.map(k => [k, sampleRow[k]])));
+      console.warn('[C6] All ' + allKeys.length + ' columns (joined):', allKeys.join(' | '));
     }
   }
   return {
