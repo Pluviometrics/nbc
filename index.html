@@ -5563,11 +5563,13 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
     });
     for (const pkgIdx of candidates) {
       if (pkgDiameters[pkgIdx].has(dia)) {
-        const anchorAsset = (packages[pkgIdx].assets || []).find(a =>
-          Number(a.diameterMm) === dia &&
-          ((c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
-           (c6.dsPit && (a.usPit === c6.dsPit || a.dsPit === c6.dsPit)))
-        );
+        const sharesPit = (a) =>
+          (c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
+          (c6.dsPit && (a.usPit === c6.dsPit || a.dsPit === c6.dsPit));
+        const pkgAssets = packages[pkgIdx].assets || [];
+        // Prefer a pipe matching both diameter AND pit; fall back to any pit-sharing pipe
+        const anchorAsset = pkgAssets.find(a => Number(a.diameterMm) === dia && sharesPit(a))
+                         || pkgAssets.find(sharesPit);
         additions[pkgIdx].push({ ...c6, is_c6_addon: true, c6_anchor_asset_id: anchorAsset?.assetId || null });
         used.add(c6.assetId);
         break;
