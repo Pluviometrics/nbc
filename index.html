@@ -5416,7 +5416,8 @@ function topupReliningPackages(packages, allCostedItems, options) {
   const usedIds = new Set();
   const result = packages.map(pkg => {
     // Locked packages are sealed: never top up.
-    if (isReliningPackageLocked(pkg.anchor_id)) return pkg;
+    if ((pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id)) ||
+        (pkg.package_id && isReliningPackageLocked(pkg.package_id))) return pkg;
     let remaining = options.maxPackageValue - pkg.total_cost;
     if (remaining <= 0) return pkg;
     const pkgGroup = options.proximityM ? (pkg.assets?.[0]?._cluster || '') : (options.groupBySuburb ? (pkg.primary_suburb || pkg.suburb || '') : '__all__');
@@ -5582,7 +5583,10 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
   // Locked packages are sealed: skip them during the auto-attach pit-share
   // pass and reject manual-include targeting a locked anchor.
   const lockedPkgIdx = new Set();
-  packages.forEach((pkg, pkgIdx) => { if (isReliningPackageLocked(pkg.anchor_id)) lockedPkgIdx.add(pkgIdx); });
+  packages.forEach((pkg, pkgIdx) => {
+    if ((pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id)) ||
+        (pkg.package_id && isReliningPackageLocked(pkg.package_id))) lockedPkgIdx.add(pkgIdx);
+  });
   const pitToPackages = new Map();
   packages.forEach((pkg, pkgIdx) => {
     if (lockedPkgIdx.has(pkgIdx)) return;
@@ -6057,6 +6061,20 @@ async function loadReliningLocksFile(file) {
       },
       moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
     };
+    // Normalise lock keys: standalone-saved locks use package_id, live tool uses anchor_id.
+    // Translate package_id → anchor_id where the current generation provides a mapping.
+    if (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages)) {
+      const pkgIdToAnchor = {};
+      lastPackagingGeneration.packages.forEach(p => {
+        if (p && p.package_id && p.anchor_id) pkgIdToAnchor[p.package_id] = p.anchor_id;
+      });
+      const translatedPkgLocks = {};
+      Object.keys(reliningManualMoves.locks.packages).forEach(key => {
+        const target = pkgIdToAnchor[key] || key;
+        translatedPkgLocks[target] = reliningManualMoves.locks.packages[key];
+      });
+      reliningManualMoves.locks.packages = translatedPkgLocks;
+    }
     persistReliningManualMoves();
     if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
       generateReliningPackages();
@@ -7272,7 +7290,10 @@ function _collectLockedPackageSnapshots() {
   if (!Array.isArray(prev) || !prev.length) return [];
   if (!reliningManualMoves?.locks?.packages) return [];
   return prev
-    .filter(pkg => pkg && pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id))
+    .filter(pkg => pkg && (
+      (pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id)) ||
+      (pkg.package_id && isReliningPackageLocked(pkg.package_id))
+    ))
     .map(pkg => ({
       // shallow-copy the package shell, deep-copy assets so subsequent
       // re-costing does not touch the live lastPackagingGeneration.
