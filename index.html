@@ -6619,7 +6619,49 @@ function attachReliningEditPanelListeners() {
     if (lockPipeBtn) { event.preventDefault(); toggleReliningPipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-anchor-id') || ''); return; }
     const lockPkgBtn = event.target?.closest?.('button[data-relining-lock-pkg]');
     if (lockPkgBtn) { event.preventDefault(); toggleReliningPackageLock(lockPkgBtn.getAttribute('data-anchor-id') || ''); return; }
+    const sortCell = event.target?.closest?.('[data-relining-edit-sort]');
+    if (sortCell) { event.preventDefault(); toggleReliningEditPipeSort(sortCell.getAttribute('data-anchor-id') || '', sortCell.getAttribute('data-relining-edit-sort') || ''); return; }
   });
+}
+
+let _reliningEditPipeSorts = {};
+
+function _reliningEditPipeSortIndicator(anchorId, key) {
+  const state = _reliningEditPipeSorts[anchorId];
+  if (!state || state.key !== key) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+  return state.dir === 'desc'
+    ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+    : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+}
+
+function _reliningEditSortPipes(assets, state) {
+  if (!state || !state.key) return assets;
+  const { key, dir } = state;
+  const mult = dir === 'desc' ? -1 : 1;
+  return assets.slice().sort((a, b) => {
+    let av, bv;
+    if (key === 'asset')       { av = String(a.assetId || ''); bv = String(b.assetId || ''); return av.localeCompare(bv, undefined, { numeric: true }) * mult; }
+    if (key === 'suburb')      { av = String(a.suburb || '');  bv = String(b.suburb || '');  return av.localeCompare(bv) * mult; }
+    if (key === 'diam')        { av = Number(a.diameter_mm) || 0; bv = Number(b.diameter_mm) || 0; }
+    else if (key === 'length') { av = Number(a.length_m) || 0;    bv = Number(b.length_m) || 0; }
+    else if (key === 'cost')   { av = Number(a.pipe_cost) || 0;   bv = Number(b.pipe_cost) || 0; }
+    else return 0;
+    return (av - bv) * mult;
+  });
+}
+
+function toggleReliningEditPipeSort(anchorId, key) {
+  if (!anchorId || !key) return;
+  const cur = _reliningEditPipeSorts[anchorId];
+  if (!cur || cur.key !== key) {
+    const numeric = key === 'diam' || key === 'length' || key === 'cost';
+    _reliningEditPipeSorts[anchorId] = { key, dir: numeric ? 'desc' : 'asc' };
+  } else if (cur.dir === 'asc') {
+    _reliningEditPipeSorts[anchorId] = { key, dir: 'desc' };
+  } else {
+    delete _reliningEditPipeSorts[anchorId];
+  }
+  renderEditPackagesPanel();
 }
 
 function renderEditPackagesPanel() {
@@ -6685,8 +6727,18 @@ function renderEditPackagesPanel() {
     if (!assets.length) {
       return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>`;
     }
-    const headRow = `<div class="edit-pkg-asset-row head"><div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div></div>`;
-    const rows = reorderAssetsByC6Anchor(assets).map(asset => {
+    const anchorAttr = escapeHtml(pkg.anchor_id || '');
+    const headRow = `<div class="edit-pkg-asset-row head">`
+      + `<div data-relining-edit-sort="asset"  data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Asset">Asset${_reliningEditPipeSortIndicator(pkg.anchor_id, 'asset')}</div>`
+      + `<div data-relining-edit-sort="suburb" data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Suburb">Suburb${_reliningEditPipeSortIndicator(pkg.anchor_id, 'suburb')}</div>`
+      + `<div data-relining-edit-sort="diam"   data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Diameter">Diam (mm)${_reliningEditPipeSortIndicator(pkg.anchor_id, 'diam')}</div>`
+      + `<div data-relining-edit-sort="length" data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Length">Length (m)${_reliningEditPipeSortIndicator(pkg.anchor_id, 'length')}</div>`
+      + `<div data-relining-edit-sort="cost"   data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Cost">Cost${_reliningEditPipeSortIndicator(pkg.anchor_id, 'cost')}</div>`
+      + `<div>Move to package</div>`
+      + `<div></div>`
+      + `<div>Lock</div>`
+      + `</div>`;
+    const rows = reorderAssetsByC6Anchor(_reliningEditSortPipes(assets, _reliningEditPipeSorts[pkg.anchor_id])).map(asset => {
       const uid = String(asset.assetId || '');
       const isC6 = !!asset.is_c6_addon;
       const isLocked = isReliningPipeLocked(uid);
@@ -9084,8 +9136,49 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (lockPipeBtn) { event.preventDefault(); reportTogglePipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-pkg-id') || ''); return; }
       var lockPkgBtn = t.closest('button[data-report-lock-pkg]');
       if (lockPkgBtn) { event.preventDefault(); reportTogglePackageLock(lockPkgBtn.getAttribute('data-pkg-id') || ''); return; }
+      var sortCell = t.closest('[data-report-edit-sort]');
+      if (sortCell) { event.preventDefault(); reportToggleEditPipeSort(sortCell.getAttribute('data-pkg-id') || '', sortCell.getAttribute('data-report-edit-sort') || ''); return; }
     });
   }
+
+  // ---------- Per-package pipe sort (Edit panel) ----------
+  var _reportEditPipeSorts = {};
+  function _reportEditPipeSortIndicator(pkgId, key) {
+    var s = _reportEditPipeSorts[pkgId];
+    if (!s || s.key !== key) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+    return s.dir === 'desc'
+      ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+      : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+  }
+  function _reportEditSortPipes(assets, state) {
+    if (!state || !state.key) return assets;
+    var key = state.key;
+    var mult = state.dir === 'desc' ? -1 : 1;
+    return assets.slice().sort(function(a, b) {
+      var av, bv;
+      if (key === 'asset')       { av = String(a.asset_id || ''); bv = String(b.asset_id || ''); return av.localeCompare(bv, undefined, { numeric: true }) * mult; }
+      if (key === 'suburb')      { av = String(a.suburb || '');   bv = String(b.suburb || '');   return av.localeCompare(bv) * mult; }
+      if (key === 'diam')        { av = Number(a.diameter_mm) || 0; bv = Number(b.diameter_mm) || 0; }
+      else if (key === 'length') { av = Number(a.length_m) || 0;    bv = Number(b.length_m) || 0; }
+      else if (key === 'cost')   { av = Number(a.pipe_cost) || 0;   bv = Number(b.pipe_cost) || 0; }
+      else return 0;
+      return (av - bv) * mult;
+    });
+  }
+  function reportToggleEditPipeSort(pkgId, key) {
+    if (!pkgId || !key) return;
+    var cur = _reportEditPipeSorts[pkgId];
+    if (!cur || cur.key !== key) {
+      var numeric = key === 'diam' || key === 'length' || key === 'cost';
+      _reportEditPipeSorts[pkgId] = { key: key, dir: numeric ? 'desc' : 'asc' };
+    } else if (cur.dir === 'asc') {
+      _reportEditPipeSorts[pkgId] = { key: key, dir: 'desc' };
+    } else {
+      delete _reportEditPipeSorts[pkgId];
+    }
+    renderReportEditPanel();
+  }
+  window.reportToggleEditPipeSort = reportToggleEditPipeSort;
 
   // ---------- Renderer ----------
   function renderReportEditPanel() {
@@ -9148,11 +9241,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         return '<div class="edit-pkg-card" data-pkg-id="' + esc(pkg.id || '') + '">' + headerHtml + '<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>';
       }
 
+      var pkgIdAttr = esc(pkg.id || '');
       var headRow = '<div class="edit-pkg-asset-row head">'
-        + '<div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div>'
+        + '<div data-report-edit-sort="asset"  data-pkg-id="' + pkgIdAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Asset">Asset'           + _reportEditPipeSortIndicator(pkg.id, 'asset')  + '</div>'
+        + '<div data-report-edit-sort="suburb" data-pkg-id="' + pkgIdAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Suburb">Suburb'         + _reportEditPipeSortIndicator(pkg.id, 'suburb') + '</div>'
+        + '<div data-report-edit-sort="diam"   data-pkg-id="' + pkgIdAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Diameter">Diam (mm)'    + _reportEditPipeSortIndicator(pkg.id, 'diam')   + '</div>'
+        + '<div data-report-edit-sort="length" data-pkg-id="' + pkgIdAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Length">Length (m)'     + _reportEditPipeSortIndicator(pkg.id, 'length') + '</div>'
+        + '<div data-report-edit-sort="cost"   data-pkg-id="' + pkgIdAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Cost">Cost'             + _reportEditPipeSortIndicator(pkg.id, 'cost')   + '</div>'
+        + '<div>Move to package</div><div></div><div>Lock</div>'
         + '</div>';
 
-      var rows = reportReorderAssetsByC6Anchor(assets).map(function(asset) {
+      var rows = reportReorderAssetsByC6Anchor(_reportEditSortPipes(assets, _reportEditPipeSorts[pkg.id])).map(function(asset) {
         var uid = String(asset.asset_id || '');
         var isC6 = !!asset.is_c6_addon;
         var isLocked = isReportPipeLocked(uid);
