@@ -7511,6 +7511,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       x_mid: Number.isFinite(item.xMid) ? item.xMid : null,
       y_mid: Number.isFinite(item.yMid) ? item.yMid : null,
       is_c6_addon: !!item.is_c6_addon,
+      c6_anchor_asset_id: item.c6_anchor_asset_id != null ? String(item.c6_anchor_asset_id) : null,
+      c6_manual_include: !!item.c6_manual_include,
+      usPit: item.usPit || '',
+      dsPit: item.dsPit || '',
       criticality_1dp: Number(item.criticality_1dp) || 0,
       condition_score: Number(item.condition_score) || 0,
       pipe_priority_score: Number(item.pipe_priority_score) || 0,
@@ -7570,6 +7574,14 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           return {
             asset_id: item.assetId || '',
             diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
+            length_m: Number(item.lengthM) || 0,
+            pipe_cost: Number(item.pipeCost) || 0,
+            suburb: String(item.suburb || '').toUpperCase(),
+            usPit: item.usPit || '',
+            dsPit: item.dsPit || '',
+            condition: item.conditionLabel || item.condition || '',
+            material: (item.raw && (item.raw['SW_Material'] || item.raw['Material'])) || '',
+            address: String((item.raw && (item.raw['Formatted_Address'] || item.raw['Address'] || item.raw['Pipe_Start_Address'] || item.raw['Street_Address'])) || '').trim(),
             lat: Number.isFinite(item.lat) ? item.lat : null,
             lon: Number.isFinite(item.lon) ? item.lon : null,
             start_lat: startPair && Number.isFinite(startPair.lat) ? startPair.lat : null,
@@ -7628,6 +7640,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   const ORIGINAL_PACKAGES_BY_ID = {};
   data.packages.forEach(function(p) { ORIGINAL_PACKAGES_BY_ID[p.id] = p; });
 
+  // Snapshot the original C6 add-ons so a Reset can restore them (and so we know which auto-attached vs manual-include)
+  const ORIGINAL_C6_ADDONS = pipes.filter(function(p){ return p.is_c6_addon; }).map(function(p){ return Object.assign({}, p); });
+
   // --- Manual moves: localStorage persistence ---
   const REPORT_MOVES_KEY = 'nbc-report-moves:' + (data.generated_at || 'unknown');
   let reportManualMoves = loadReportMoves();
@@ -7641,13 +7656,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         assignments: parsed.assignments || {},
         anchorOrigins: parsed.anchorOrigins || {},
         locks: { pipes: (parsed.locks && parsed.locks.pipes) || {}, packages: (parsed.locks && parsed.locks.packages) || {} },
-        moveOrigins: parsed.moveOrigins || {}
+        moveOrigins: parsed.moveOrigins || {},
+        c6Excluded: parsed.c6Excluded || {},
+        c6Included: parsed.c6Included || {}
       };
     } catch (e) { return emptyMoves(); }
   }
 
   function emptyMoves() {
-    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
   }
 
   function saveReportMoves() {
@@ -7656,13 +7673,26 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function resetReportMoves() {
+    var hasAssignments = Object.keys(reportManualMoves.assignments || {}).length > 0;
+    var hasC6Excluded = Object.keys(reportManualMoves.c6Excluded || {}).length > 0;
+    var hasC6Included = Object.keys(reportManualMoves.c6Included || {}).length > 0;
+    var hasLocks = (reportManualMoves.locks && (Object.keys(reportManualMoves.locks.pipes || {}).length || Object.keys(reportManualMoves.locks.packages || {}).length)) > 0;
+    if (!hasAssignments && !hasC6Excluded && !hasC6Included && !hasLocks) return;
     if (!confirm('Clear all manual edits and return to the original generated state?')) return;
     reportManualMoves = emptyMoves();
     saveReportMoves();
+    // Restore originally-attached C6 add-ons (and drop any manually-included ones)
+    pipes = pipes.filter(function(p){ return !(p.is_c6_addon && p.c6_manual_include); });
+    var presentIds = {};
+    pipes.forEach(function(p){ presentIds[p.asset_id] = true; });
+    ORIGINAL_C6_ADDONS.forEach(function(orig){
+      if (!presentIds[orig.asset_id]) pipes.push(Object.assign({}, orig));
+    });
     applyMovesAndRender();
   }
 
   window.resetReportMoves = resetReportMoves;
+  window.resetAllReportManualEdits = resetReportMoves;
 
   // --- Core rebuild helpers ---
   function haversineM(lat1, lon1, lat2, lon2) {
@@ -7746,28 +7776,126 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       }
       return String(a.id).localeCompare(String(b.id));
     });
+    var idRemap = {};
     packages.forEach(function(pkg, i) {
       const newId = 'RLN_' + String(i+1).padStart(3, '0');
       if (pkg.id !== newId) {
         pipes.forEach(function(p){ if (p.package_id === pkg.id) p.package_id = newId; });
+        idRemap[pkg.id] = newId;
         pkg.id = newId;
       }
     });
+    // Remap any persisted assignments / locks / c6Included that pointed at pre-renumber IDs
+    if (Object.keys(idRemap).length && reportManualMoves) {
+      Object.keys(reportManualMoves.assignments || {}).forEach(function(uid) {
+        var t = reportManualMoves.assignments[uid];
+        if (idRemap[t]) reportManualMoves.assignments[uid] = idRemap[t];
+      });
+      Object.keys(reportManualMoves.c6Included || {}).forEach(function(uid) {
+        var t = reportManualMoves.c6Included[uid];
+        if (idRemap[t]) reportManualMoves.c6Included[uid] = idRemap[t];
+      });
+      var lockedPkgs = (reportManualMoves.locks && reportManualMoves.locks.packages) || {};
+      Object.keys(lockedPkgs).forEach(function(t) {
+        if (idRemap[t]) {
+          lockedPkgs[idRemap[t]] = lockedPkgs[t];
+          delete lockedPkgs[t];
+        }
+      });
+      if (typeof saveReportMoves === 'function') saveReportMoves();
+    }
     pkgIndex = {};
     packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
   }
 
   function applyMovesAndRender() {
-    // 1. Reset every pipe to its original package
-    pipes.forEach(function(p) { p.package_id = originalAssignments[p.asset_id]; });
+    // 0. Honour c6Excluded/c6Included by mutating the pipes array itself
+    var c6Excluded = (reportManualMoves && reportManualMoves.c6Excluded) || {};
+    var c6Included = (reportManualMoves && reportManualMoves.c6Included) || {};
+    // Drop excluded C6 add-ons from pipes
+    pipes = pipes.filter(function(p){ return !(p.is_c6_addon && c6Excluded[p.asset_id]); });
+    // Add manually-included C6 pipes (from the c6_pool) if not already present
+    var presentIds = {};
+    pipes.forEach(function(p){ presentIds[p.asset_id] = true; });
+    Object.keys(c6Included).forEach(function(assetId) {
+      if (presentIds[assetId]) return;
+      var c6 = (data.c6_pool || []).find(function(c){ return String(c.asset_id) === String(assetId); });
+      if (!c6) return;
+      var targetPkgId = c6Included[assetId];
+      pipes.push({
+        asset_id: c6.asset_id,
+        package_id: targetPkgId,
+        suburb: c6.suburb || '',
+        diameter_mm: c6.diameter_mm || null,
+        material: c6.material || '',
+        condition: c6.condition || '',
+        length_m: Number(c6.length_m) || 0,
+        pipe_cost: Number(c6.pipe_cost) || 0,
+        rate_per_m: 0,
+        address: c6.address || '',
+        upstream: c6.usPit || '',
+        downstream: c6.dsPit || '',
+        lat: c6.lat, lon: c6.lon,
+        start_lat: c6.start_lat, start_lon: c6.start_lon,
+        end_lat: c6.end_lat, end_lon: c6.end_lon,
+        x_mid: null, y_mid: null,
+        is_c6_addon: true,
+        c6_anchor_asset_id: null,
+        c6_manual_include: true,
+        usPit: c6.usPit || '',
+        dsPit: c6.dsPit || '',
+        criticality_1dp: 0,
+        condition_score: 6,
+        pipe_priority_score: 0,
+        raw: {}
+      });
+      // Ensure originalAssignments has an entry so the rebuild keeps it on the right pkg
+      if (!(c6.asset_id in originalAssignments)) originalAssignments[c6.asset_id] = targetPkgId;
+    });
+    // 1. Reset every pipe to its original package (manually-included C6 default to their c6Included target)
+    pipes.forEach(function(p) {
+      if (p.is_c6_addon && p.c6_manual_include && c6Included[p.asset_id]) {
+        p.package_id = c6Included[p.asset_id];
+      } else {
+        p.package_id = originalAssignments[p.asset_id];
+      }
+    });
     // 2. Apply manual assignments on top
     Object.keys(reportManualMoves.assignments || {}).forEach(function(assetId) {
-      const target = reportManualMoves.assignments[assetId];
-      const pipe = pipes.find(function(p){ return p.asset_id === assetId; });
+      var target = reportManualMoves.assignments[assetId];
+      var pipe = pipes.find(function(p){ return p.asset_id === assetId; });
       if (pipe) pipe.package_id = target;
     });
     // 3. Rebuild package objects from current pipe assignments
     rebuildPackagesFromPipes();
+    // 3b. Materialise locked-but-empty packages so the user sees them in the edit panel
+    var lockedPkgs = (reportManualMoves.locks && reportManualMoves.locks.packages) || {};
+    Object.keys(lockedPkgs).forEach(function(pkgId) {
+      if (!packages.find(function(p){ return p.id === pkgId; })) {
+        packages.push({
+          id: pkgId,
+          original_package_id: pkgId,
+          suburbs: [],
+          diameters_mm: [],
+          pipe_count: 0,
+          total_length_m: 0,
+          total_cost: 0,
+          max_span_m: 0,
+          condition_6_count: 0,
+          condition_7_count: 0,
+          condition_8_count: 0,
+          c6_addon_count: 0,
+          asset_ids: [],
+          centroid: null,
+          coordinate_sources: '',
+          distance_warning: '',
+          materialMix: {}, conditionMix: {}, diameterMix: {},
+          dedicated_map_url: '',
+          max_from_centroid_m: 0,
+          manual_origin: 'new'
+        });
+      }
+    });
     // 4. Re-prioritise + renumber
     prioritiseAndRenumberReportPackages();
     // 5. Re-render everything
@@ -7794,62 +7922,391 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 1000);
   };
 
+  // ---------- Edit Packages panel — full parity with live tool's renderEditPackagesPanel ----------
+
+  function reportReorderAssetsByC6Anchor(assets) {
+    // Place each C6 add-on immediately after its anchor pipe; orphans go to the end
+    var c6ByAnchor = {};
+    var c6Orphans = [];
+    var nonC6 = [];
+    (assets || []).forEach(function(a) {
+      var isC6 = a.is_c6_addon || Number(a.condition_score) === 6;
+      if (isC6) {
+        var anchorId = a.c6_anchor_asset_id != null ? String(a.c6_anchor_asset_id) : null;
+        if (anchorId) {
+          if (!c6ByAnchor[anchorId]) c6ByAnchor[anchorId] = [];
+          c6ByAnchor[anchorId].push(a);
+        } else {
+          c6Orphans.push(a);
+        }
+      } else {
+        nonC6.push(a);
+      }
+    });
+    var ordered = [];
+    nonC6.forEach(function(a) {
+      ordered.push(a);
+      var followers = c6ByAnchor[String(a.asset_id)];
+      if (followers) ordered.push.apply(ordered, followers);
+    });
+    ordered.push.apply(ordered, c6Orphans);
+    return ordered;
+  }
+
+  function isReportPipeLocked(uid) {
+    return !!(reportManualMoves && reportManualMoves.locks && reportManualMoves.locks.pipes && reportManualMoves.locks.pipes[String(uid)]);
+  }
+  function isReportPackageLocked(pkgId) {
+    return !!(reportManualMoves && reportManualMoves.locks && reportManualMoves.locks.packages && reportManualMoves.locks.packages[String(pkgId)]);
+  }
+  function getReportPackageLockState(pkg) {
+    var assets = pipes.filter(function(p){ return p.package_id === pkg.id; });
+    if (!assets.length) return isReportPackageLocked(pkg.id) ? 'all' : 'none';
+    var lockedCount = assets.filter(function(a){ return isReportPipeLocked(a.asset_id); }).length;
+    if (lockedCount === assets.length) return 'all';
+    if (lockedCount === 0) return 'none';
+    return 'partial';
+  }
+  function getReportGlobalLockState() {
+    if (!pipes.length) return 'none';
+    var lockedCount = pipes.filter(function(a){ return isReportPipeLocked(a.asset_id); }).length;
+    if (lockedCount === pipes.length) return 'all';
+    if (lockedCount === 0) return 'none';
+    return 'partial';
+  }
+  function ensureReportLocks() {
+    if (!reportManualMoves) reportManualMoves = emptyMoves();
+    if (!reportManualMoves.locks) reportManualMoves.locks = { pipes: {}, packages: {} };
+    if (!reportManualMoves.locks.pipes) reportManualMoves.locks.pipes = {};
+    if (!reportManualMoves.locks.packages) reportManualMoves.locks.packages = {};
+    if (!reportManualMoves.moveOrigins) reportManualMoves.moveOrigins = {};
+    if (!reportManualMoves.c6Excluded) reportManualMoves.c6Excluded = {};
+    if (!reportManualMoves.c6Included) reportManualMoves.c6Included = {};
+  }
+  function manualReportAssignmentCount() {
+    return Object.keys((reportManualMoves && reportManualMoves.assignments) || {}).length;
+  }
+
+  function reportEditTargetOptionsHtml(currentPkgId) {
+    var opts = packages.map(function(p) {
+      var isCurrent = p.id === currentPkgId;
+      var isManual = !!p.manual_origin;
+      var tag = isManual ? ' (manual)' : '';
+      var suburbs = (p.suburbs || []).filter(Boolean).join(', ') || 'no suburb';
+      var label = p.id + tag + ' — ' + suburbs + ' (' + (p.pipe_count || 0) + ' pipes)';
+      return '<option value="' + esc(p.id) + '"' + (isCurrent ? ' selected disabled' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    return opts + '<option value="__NEW__">+ Create new package</option>';
+  }
+
+  function getQualifyingC6ForReportPackage(pkg) {
+    var c6Pool = (data.c6_pool || []);
+    if (!c6Pool.length) return [];
+    ensureReportLocks();
+    var excluded = reportManualMoves.c6Excluded || {};
+    // Already-attached C6 (regardless of which package they're in)
+    var packagedC6 = {};
+    pipes.forEach(function(p){ if (p.is_c6_addon) packagedC6[String(p.asset_id)] = true; });
+    var pkgPits = {};
+    pipes.filter(function(p){ return p.package_id === pkg.id; }).forEach(function(a){
+      if (a.usPit) pkgPits[a.usPit] = true;
+      if (a.dsPit) pkgPits[a.dsPit] = true;
+    });
+    if (!Object.keys(pkgPits).length) return [];
+    return c6Pool.filter(function(c) {
+      if (packagedC6[String(c.asset_id)]) return false;
+      if (excluded[String(c.asset_id)]) return false;
+      return (c.usPit && pkgPits[c.usPit]) || (c.dsPit && pkgPits[c.dsPit]);
+    });
+  }
+
+  // ---------- Mutators ----------
+
+  function reportToggleAllPackagesLock() {
+    ensureReportLocks();
+    if (getReportGlobalLockState() === 'all') {
+      reportManualMoves.locks.pipes = {};
+      reportManualMoves.locks.packages = {};
+    } else {
+      packages.forEach(function(pkg) {
+        reportManualMoves.locks.packages[pkg.id] = true;
+        pipes.filter(function(p){ return p.package_id === pkg.id; }).forEach(function(a){
+          reportManualMoves.locks.pipes[a.asset_id] = true;
+        });
+      });
+    }
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportToggleAllPackagesLock = reportToggleAllPackagesLock;
+
+  function reportTogglePackageLock(pkgId) {
+    ensureReportLocks();
+    var pkg = packages.find(function(p){ return p.id === pkgId; });
+    if (!pkg) return;
+    var assets = pipes.filter(function(p){ return p.package_id === pkgId; });
+    if (getReportPackageLockState(pkg) === 'all') {
+      delete reportManualMoves.locks.packages[pkgId];
+      assets.forEach(function(a){ delete reportManualMoves.locks.pipes[a.asset_id]; });
+    } else {
+      reportManualMoves.locks.packages[pkgId] = true;
+      assets.forEach(function(a){ reportManualMoves.locks.pipes[a.asset_id] = true; });
+    }
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportTogglePackageLock = reportTogglePackageLock;
+
+  function reportTogglePipeLock(uid, pkgId) {
+    ensureReportLocks();
+    var u = String(uid);
+    if (isReportPipeLocked(u)) {
+      delete reportManualMoves.locks.pipes[u];
+    } else {
+      reportManualMoves.locks.pipes[u] = true;
+    }
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportTogglePipeLock = reportTogglePipeLock;
+
+  function reportMovePipeToPackage(uid, targetPkgId) {
+    ensureReportLocks();
+    var u = String(uid);
+    var pipe = pipes.find(function(p){ return String(p.asset_id) === u; });
+    if (!pipe) { alert('Asset not found in current report.'); return; }
+    if (pipe.package_id === targetPkgId) return;
+    var targetPkg = packages.find(function(p){ return p.id === targetPkgId; });
+    if (!targetPkg) { alert('Target package not found.'); return; }
+    reportManualMoves.assignments[u] = targetPkgId;
+    reportManualMoves.locks.pipes[u] = true;
+    reportManualMoves.moveOrigins[u] = true;
+    // Lock all existing pipes in target package so it stays intact
+    pipes.filter(function(p){ return p.package_id === targetPkgId && String(p.asset_id) !== u; }).forEach(function(a){
+      reportManualMoves.locks.pipes[a.asset_id] = true;
+      if (!reportManualMoves.assignments[a.asset_id]) reportManualMoves.assignments[a.asset_id] = targetPkgId;
+    });
+    reportManualMoves.locks.packages[targetPkgId] = true;
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportMovePipeToPackage = reportMovePipeToPackage;
+
+  function reportCreateNewPackageForPipe(uid) {
+    ensureReportLocks();
+    var u = String(uid);
+    var pipe = pipes.find(function(p){ return String(p.asset_id) === u; });
+    if (!pipe) { alert('Asset not found in current report.'); return; }
+    var maxNum = packages.reduce(function(m, p) {
+      var match = String(p.id).match(/(\\d+)$/);
+      return Math.max(m, match ? Number(match[1]) : 0);
+    }, 0);
+    var newPkgId = 'RLN_' + String(maxNum + 1).padStart(3, '0');
+    reportManualMoves.assignments[u] = newPkgId;
+    reportManualMoves.locks.pipes[u] = true;
+    reportManualMoves.locks.packages[newPkgId] = true;
+    reportManualMoves.moveOrigins[u] = true;
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportCreateNewPackageForPipe = reportCreateNewPackageForPipe;
+
+  function reportClearMove(uid) {
+    ensureReportLocks();
+    var u = String(uid);
+    if (!(u in (reportManualMoves.assignments || {}))) return;
+    delete reportManualMoves.assignments[u];
+    if (reportManualMoves.moveOrigins) delete reportManualMoves.moveOrigins[u];
+    if (reportManualMoves.locks && reportManualMoves.locks.pipes) delete reportManualMoves.locks.pipes[u];
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportClearMove = reportClearMove;
+
+  function reportExcludeC6(uid) {
+    ensureReportLocks();
+    var u = String(uid);
+    reportManualMoves.c6Excluded[u] = true;
+    if (reportManualMoves.c6Included) delete reportManualMoves.c6Included[u];
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportExcludeC6 = reportExcludeC6;
+
+  function reportIncludeC6(uid, pkgId) {
+    ensureReportLocks();
+    var u = String(uid);
+    var p = String(pkgId);
+    if (!u || !p) return;
+    reportManualMoves.c6Included[u] = p;
+    if (reportManualMoves.c6Excluded) delete reportManualMoves.c6Excluded[u];
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+  window.reportIncludeC6 = reportIncludeC6;
+
+  // ---------- Event delegation (mirrors attachReliningEditPanelListeners) ----------
+  var _reportEditListenersAttached = false;
+  function attachReportEditPanelListeners() {
+    if (_reportEditListenersAttached) return;
+    _reportEditListenersAttached = true;
+    document.addEventListener('change', function(event) {
+      var sel = event.target && event.target.closest && event.target.closest('select[data-report-edit-target]');
+      if (sel) {
+        var value = sel.value;
+        var uid = sel.getAttribute('data-asset-uid') || '';
+        var current = sel.getAttribute('data-current-pkg') || '';
+        if (!value || value === current) return;
+        if (value === '__NEW__') reportCreateNewPackageForPipe(uid);
+        else reportMovePipeToPackage(uid, value);
+        return;
+      }
+      var c6Sel = event.target && event.target.closest && event.target.closest('select[data-report-c6-add]');
+      if (c6Sel) {
+        var assetUid = c6Sel.value;
+        var pkgId = c6Sel.getAttribute('data-pkg-id') || '';
+        if (assetUid && pkgId) reportIncludeC6(assetUid, pkgId);
+        c6Sel.value = '';
+      }
+    });
+    document.addEventListener('click', function(event) {
+      var t = event.target;
+      if (!t || !t.closest) return;
+      var clearBtn = t.closest('button[data-report-edit-clear]');
+      if (clearBtn) { event.preventDefault(); reportClearMove(clearBtn.getAttribute('data-asset-uid') || ''); return; }
+      var c6Rm = t.closest('button[data-report-c6-remove]');
+      if (c6Rm) { event.preventDefault(); reportExcludeC6(c6Rm.getAttribute('data-asset-uid') || ''); return; }
+      var lockPipeBtn = t.closest('button[data-report-lock-pipe]');
+      if (lockPipeBtn) { event.preventDefault(); reportTogglePipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-pkg-id') || ''); return; }
+      var lockPkgBtn = t.closest('button[data-report-lock-pkg]');
+      if (lockPkgBtn) { event.preventDefault(); reportTogglePackageLock(lockPkgBtn.getAttribute('data-pkg-id') || ''); return; }
+    });
+  }
+
+  // ---------- Renderer ----------
   function renderReportEditPanel() {
     var area = document.getElementById('reportEditArea');
     if (!area) return;
+    attachReportEditPanelListeners();
     if (!packages.length) { area.innerHTML = '<div class="pkg-empty">No packages.</div>'; return; }
-    var optsHtml = packages.map(function(p){ return '<option value="' + esc(p.id) + '">' + esc(p.id) + '</option>'; }).join('');
-    var newOpt = '<option value="__new__">+ Create new package</option>';
-    var sorted = pipes.slice().sort(function(a,b){
-      return String(a.package_id).localeCompare(String(b.package_id))
-        || String(a.asset_id).localeCompare(String(b.asset_id));
-    });
-    var rows = sorted.map(function(p) {
-      var movedFromOriginal = reportManualMoves.assignments[p.asset_id] != null
-        && reportManualMoves.assignments[p.asset_id] !== originalAssignments[p.asset_id];
-      return '<tr' + (movedFromOriginal ? ' style="background:#FEF3C7"' : '') + '>'
-        + '<td style="padding:6px 8px;font-family:monospace;font-size:11px"><strong>' + esc(p.package_id) + '</strong></td>'
-        + '<td style="padding:6px 8px;font-family:monospace;font-size:11px">' + esc(p.asset_id) + '</td>'
-        + '<td style="padding:6px 8px;font-size:11px">Ø' + esc(p.diameter_mm || '') + 'mm</td>'
-        + '<td style="padding:6px 8px;font-size:11px">' + esc(p.suburb) + '</td>'
-        + '<td style="padding:6px 8px;font-size:11px">' + Number(p.length_m || 0).toFixed(1) + ' m</td>'
-        + '<td style="padding:6px 8px;font-size:11px">' + fmtCurrency(p.pipe_cost) + '</td>'
-        + '<td style="padding:6px 8px">'
-          + '<select onchange="onMovePipe(\\'' + esc(p.asset_id) + '\\', this.value)" title="IDs may renumber after move">'
-          + '<option value="" disabled selected>Move to…</option>'
-          + optsHtml + newOpt
-          + '</select>'
-        + '</td>'
-      + '</tr>';
-    }).join('');
-    area.innerHTML =
-      '<table style="width:100%;border-collapse:collapse;font-family:Segoe UI,system-ui,sans-serif">'
-        + '<thead><tr style="background:#f3f4f6;text-align:left">'
-          + '<th style="padding:8px;font-size:11px">Package</th>'
-          + '<th style="padding:8px;font-size:11px">Asset</th>'
-          + '<th style="padding:8px;font-size:11px">Dia</th>'
-          + '<th style="padding:8px;font-size:11px">Suburb</th>'
-          + '<th style="padding:8px;font-size:11px">Length</th>'
-          + '<th style="padding:8px;font-size:11px">Cost</th>'
-          + '<th style="padding:8px;font-size:11px">Move to package</th>'
-        + '</tr></thead><tbody>' + rows + '</tbody>'
-      + '</table>';
-  }
 
-  window.onMovePipe = function(assetId, target) {
-    if (!target) return;
-    var targetId = target;
-    if (target === '__new__') {
-      var maxNum = packages.reduce(function(m, p) {
-        var match = String(p.id).match(/(\d+)$/);
-        return Math.max(m, match ? Number(match[1]) : 0);
-      }, 0);
-      targetId = 'RLN_' + String(maxNum + 1).padStart(3, '0');
-    }
-    reportManualMoves.assignments[assetId] = targetId;
-    saveReportMoves();
-    applyMovesAndRender();
-  };
+    var moveCount = manualReportAssignmentCount();
+    var affectedPkgIds = {};
+    Object.values((reportManualMoves && reportManualMoves.assignments) || {}).forEach(function(v){ affectedPkgIds[v] = true; });
+    var affectedCount = Object.keys(affectedPkgIds).length;
+
+    var globalLockState = getReportGlobalLockState();
+    var globalLockCls = globalLockState === 'all' ? 'locked' : (globalLockState === 'partial' ? 'partial' : 'unlocked');
+    var globalLockIcon = globalLockState === 'all' ? '🔒' : '🔓';
+    var globalLockTitle = globalLockState === 'all' ? 'All packages locked — click to unlock all' : 'Click to lock all packages';
+    var toolbarHtml = '<div class="edit-pkg-toolbar">'
+      + '<div style="display:flex;align-items:center;gap:10px">'
+      +   '<button class="pkg-lock-btn ' + globalLockCls + '" style="font-size:18px;padding:4px 9px" type="button" onclick="reportToggleAllPackagesLock()" title="' + esc(globalLockTitle) + '">' + globalLockIcon + '</button>'
+      +   '<div>'
+      +     '<strong>' + moveCount.toLocaleString() + '</strong> manual move' + (moveCount === 1 ? '' : 's') + ' active.'
+      +     ' Affected packages: <strong>' + affectedCount.toLocaleString() + '</strong>.'
+      +     ' Manual edits persist in this browser (per-report).'
+      +   '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px">'
+      +   '<button class="export-btn" type="button" onclick="resetReportMoves()">Reset All Manual Edits</button>'
+      + '</div>'
+      + '</div>';
+
+    var c6Active = (data.options || {}).reliningMode === 'Condition 6, 7 and 8';
+
+    var cardsHtml = packages.map(function(pkg) {
+      var assets = pipes.filter(function(p){ return p.package_id === pkg.id; });
+      var isManual = !!pkg.manual_origin;
+      var suburbs = (pkg.suburbs || []).filter(Boolean).join(', ') || 'No suburb';
+      var pkgLockState = getReportPackageLockState(pkg);
+      var pkgLockCls = pkgLockState === 'all' ? 'locked' : (pkgLockState === 'partial' ? 'partial' : 'unlocked');
+      var pkgLockIcon = pkgLockState === 'all' ? '🔒' : '🔓';
+      var pkgLockTitle = pkgLockState === 'all' ? 'Package locked — click to unlock all pipes'
+        : pkgLockState === 'partial' ? 'Partially locked — click to lock all pipes'
+        : 'Package unlocked — click to lock all pipes';
+      var totalCost = assets.reduce(function(s,a){ return s + (Number(a.pipe_cost)||0); }, 0);
+      var totalLength = assets.reduce(function(s,a){ return s + (Number(a.length_m)||0); }, 0);
+
+      var headerHtml = '<div class="edit-pkg-header">'
+        + '<div>'
+        +   '<div class="edit-pkg-title">'
+        +     esc(pkg.id || '')
+        +     (isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : '')
+        +     (assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : '')
+        +     '<button class="pkg-lock-btn pkg-lock-btn-pkg ' + pkgLockCls + '" type="button" data-report-lock-pkg data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(pkgLockTitle) + '">' + pkgLockIcon + '</button>'
+        +   '</div>'
+        +   '<div class="edit-pkg-meta">' + esc(suburbs) + ' · ' + assets.length + ' pipe' + (assets.length === 1 ? '' : 's') + ' · ' + esc(fmtCurrency(totalCost) || '—') + ' · ' + Number(totalLength).toFixed(1) + ' m</div>'
+        + '</div>'
+        + '</div>';
+
+      if (!assets.length) {
+        return '<div class="edit-pkg-card" data-pkg-id="' + esc(pkg.id || '') + '">' + headerHtml + '<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>';
+      }
+
+      var headRow = '<div class="edit-pkg-asset-row head">'
+        + '<div>Asset</div><div>Suburb</div><div>Diam (mm)</div><div>Length (m)</div><div>Cost</div><div>Move to package</div><div></div><div>Lock</div>'
+        + '</div>';
+
+      var rows = reportReorderAssetsByC6Anchor(assets).map(function(asset) {
+        var uid = String(asset.asset_id || '');
+        var isC6 = !!asset.is_c6_addon;
+        var isLocked = isReportPipeLocked(uid);
+        var isMoveOrigin = !!(reportManualMoves.moveOrigins && reportManualMoves.moveOrigins[uid]);
+        var lockCls = isLocked ? 'locked' : 'unlocked';
+        var lockIcon = isLocked ? '🔒' : '🔓';
+        var lockTitle = isLocked ? 'Locked — click to unlock' : 'Unlocked — click to lock';
+        var lockedTag = isLocked
+          ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
+          : '';
+        var c6Tag = isC6 ? ' <span class="edit-pkg-tag" style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe">C6' + (asset.c6_manual_include ? ' · manual' : '') + '</span>' : '';
+        var tagHtml = lockedTag + c6Tag;
+        var assetColor = isLocked ? '#dc2626' : '#16a34a';
+        var assetLinkHtml = '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + assetColor + ' !important;text-decoration:underline;cursor:pointer" title="Show this pipe on the map">' + esc(uid) + '</a>';
+        var moveCellHtml;
+        if (isC6) {
+          moveCellHtml = '<button class="export-btn" type="button" data-report-c6-remove data-asset-uid="' + esc(uid) + '" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>';
+        } else {
+          moveCellHtml = '<select data-report-edit-target data-asset-uid="' + esc(uid) + '" data-current-pkg="' + esc(pkg.id || '') + '">' + reportEditTargetOptionsHtml(pkg.id) + '</select>';
+        }
+        var clearCellHtml = isC6 ? '' : (isMoveOrigin ? '<button class="export-btn" type="button" data-report-edit-clear data-asset-uid="' + esc(uid) + '" style="padding:4px 8px;font-size:10px">Clear</button>' : '');
+        var lockCellHtml = isC6 ? '' : '<button class="pkg-lock-btn ' + lockCls + '" type="button" data-report-lock-pipe data-asset-uid="' + esc(uid) + '" data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(lockTitle) + '">' + lockIcon + '</button>';
+        return '<div class="edit-pkg-asset-row" data-asset-uid="' + esc(uid) + '">'
+          + '<div>' + assetLinkHtml + tagHtml + '</div>'
+          + '<div>' + esc(asset.suburb || '') + '</div>'
+          + '<div>' + esc(String(asset.diameter_mm == null ? '' : asset.diameter_mm)) + '</div>'
+          + '<div>' + Number(asset.length_m || 0).toFixed(1) + '</div>'
+          + '<div>' + (Number.isFinite(asset.pipe_cost) ? esc(fmtCurrency(asset.pipe_cost) || '') : '') + '</div>'
+          + '<div>' + moveCellHtml + '</div>'
+          + '<div>' + clearCellHtml + '</div>'
+          + '<div>' + lockCellHtml + '</div>'
+          + '</div>';
+      }).join('');
+
+      var c6FooterHtml = '';
+      if (c6Active) {
+        var qualifying = getQualifyingC6ForReportPackage(pkg);
+        if (qualifying.length) {
+          var qOpts = qualifying.slice().sort(function(a,b){ return String(a.asset_id).localeCompare(String(b.asset_id)); }).map(function(c) {
+            return '<option value="' + esc(String(c.asset_id)) + '">' + esc(String(c.asset_id)) + ' · ' + esc(String(c.diameter_mm == null ? '?' : c.diameter_mm)) + ' mm · ' + esc(c.suburb || '') + '</option>';
+          }).join('');
+          c6FooterHtml = '<div class="edit-pkg-asset-row" style="grid-template-columns:1fr;background:#f8fafc;border-top:1px dashed #cbd5e1">'
+            + '<div style="display:flex;align-items:center;gap:10px;font-size:12px">'
+            +   '<span style="font-weight:700;color:#3730a3">+ Add C6 pipe</span>'
+            +   '<select data-report-c6-add data-pkg-id="' + esc(pkg.id || '') + '" style="font-size:12px;flex:1;max-width:420px">'
+            +     '<option value="">Choose adjacent C6 pipe (' + qualifying.length.toLocaleString() + ' candidate' + (qualifying.length === 1 ? '' : 's') + ')…</option>'
+            +     qOpts
+            +   '</select>'
+            + '</div>'
+            + '</div>';
+        }
+      }
+
+      return '<div class="edit-pkg-card" data-pkg-id="' + esc(pkg.id || '') + '">' + headerHtml + headRow + rows + c6FooterHtml + '</div>';
+    }).join('');
+
+    area.innerHTML = toolbarHtml + cardsHtml;
+  }
 
   window.renderReportEditPanel = renderReportEditPanel;
 
@@ -8931,6 +9388,29 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.subtab:hover:not(.active) { color:#1A2B3C; }',
     '.subpage { display:none; }',
     '.subpage.active { display:block; }',
+    // ----- Edit Packages panel CSS (port of styles.css .edit-pkg-* and .pkg-lock-btn rules) -----
+    '.edit-pkg-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;background:white;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-l);margin-bottom:12px}',
+    '.edit-pkg-toolbar strong{color:var(--navy)}',
+    '.edit-pkg-card{background:white;border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px}',
+    '.edit-pkg-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}',
+    '.edit-pkg-title{font-size:14px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+    '.edit-pkg-meta{font-size:11px;color:var(--text-l);margin-top:3px}',
+    '.edit-pkg-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;background:var(--panel);color:var(--text-l)}',
+    '.edit-pkg-tag.manual{background:#FFE9A8;color:#7A5A00}',
+    '.edit-pkg-tag.empty{background:#FAD2CF;color:#7B2D26}',
+    '.edit-pkg-tag.moved{background:#D8EBE5;color:#0E5C4F}',
+    '.edit-pkg-tag.locked{background:#FEE2E2;color:#991B1B}',
+    '.edit-pkg-asset-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.7fr 0.7fr 0.9fr 2fr 0.7fr 0.5fr;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--border);align-items:center}',
+    '.edit-pkg-asset-row:last-child{border-bottom:none}',
+    '.edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border)}',
+    '.edit-pkg-asset-row select{font-size:11px;padding:4px 6px;width:100%}',
+    '.edit-pkg-empty-msg{color:var(--text-l);font-style:italic;font-size:12px;padding:10px 0}',
+    '.pkg-lock-btn{background:none;border:1.5px solid currentColor;border-radius:4px;cursor:pointer;padding:2px 5px;font-size:13px;line-height:1;transition:opacity .15s;flex-shrink:0}',
+    '.pkg-lock-btn:hover{opacity:.65}',
+    '.pkg-lock-btn.locked{color:#dc2626}',
+    '.pkg-lock-btn.unlocked{color:#16a34a}',
+    '.pkg-lock-btn.partial{color:#d97706}',
+    '.pkg-lock-btn-pkg{font-size:16px;padding:3px 7px;margin-left:6px}',
     '</style>',
     '</head>',
     '<body>',
@@ -9004,11 +9484,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<div class="pkg-panel">',
     '<div class="lbl">Edit Packages</div>',
     '<div style="font-size:12px;color:#6B7280;margin-top:6px;line-height:1.5">',
-    'Move pipes between packages. Manual moves persist in this browser (per-report).',
-    'Use <em>+ Create new package</em> in any pipe\'s <strong>Move to package</strong> dropdown.',
+    'Move pipes between packages, lock pipes/packages to keep them put, and add or remove C6 add-ons. Manual edits persist in this browser (per-report).',
+    'Moving a pipe to a different package locks it there by default. Use <em>+ Create new package</em> in any pipe\'s <strong>Move to package</strong> dropdown to spin one up.',
     '<strong style="color:#1A2B3C">Note:</strong> Package IDs renumber by priority after every edit, matching the live tool. The pipe you moved stays in its new package; only the ID label may change.',
     '</div>',
-    '<div style="margin-top:10px"><button class="export-btn" type="button" onclick="resetReportMoves()">Reset all moves</button></div>',
     '</div>',
     '<div id="reportEditArea" style="margin-top:12px"></div>',
     '</div>',
