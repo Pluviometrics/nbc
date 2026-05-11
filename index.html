@@ -915,7 +915,7 @@ window.addEventListener('keydown', (event) => {
       <div class="lbl">Packaging Rules</div>
       <div class="pkg-grid" style="grid-template-columns:1.2fr 1.2fr 1fr 1fr 1fr auto">
         <div class="fg">
-          <label for="pkgReliningMode">Pipe Condition Selection</label>
+          <label for="pkgReliningMode">Pipe Condition Selection<span class="help-icon" title="Which pipe condition grades to consider for relining: Cond 8 only (worst), Cond 7 only, Cond 7+8 (typical), or Cond 6/7/8 with C6 add-ons attached to existing packages.">?</span></label>
           <select id="pkgReliningMode" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option>Condition 8 only</option>
             <option>Condition 7 only</option>
@@ -924,7 +924,7 @@ window.addEventListener('keydown', (event) => {
           </select>
         </div>
         <div class="fg">
-          <label for="pkgMethod">Packaging Method</label>
+          <label for="pkgMethod">Packaging Method<span class="help-icon" title="How to split candidates into work-order packages: by total $ value, by pipe count, or by location-only with full grouping.">?</span></label>
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="value" selected>Value based</option>
             <option value="count">Pipe count based</option>
@@ -933,11 +933,11 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div class="fg" id="pkgValueWrap">
           <label for="pkgMaxValue">Max Package Value ($)</label>
-          <input type="text" id="pkgMaxValue" value="500000"/>
+          <input type="number" id="pkgMaxValue" min="1" step="1" value="500000"/>
         </div>
         <div class="fg" id="pkgCountWrap" style="display:none">
           <label for="pkgPipeCount">Pipes Per Package</label>
-          <input type="text" id="pkgPipeCount" value="25"/>
+          <input type="number" id="pkgPipeCount" min="1" step="1" value="25"/>
         </div>
         <div class="fg">
           <label for="pkgGroupSuburb">Group by Suburb</label>
@@ -1013,7 +1013,7 @@ window.addEventListener('keydown', (event) => {
             </div>
           </div>
           <div id="pkgTopupRow" style="margin-top:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top-up rule for underfilled packages</div>
+            <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Top-up rule for underfilled packages<span class="help-icon" title="When a package is under its target value, add more pipes from the candidate pool. 'Same condition' = only same-condition top-ups; 'Same condition first…' = use the lower-condition pool only after exhausting same-condition.">?</span></div>
             <div style="display:flex;gap:14px;font-size:12px;align-items:center;flex-wrap:wrap">
               <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="No top up" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> No top up</label>
               <label style="display:flex;align-items:center;gap:5px;cursor:pointer"><input type="radio" name="pkgTopupMode" value="Same condition only" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"> Same condition only</label>
@@ -1686,7 +1686,8 @@ function renderReliningAssetIdsCell(input) {
     const weight = isC6 ? ';font-weight:700' : '';
     const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer' + weight;
     const title = (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + ' — click to show on map';
-    return '<a href="#reliningPackagesMap" data-relining-asset-id="' + encodeURIComponent(uid) + '" style="' + style + '" title="' + title + '">' + escapeHtml(uid) + '</a>';
+    const icon = isC6 ? '➕ ' : (isLocked ? '🔒 ' : '🔓 ');
+    return '<a href="#reliningPackagesMap" data-relining-asset-id="' + encodeURIComponent(uid) + '" style="' + style + '" title="' + title + '">' + icon + escapeHtml(uid) + '</a>';
   }).join('');
   // 4-column grid with tight column gap so RLN-XXXXX-X IDs fit at floor width.
   return '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 4px;align-items:start">' + cellHtml + '</div>';
@@ -6217,12 +6218,22 @@ function clearAllReliningLocks() {
 }
 
 function resetAllReliningManualMoves() {
-  const hasAssignments = Object.keys(reliningManualMoves?.assignments || {}).length > 0;
-  const hasOrigins = Object.keys(reliningManualMoves?.anchorOrigins || {}).length > 0;
-  const hasC6Excluded = Object.keys(reliningManualMoves?.c6Excluded || {}).length > 0;
-  const hasC6Included = Object.keys(reliningManualMoves?.c6Included || {}).length > 0;
-  if (!hasAssignments && !hasOrigins && !hasC6Excluded && !hasC6Included) return;
-  if (!confirm('Clear all manual package edits and regenerate from scratch?')) return;
+  const moves = Object.keys(reliningManualMoves?.assignments || {}).length;
+  const lockedPkgs = Object.keys(reliningManualMoves?.locks?.packages || {}).length;
+  const lockedPipes = Object.keys(reliningManualMoves?.locks?.pipes || {}).length;
+  const c6Adds = Object.keys(reliningManualMoves?.c6Included || {}).length;
+  const c6Removes = Object.keys(reliningManualMoves?.c6Excluded || {}).length;
+  const summary = [];
+  if (moves) summary.push(moves + ' move' + (moves === 1 ? '' : 's'));
+  if (lockedPkgs) summary.push(lockedPkgs + ' locked package' + (lockedPkgs === 1 ? '' : 's'));
+  if (lockedPipes) summary.push(lockedPipes + ' locked pipe' + (lockedPipes === 1 ? '' : 's'));
+  if (c6Adds) summary.push(c6Adds + ' C6 add-on' + (c6Adds === 1 ? '' : 's'));
+  if (c6Removes) summary.push(c6Removes + ' C6 removal' + (c6Removes === 1 ? '' : 's'));
+  const msg = summary.length
+    ? 'Clear ' + summary.join(', ') + '? This cannot be undone.'
+    : 'Nothing to clear.';
+  if (!summary.length) { alert(msg); return; }
+  if (!confirm(msg)) return;
   reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
@@ -7363,14 +7374,18 @@ function updateReliningStatus() {
 }
 
 async function loadPackagingPreview() {
+  const previewBtn = document.getElementById('pkgPreviewBtn');
+  const generateBtn = document.getElementById('pkgGenerateBtn');
+  if (previewBtn) previewBtn.disabled = true;
+  if (generateBtn) generateBtn.disabled = true;
   try {
     if (!reliningAssetsRows.length) throw new Error('Upload the assets file first.');
-    showLoad('Filtering relining candidates...');
+    showLoad('Step 1 of 2: Filtering relining candidates...');
     await waitForPaint();
     const options = getReliningPackagingOptions();
     const data = buildReliningPackagingPreview(reliningAssetsRows, options);
     lastReliningPackagingPreview = data;
-    setLoadTxt('Rendering relining candidate preview...');
+    setLoadTxt('Rendering relining candidate preview...', 2, 2);
     await waitForPaint();
     setPackagingStatus(true, `${data.eligible.length.toLocaleString()} relining candidates previewed`);
     renderPackagingMeta({
@@ -7390,6 +7405,8 @@ async function loadPackagingPreview() {
     console.error('[Preview]', e);
   } finally {
     hideLoad();
+    if (previewBtn) previewBtn.disabled = false;
+    if (generateBtn) generateBtn.disabled = false;
   }
 }
 
@@ -7501,10 +7518,21 @@ function _recostLockedPackages(snapshots, options) {
 }
 
 async function generateReliningPackages() {
+  const previewBtn = document.getElementById('pkgPreviewBtn');
+  const generateBtn = document.getElementById('pkgGenerateBtn');
+  if (previewBtn) previewBtn.disabled = true;
+  if (generateBtn) generateBtn.disabled = true;
+  // Compute total phase count up-front so the loader counter matches the
+  // actual work that will run (skip top-up + C6 attach when not configured).
+  const _opts = (typeof getReliningPackagingOptions === 'function') ? getReliningPackagingOptions() : {};
+  const _willTopup = _opts && _opts.topupMode !== 'No top up' && _opts.method !== 'count' && _opts.method !== 'location';
+  const _willAttachC6 = _opts && _opts.reliningMode === 'Condition 6, 7 and 8';
+  const TOTAL_PHASES = 5 + (_willTopup ? 1 : 0) + (_willAttachC6 ? 1 : 0);
+  let _phase = 1;
   try {
     if (!reliningAssetsRows.length) throw new Error('Upload the assets file first.');
     if (!reliningRatesRows.length) throw new Error('Upload the panel rates workbook first.');
-    showLoad('Filtering relining candidates...');
+    showLoad('Step ' + _phase + ' of ' + TOTAL_PHASES + ': Filtering relining candidates...');
     await waitForPaint();
     const options = getReliningPackagingOptions();
     // --- Locked-package carve-out: capture locked snapshots and exclude
@@ -7522,7 +7550,8 @@ async function generateReliningPackages() {
       preview.c6Pool = _filterPoolExcludingAssetIds(preview.c6Pool, lockedAssetIds);
     }
     lastReliningPackagingPreview = preview;
-    setLoadTxt('Matching relining rates...');
+    _phase++;
+    setLoadTxt('Matching relining rates...', _phase, TOTAL_PHASES);
     await waitForPaint();
     let packagedItems = options.method === 'count'
       ? splitReliningItemsByCount(preview.costed, options)
@@ -7530,11 +7559,13 @@ async function generateReliningPackages() {
       ? splitReliningItemsByLocation(preview.costed, options)
       : splitReliningItemsByValue(preview.costed, options);
     packagedItems = forceIslandSinglePipePackages(packagedItems);
-    setLoadTxt('Building relining packages...');
+    _phase++;
+    setLoadTxt('Building relining packages...', _phase, TOTAL_PHASES);
     await waitForPaint();
     let packages = buildReliningPackageObjects(packagedItems, options);
     if (options.topupMode !== 'No top up') {
-      setLoadTxt('Topping up underfilled packages...');
+      _phase++;
+      setLoadTxt('Topping up underfilled packages...', _phase, TOTAL_PHASES);
       await waitForPaint();
       packages = topupReliningPackages(packages, preview.costed, options);
       if (options.topupMode === 'Same condition first, lower condition if needed') {
@@ -7567,7 +7598,8 @@ async function generateReliningPackages() {
       }
       packages = packages.concat(recosted);
     }
-    setLoadTxt('Prioritising and renumbering packages...');
+    _phase++;
+    setLoadTxt('Prioritising and renumbering packages...', _phase, TOTAL_PHASES);
     await waitForPaint();
     // prioritiseAndRenumberReliningPackages already reserves locked-package
     // numeric IDs so unlocked packages renumber around them.
@@ -7577,7 +7609,8 @@ async function generateReliningPackages() {
     packages = applyReliningManualMoves(packages, options);
     packages = prioritiseAndRenumberReliningPackages(packages);
     if (options.reliningMode === 'Condition 6, 7 and 8' && Array.isArray(preview.c6Pool) && preview.c6Pool.length) {
-      setLoadTxt('Attaching adjacent Condition 6 pipes...');
+      _phase++;
+      setLoadTxt('Attaching adjacent Condition 6 pipes...', _phase, TOTAL_PHASES);
       await waitForPaint();
       packages = attachC6AddOns(packages, preview.c6Pool, options);
       packages = prioritiseAndRenumberReliningPackages(packages);
@@ -7599,7 +7632,8 @@ async function generateReliningPackages() {
     };
     lastPackagingGeneration = data;
     setPackagingStatus(true, `${data.package_count.toLocaleString()} packages generated`);
-    setLoadTxt('Rendering package tables and map...');
+    _phase++;
+    setLoadTxt('Rendering package tables and map...', _phase, TOTAL_PHASES);
     await waitForPaint();
     renderPackagingMeta({
       asset_count: preview.asset_count,
@@ -7619,6 +7653,8 @@ async function generateReliningPackages() {
     }
   } finally {
     hideLoad();
+    if (previewBtn) previewBtn.disabled = false;
+    if (generateBtn) generateBtn.disabled = false;
   }
 }
 
@@ -8027,12 +8063,22 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function resetReportMoves() {
-    var hasAssignments = Object.keys(reportManualMoves.assignments || {}).length > 0;
-    var hasC6Excluded = Object.keys(reportManualMoves.c6Excluded || {}).length > 0;
-    var hasC6Included = Object.keys(reportManualMoves.c6Included || {}).length > 0;
-    var hasLocks = (reportManualMoves.locks && (Object.keys(reportManualMoves.locks.pipes || {}).length || Object.keys(reportManualMoves.locks.packages || {}).length)) > 0;
-    if (!hasAssignments && !hasC6Excluded && !hasC6Included && !hasLocks) return;
-    if (!confirm('Clear all manual edits and return to the original generated state?')) return;
+    var moves = Object.keys(reportManualMoves.assignments || {}).length;
+    var lockedPkgs = (reportManualMoves.locks && Object.keys(reportManualMoves.locks.packages || {}).length) || 0;
+    var lockedPipes = (reportManualMoves.locks && Object.keys(reportManualMoves.locks.pipes || {}).length) || 0;
+    var c6Adds = Object.keys(reportManualMoves.c6Included || {}).length;
+    var c6Removes = Object.keys(reportManualMoves.c6Excluded || {}).length;
+    var summary = [];
+    if (moves) summary.push(moves + ' move' + (moves === 1 ? '' : 's'));
+    if (lockedPkgs) summary.push(lockedPkgs + ' locked package' + (lockedPkgs === 1 ? '' : 's'));
+    if (lockedPipes) summary.push(lockedPipes + ' locked pipe' + (lockedPipes === 1 ? '' : 's'));
+    if (c6Adds) summary.push(c6Adds + ' C6 add-on' + (c6Adds === 1 ? '' : 's'));
+    if (c6Removes) summary.push(c6Removes + ' C6 removal' + (c6Removes === 1 ? '' : 's'));
+    var msg = summary.length
+      ? 'Clear ' + summary.join(', ') + '? This cannot be undone.'
+      : 'Nothing to clear.';
+    if (!summary.length) { alert(msg); return; }
+    if (!confirm(msg)) return;
     reportManualMoves = emptyMoves();
     saveReportMoves();
     // Restore originally-attached C6 add-ons (and drop any manually-included ones)
@@ -9549,7 +9595,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         var color = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
         var weight = isC6 ? ';font-weight:700' : '';
         var title = isC6 ? 'Condition 6 add-on' : (isLocked ? 'Locked pipe' : 'Unlocked pipe');
-        return '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + color + ' !important;text-decoration:underline;cursor:pointer' + weight + '" title="' + esc(title) + '">' + esc(uid) + '</a>';
+        var icon = isC6 ? '➕ ' : (isLocked ? '🔒 ' : '🔓 ');
+        return '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + color + ' !important;text-decoration:underline;cursor:pointer' + weight + '" title="' + esc(title) + '">' + icon + esc(uid) + '</a>';
       }).join(', ');
       var pkgIdCell = '<td><a href="#reportPackagesMap" class="pkg-row-link" data-report-package-id="' + esc(pkg.id) + '" title="Show ' + esc(pkg.id) + ' on the map" style="font-weight:800">' + esc(pkg.id) + '</a></td>';
       var cells = [
@@ -10365,7 +10412,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.edit-pkg-tag.locked{background:#FEE2E2;color:#991B1B}',
     '.edit-pkg-asset-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.7fr 0.7fr 0.9fr 2fr 0.7fr 0.5fr;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--border);align-items:center}',
     '.edit-pkg-asset-row:last-child{border-bottom:none}',
-    '.edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border)}',
+    '.edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;background:var(--panel)}',
+    '.help-icon{display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:var(--text-l);color:white;font-size:9px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle}',
+    '.help-icon:hover{background:var(--teal)}',
     '.edit-pkg-asset-row select{font-size:11px;padding:4px 6px;width:100%}',
     '.edit-pkg-empty-msg{color:var(--text-l);font-style:italic;font-size:12px;padding:10px 0}',
     '.pkg-lock-btn{background:none;border:1.5px solid currentColor;border-radius:4px;cursor:pointer;padding:2px 5px;font-size:13px;line-height:1;transition:opacity .15s;flex-shrink:0}',
@@ -14838,7 +14887,12 @@ function showLoad(txt) {
   document.getElementById('loading').classList.add('show');
   document.body.classList.add('busy-ui');
 }
-function setLoadTxt(txt) { document.getElementById('load-txt').textContent = txt; }
+function setLoadTxt(txt, phase, totalPhases) {
+  const prefix = (Number.isFinite(phase) && Number.isFinite(totalPhases))
+    ? 'Step ' + phase + ' of ' + totalPhases + ': '
+    : '';
+  document.getElementById('load-txt').textContent = prefix + txt;
+}
 function hideLoad() {
   document.getElementById('loading').classList.remove('show');
   document.body.classList.remove('busy-ui');
