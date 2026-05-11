@@ -1243,6 +1243,12 @@ window.addEventListener('keydown', (event) => {
 
 <div id="page-cctvpackaging" style="display:none;flex:1;min-height:0;overflow:hidden;background:var(--panel);padding:20px">
   <div class="pkg-shell">
+    <div class="subtab-bar">
+      <button class="subtab active" type="button" id="cctvSubtabMain" onclick="switchCctvSubtab('main')">CCTV Packaging</button>
+      <button class="subtab" type="button" id="cctvSubtabEdit" onclick="switchCctvSubtab('edit')">Edit Packages</button>
+    </div>
+
+    <div id="cctv-subpage-main">
     <div class="pkg-hero">
       <div>
         <div class="pkg-title">CCTV Work Order Packaging</div>
@@ -1386,6 +1392,18 @@ window.addEventListener('keydown', (event) => {
         </div>
         <div id="cctvPackagesMap"></div>
       </div>
+    </div>
+    </div><!-- /#cctv-subpage-main -->
+
+    <div id="cctv-subpage-edit" style="display:none">
+      <div class="pkg-panel">
+        <div class="lbl">Edit Packages</div>
+        <div style="font-size:12px;color:var(--text-l);margin-top:6px;line-height:1.5">
+          Move pipes between generated CCTV packages. Manual moves persist across regenerations until cleared. Empty packages are kept.
+          To create a new package, choose <em>+ Create new package</em> in any pipe's <strong>Move to package</strong> dropdown.
+        </div>
+      </div>
+      <div id="cctvEditPackagesArea" class="pkg-empty">Generate packages on the CCTV tab first to enable manual editing.</div>
     </div>
   </div>
 </div>
@@ -7118,6 +7136,352 @@ function renderEditPackagesPanel() {
 
   area.className = '';
   area.innerHTML = toolbarHtml + cardsHtml;
+}
+
+// ── CCTV Edit Packages: mirror of the Relining edit panel above ──────
+// Skips C6 (CCTV has no C6 concept). Asset rows show estimated CCTV cost
+// per pipe (length / metresPerHour, floored at CCTV_MIN_HOURS_PER_PIPE,
+// times the package CCTV rate) so the Cost column has comparable values.
+
+let _cctvEditPanelListenersAttached = false;
+function attachCctvEditPanelListeners() {
+  if (_cctvEditPanelListenersAttached) return;
+  _cctvEditPanelListenersAttached = true;
+  document.addEventListener('change', (event) => {
+    const select = event.target?.closest?.('select[data-cctv-edit-target]');
+    if (select) {
+      const value = select.value;
+      const assetUid = select.getAttribute('data-asset-uid') || '';
+      const currentAnchor = select.getAttribute('data-current-anchor') || '';
+      if (!value || value === currentAnchor) return;
+      if (value === '__NEW__') createNewCctvPackageForAsset(assetUid);
+      else moveCctvAssetToPackage(assetUid, value);
+    }
+  });
+  document.addEventListener('click', (event) => {
+    const btn = event.target?.closest?.('button[data-cctv-edit-clear]');
+    if (btn) { event.preventDefault(); clearCctvManualMove(btn.getAttribute('data-asset-uid') || ''); return; }
+    const lockPipeBtn = event.target?.closest?.('button[data-cctv-lock-pipe]');
+    if (lockPipeBtn) { event.preventDefault(); toggleCctvPipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-anchor-id') || ''); return; }
+    const lockPkgBtn = event.target?.closest?.('button[data-cctv-lock-pkg]');
+    if (lockPkgBtn) { event.preventDefault(); toggleCctvPackageLock(lockPkgBtn.getAttribute('data-anchor-id') || ''); return; }
+    const sortCell = event.target?.closest?.('[data-cctv-edit-sort]');
+    if (sortCell) { event.preventDefault(); toggleCctvEditPipeSort(sortCell.getAttribute('data-anchor-id') || '', sortCell.getAttribute('data-cctv-edit-sort') || ''); return; }
+  });
+}
+
+let _cctvEditPipeSorts = {};
+
+function _cctvEditPipeSortIndicator(anchorId, key) {
+  const state = _cctvEditPipeSorts[anchorId];
+  if (!state || state.key !== key) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+  return state.dir === 'desc'
+    ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+    : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+}
+
+function _cctvEditSortPipes(assets, state) {
+  if (!state || !state.key) return assets;
+  const { key, dir } = state;
+  const mult = dir === 'desc' ? -1 : 1;
+  return assets.slice().sort((a, b) => {
+    let av, bv;
+    if (key === 'asset')       { av = String(a.assetId || ''); bv = String(b.assetId || ''); return av.localeCompare(bv, undefined, { numeric: true }) * mult; }
+    if (key === 'suburb')      { av = String(a.suburb || '');  bv = String(b.suburb || '');  return av.localeCompare(bv) * mult; }
+    if (key === 'diam')        { av = Number(a.diameterMm) || 0; bv = Number(b.diameterMm) || 0; }
+    else if (key === 'length') { av = Number(a.lengthM) || 0;    bv = Number(b.lengthM) || 0; }
+    else if (key === 'cost')   { av = Number(a._cctvEstCost) || 0; bv = Number(b._cctvEstCost) || 0; }
+    else return 0;
+    return (av - bv) * mult;
+  });
+}
+
+function toggleCctvEditPipeSort(anchorId, key) {
+  if (!anchorId || !key) return;
+  const cur = _cctvEditPipeSorts[anchorId];
+  if (!cur || cur.key !== key) {
+    const numeric = key === 'diam' || key === 'length' || key === 'cost';
+    _cctvEditPipeSorts[anchorId] = { key, dir: numeric ? 'desc' : 'asc' };
+  } else if (cur.dir === 'asc') {
+    _cctvEditPipeSorts[anchorId] = { key, dir: 'desc' };
+  } else {
+    delete _cctvEditPipeSorts[anchorId];
+  }
+  renderCctvEditPackagesPanel();
+}
+
+function cctvEditTargetOptionsHtml(currentAnchor) {
+  const packages = lastCctvPackagingGeneration?.packages || [];
+  const opts = packages
+    .filter(p => p.anchor_id === currentAnchor || !isCctvPackageLocked(p.anchor_id))
+    .map(p => {
+      const isCurrent = p.anchor_id === currentAnchor;
+      const tag = p.manual_origin ? ' (manual)' : '';
+      const suburbs = (p.suburbs || [p.suburb]).filter(Boolean).join(', ') || 'no suburb';
+      const label = `${p.package_id}${tag} — ${suburbs} (${p.pipe_count} pipes)`;
+      return `<option value="${escapeHtml(p.anchor_id || '')}"${isCurrent ? ' selected disabled' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
+  return `${opts}<option value="__NEW__">+ Create new package</option>`;
+}
+
+function _cctvEstPipeCost(asset, pkg) {
+  // Per-pipe estimate so the Cost column has a sortable value. Mirrors
+  // calculateCctvSurveyHours' floor of CCTV_MIN_HOURS_PER_PIPE per pipe
+  // applied at package level — applied here per-pipe for ordering only.
+  const lengthM = Number(asset?.lengthM) || 0;
+  const opts = lastCctvPackagingGeneration?.options || {};
+  const mph = Math.max(1, Number(opts.metresPerHour) || 80);
+  const rate = Number(pkg?.cctv_rate) || Number(opts.cctvRatePerHour) || 205;
+  const hours = Math.max(lengthM / mph, CCTV_MIN_HOURS_PER_PIPE);
+  return hours * rate;
+}
+
+function renderCctvEditPackagesPanel() {
+  const area = document.getElementById('cctvEditPackagesArea');
+  if (!area) return;
+  attachCctvEditPanelListeners();
+  const data = lastCctvPackagingGeneration;
+  if (!data || !data.packages || !data.packages.length) {
+    area.className = 'pkg-empty';
+    area.textContent = 'Generate packages on the CCTV tab first to enable manual editing.';
+    return;
+  }
+  if (data.packages.some(p => !p.anchor_id)) {
+    data.packages = ensurePackageAnchors(data.packages);
+  }
+  const packages = data.packages;
+  const moveCount = Object.keys(cctvManualMoves?.assignments || {}).length;
+  const affectedAnchors = new Set(Object.values(cctvManualMoves?.assignments || {}));
+
+  const globalLockState = getCctvGlobalLockState();
+  const globalLockCls = globalLockState === 'all' ? 'locked' : globalLockState === 'partial' ? 'partial' : 'unlocked';
+  const globalLockIcon = globalLockState === 'all' ? '🔒' : '🔓';
+  const globalLockTitle = globalLockState === 'all' ? 'All packages locked — click to unlock all' : 'Click to lock all packages';
+  const toolbarHtml = `
+    <div class="edit-pkg-toolbar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="pkg-lock-btn ${globalLockCls}" style="font-size:18px;padding:4px 9px" type="button" onclick="toggleCctvAllPackagesLock()" title="${escapeHtml(globalLockTitle)}">${globalLockIcon}</button>
+        <div>
+          <strong>${moveCount.toLocaleString()}</strong> manual move${moveCount === 1 ? '' : 's'} active.
+          Affected packages: <strong>${affectedAnchors.size.toLocaleString()}</strong>.
+          Manual moves persist across regenerations.
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="export-btn" type="button" onclick="undoLastCctvMove()" title="Undo the last manual edit (max ${CCTV_HISTORY_MAX})">↶ Undo (${(cctvManualMoves?.history?.length || 0)})</button>
+        <button class="export-btn" type="button" onclick="resetAllCctvManualMoves()">Reset All Manual Edits</button>
+      </div>
+    </div>
+  `;
+
+  const cardsHtml = packages.map(pkg => {
+    const assets = (pkg.assets || []).map(a => ({ ...a, _cctvEstCost: _cctvEstPipeCost(a, pkg) }));
+    const isManual = !!pkg.manual_origin;
+    const suburbs = (pkg.suburbs || [pkg.suburb]).filter(Boolean).join(', ') || 'No suburb';
+    const pkgLockState = getCctvPackageLockState(pkg);
+    const pkgLockCls = pkgLockState === 'all' ? 'locked' : pkgLockState === 'partial' ? 'partial' : 'unlocked';
+    const pkgLockIcon = pkgLockState === 'all' ? '🔒' : '🔓';
+    const pkgLockTitle = pkgLockState === 'all' ? 'Package locked — click to unlock all pipes' : pkgLockState === 'partial' ? 'Partially locked — click to lock all pipes' : 'Package unlocked — click to lock all pipes';
+    const headerHtml = `
+      <div class="edit-pkg-header">
+        <div>
+          <div class="edit-pkg-title">
+            ${escapeHtml(pkg.package_id || '')}
+            ${isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : ''}
+            ${assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : ''}
+            <button class="pkg-lock-btn pkg-lock-btn-pkg ${pkgLockCls}" data-cctv-lock-pkg data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(pkgLockTitle)}">${pkgLockIcon}</button>
+          </div>
+          <div class="edit-pkg-meta">${escapeHtml(suburbs)} · ${assets.length} pipe${assets.length === 1 ? '' : 's'} · ${escapeHtml(formatCurrency(pkg.total_cost))} · ${Number(pkg.total_length_m || 0).toFixed(1)} m</div>
+        </div>
+      </div>
+    `;
+    if (!assets.length) {
+      return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>`;
+    }
+    const anchorAttr = escapeHtml(pkg.anchor_id || '');
+    const headRow = `<div class="edit-pkg-asset-row head">`
+      + `<div data-cctv-edit-sort="asset"  data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Asset">Asset${_cctvEditPipeSortIndicator(pkg.anchor_id, 'asset')}</div>`
+      + `<div data-cctv-edit-sort="suburb" data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Suburb">Suburb${_cctvEditPipeSortIndicator(pkg.anchor_id, 'suburb')}</div>`
+      + `<div data-cctv-edit-sort="diam"   data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Diameter">Diam (mm)${_cctvEditPipeSortIndicator(pkg.anchor_id, 'diam')}</div>`
+      + `<div data-cctv-edit-sort="length" data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Length">Length (m)${_cctvEditPipeSortIndicator(pkg.anchor_id, 'length')}</div>`
+      + `<div data-cctv-edit-sort="cost"   data-anchor-id="${anchorAttr}" style="cursor:pointer;user-select:none" title="Click to sort by Cost">Cost${_cctvEditPipeSortIndicator(pkg.anchor_id, 'cost')}</div>`
+      + `<div>Move to package</div>`
+      + `<div></div>`
+      + `<div>Lock</div>`
+      + `</div>`;
+    const rows = _cctvEditSortPipes(assets, _cctvEditPipeSorts[pkg.anchor_id]).map(asset => {
+      const uid = String(asset.assetId || '');
+      const isLocked = isCctvPipeLocked(uid);
+      const isMoveOrigin = !!(cctvManualMoves?.moveOrigins?.[uid]);
+      const lockCls = isLocked ? 'locked' : 'unlocked';
+      const lockIcon = isLocked ? '🔒' : '🔓';
+      const lockTitle = isLocked ? 'Locked — click to unlock' : 'Unlocked — click to lock';
+      const lockedTag = isLocked
+        ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
+        : '';
+      const assetColor = isLocked ? '#dc2626' : '#16a34a';
+      const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
+      const assetLinkHtml = `<a href="#cctvPackagesMap" data-cctv-asset-id="${encodeURIComponent(uid)}" style="${assetStyle};cursor:pointer" title="Show this pipe on the map">${escapeHtml(uid)}</a>`;
+      const moveCellHtml = `<select data-cctv-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">${cctvEditTargetOptionsHtml(pkg.anchor_id)}</select>`;
+      const clearCellHtml = isMoveOrigin ? `<button class="export-btn" type="button" data-cctv-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : '';
+      const lockCellHtml = `<button class="pkg-lock-btn ${lockCls}" type="button" data-cctv-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button>`;
+      return `
+        <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
+          <div>${assetLinkHtml}${lockedTag}</div>
+          <div>${escapeHtml(asset.suburb || '')}</div>
+          <div>${escapeHtml(String(asset.diameterMm ?? ''))}</div>
+          <div>${Number(asset.lengthM || 0).toFixed(1)}</div>
+          <div>${escapeHtml(formatCurrency(asset._cctvEstCost))}</div>
+          <div>${moveCellHtml}</div>
+          <div>${clearCellHtml}</div>
+          <div>${lockCellHtml}</div>
+        </div>
+      `;
+    }).join('');
+    return `<div class="edit-pkg-card" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}">${headerHtml}${headRow}${rows}</div>`;
+  }).join('');
+
+  area.className = '';
+  area.innerHTML = toolbarHtml + cardsHtml;
+}
+
+function reapplyCctvManualEditsToCurrentGeneration() {
+  if (!lastCctvPackagingGeneration) { renderCctvEditPackagesPanel(); return; }
+  const options = lastCctvPackagingGeneration.options || (typeof getCctvPackagingOptions === 'function' ? getCctvPackagingOptions() : {});
+  const rateMeta = lastCctvPackagingGeneration.rateMeta || {};
+  const cctvRate = Number(options.cctvRatePerHour) || 205;
+  const mph = Math.max(1, Number(options.metresPerHour) || 80);
+
+  // Carve out locked packages — sealed against incoming moves.
+  const sourcePackages = (lastCctvPackagingGeneration.packages || []).map(pkg => ({ ...pkg, assets: [...(pkg.assets || [])] }));
+  const lockedAnchorSet = new Set(sourcePackages.filter(p => isCctvPackageLocked(p.anchor_id)).map(p => p.anchor_id));
+  const lockedAssetIds = new Set();
+  sourcePackages.filter(p => lockedAnchorSet.has(p.anchor_id)).forEach(p => (p.assets || []).forEach(a => {
+    const id = String(a.assetId || '').trim();
+    if (id) lockedAssetIds.add(id);
+  }));
+
+  const assignments = cctvManualMoves?.assignments || {};
+  const packageOrigins = cctvManualMoves?.packageOrigins || {};
+
+  // Build asset catalog from non-locked packages (locked ones pass through untouched).
+  const assetCatalog = new Map();
+  sourcePackages.forEach(pkg => {
+    if (lockedAnchorSet.has(pkg.anchor_id)) return;
+    (pkg.assets || []).forEach(asset => {
+      const uid = String(asset.assetId || '');
+      if (uid) assetCatalog.set(uid, { asset, currentAnchor: pkg.anchor_id });
+    });
+  });
+
+  // Anchor pool: every existing non-locked package + any manual-origin anchor that no longer matches a package.
+  const anchorPool = new Map();
+  sourcePackages.forEach(pkg => {
+    if (lockedAnchorSet.has(pkg.anchor_id)) return;
+    anchorPool.set(pkg.anchor_id, { existing: pkg, items: [] });
+  });
+  Object.entries(packageOrigins).forEach(([anchorId, info]) => {
+    if (lockedAnchorSet.has(anchorId)) return;
+    if (!anchorPool.has(anchorId)) {
+      anchorPool.set(anchorId, {
+        existing: {
+          anchor_id: anchorId,
+          package_id: info.last_package_id || 'CCTV_PENDING',
+          manual_origin: info.kind || 'manual'
+        },
+        items: []
+      });
+    }
+  });
+
+  let assignmentsChanged = false;
+  assetCatalog.forEach(({ asset, currentAnchor }, uid) => {
+    const target = assignments[uid];
+    let dest = currentAnchor;
+    if (target) {
+      if (lockedAnchorSet.has(target)) {
+        // Move into a locked package is rejected; assignment kept for later unlock.
+      } else if (anchorPool.has(target)) {
+        dest = target;
+      } else {
+        delete assignments[uid];
+        assignmentsChanged = true;
+      }
+    }
+    anchorPool.get(dest).items.push(asset);
+  });
+
+  Object.keys(assignments).forEach(uid => {
+    if (lockedAssetIds.has(uid)) return;
+    if (!assetCatalog.has(uid)) { delete assignments[uid]; assignmentsChanged = true; }
+  });
+
+  if (assignmentsChanged) persistCctvManualMoves();
+
+  // Rebuild every non-locked package from its items, recomputing CCTV totals.
+  const rebuilt = [...anchorPool.values()].map(({ existing, items }) => {
+    const totalLengthM = items.reduce((sum, a) => sum + (Number(a.lengthM) || 0), 0);
+    const surveyHours = Math.max(totalLengthM / mph, items.length * CCTV_MIN_HOURS_PER_PIPE);
+    const totalCost = surveyHours * cctvRate;
+    const suburbCounts = {};
+    items.forEach(a => { suburbCounts[a.suburb || 'Unknown'] = (suburbCounts[a.suburb || 'Unknown'] || 0) + 1; });
+    const suburbs = Object.entries(suburbCounts)
+      .filter(([s]) => s && s !== 'Unknown')
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([s]) => s);
+    return {
+      ...existing,
+      assets: items,
+      pipe_count: items.length,
+      asset_ids: items.map(a => a.assetId),
+      total_length_m: Number(totalLengthM.toFixed(1)),
+      cctv_hours: Number(surveyHours.toFixed(2)),
+      cctv_rate: cctvRate,
+      total_cost: Number(totalCost.toFixed(2)),
+      suburb: suburbs[0] || existing.suburb || 'Unknown',
+      primary_suburb: suburbs[0] || existing.primary_suburb || 'Unknown',
+      suburbs: suburbs.length ? suburbs : (existing.suburbs || ['Unknown'])
+    };
+  });
+
+  // Locked packages pass through untouched, appended last.
+  const lockedPassthrough = sourcePackages.filter(p => lockedAnchorSet.has(p.anchor_id));
+  let packages = rebuilt.concat(lockedPassthrough);
+
+  packages = prioritiseAndRenumberCctvPackages(packages);
+
+  packages.forEach(pkg => {
+    if (cctvManualMoves.packageOrigins[pkg.anchor_id]) {
+      cctvManualMoves.packageOrigins[pkg.anchor_id].last_package_id = pkg.package_id;
+    }
+  });
+  persistCctvManualMoves();
+
+  lastCctvPackagingGeneration = { ...lastCctvPackagingGeneration, packages, rateMeta };
+  if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(packages);
+  if (typeof renderCctvPackagesMap === 'function') renderCctvPackagesMap();
+  renderCctvEditPackagesPanel();
+}
+
+function switchCctvSubtab(name) {
+  const main = document.getElementById('cctv-subpage-main');
+  const edit = document.getElementById('cctv-subpage-edit');
+  const tabMain = document.getElementById('cctvSubtabMain');
+  const tabEdit = document.getElementById('cctvSubtabEdit');
+  if (!main || !edit || !tabMain || !tabEdit) return;
+  if (name === 'edit') {
+    main.style.display = 'none';
+    edit.style.display = 'block';
+    tabMain.classList.remove('active');
+    tabEdit.classList.add('active');
+    renderCctvEditPackagesPanel();
+  } else {
+    main.style.display = 'block';
+    edit.style.display = 'none';
+    tabMain.classList.add('active');
+    tabEdit.classList.remove('active');
+    setTimeout(() => { try { if (typeof refreshCctvPackagesMap === 'function') refreshCctvPackagesMap(); } catch (e) {} }, 0);
+  }
 }
 
 function isIslandPipe(item) {
@@ -15288,6 +15652,18 @@ async function generateCctvPackages() {
     renderCctvPackagingCards(preview);
     renderGeneratedCctvPackages(packages);
     renderCctvPackagesMap();
+    // Re-apply persisted manual edits (assignments + locks) to the freshly
+    // generated packages so undo/regen flows preserve user intent.
+    const hasManualState = !!(cctvManualMoves && (
+      Object.keys(cctvManualMoves.assignments || {}).length ||
+      Object.keys(cctvManualMoves.locks?.packages || {}).length ||
+      Object.keys(cctvManualMoves.locks?.pipes || {}).length
+    ));
+    if (hasManualState && typeof reapplyCctvManualEditsToCurrentGeneration === 'function') {
+      reapplyCctvManualEditsToCurrentGeneration();
+    } else if (typeof renderCctvEditPackagesPanel === 'function') {
+      renderCctvEditPackagesPanel();
+    }
   } catch (e) {
     alert(`CCTV package generation failed: ${e.message || e}`);
   } finally {
