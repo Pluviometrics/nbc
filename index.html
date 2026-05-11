@@ -885,6 +885,7 @@ window.addEventListener('keydown', (event) => {
         Load Locks
         <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
       </label>
+      <button class="export-btn" onclick="clearAllReliningLocks()" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Wipe every saved lock, assignment and manual edit in this browser. Use on startup to clear residual state.">Clear All Locks</button>
     </div>
   </div>
   <div style="flex:1;min-height:0;overflow:auto">
@@ -6114,6 +6115,19 @@ async function loadReliningLocksFile(file) {
     console.info(`[Locks] Loaded ${pipeCount} assignment(s) from ${file.name}`);
   } catch (err) {
     alert('Failed to load locks file: ' + (err?.message || err));
+  }
+}
+
+function clearAllReliningLocks() {
+  if (!confirm('Clear all saved locks, manual edits, and C6 add/remove state in this browser? This cannot be undone.')) return;
+  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  persistReliningManualMoves();
+  if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
+    generateReliningPackages();
+  } else if (lastPackagingGeneration) {
+    renderGeneratedPackages(lastPackagingGeneration);
+    if (typeof renderReliningPackagesMap === 'function') renderReliningPackagesMap();
+    if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
   }
 }
 
