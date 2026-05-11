@@ -8276,7 +8276,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ];
   function csvCell(v) {
     var s = String(v == null ? '' : v);
-    return /[,"\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+    return /[,"\\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
   }
   function csvRow(arr) { return arr.map(csvCell).join(','); }
   function fmtCurrencyCents(v) {
@@ -8317,7 +8317,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     totalsRow[ZIP_HEADERS.indexOf('pipe_cost')] = fmtCurrencyCents(totalCost);
     totalsRow[ZIP_HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxSpanText(pkg);
     lines.push(csvRow(totalsRow));
-    return { csv: lines.join('\n'), totalLen: totalLen, totalCost: totalCost };
+    return { csv: lines.join('\\n'), totalLen: totalLen, totalCost: totalCost };
   }
   function buildReportPipeKml(pkg, color) {
     var items = pipes.filter(function(p){ return p.package_id === pkg.id && Number.isFinite(p.lat) && Number.isFinite(p.lon); });
@@ -8473,10 +8473,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         if (idx < packages.length - 1) summaryLines.push('');
         summaryRows.push([pkg.id, suburbsStr, diametersStr, maxDist, items.length, Number(pkg.condition_7_count||0), Number(pkg.condition_8_count||0), Math.round(built.totalLen*10)/10, Math.round(built.totalCost), items.map(function(i){return i.asset_id;}).join(', ')]);
       });
-      zip.file('package_summary.txt', summaryLines.join('\n'));
+      zip.file('package_summary.txt', summaryLines.join('\\n'));
       var sortedNames = csvNames.slice().sort();
-      zip.file('file_list.txt', ['PACKAGE FILE LIST','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']).concat(sortedNames).join('\n'));
-      zip.file('provenance.txt', provLines.join('\n') + '\n');
+      zip.file('file_list.txt', ['PACKAGE FILE LIST','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']).concat(sortedNames).join('\\n'));
+      zip.file('provenance.txt', provLines.join('\\n') + '\\n');
       var _ZIP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
       packages.forEach(function(pkg, i) {
         var color = _ZIP_PALETTE[i % _ZIP_PALETTE.length];
