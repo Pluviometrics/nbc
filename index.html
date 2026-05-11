@@ -7813,6 +7813,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         if (m) reserved[Number(m[1])] = true;
       }
     });
+    // PHASE 1 — compute the target id for each unlocked package without mutating anything yet.
+    // The naive single-pass rename leaks pipes between packages: once pkg_C has been renamed
+    // RLN_001, processing the original pkg_A (whose old id is also RLN_001) would re-tag
+    // pkg_C pipes too. Build the full old-to-new map first, then apply atomically.
     var idRemap = {};
     var nextNum = 1;
     packages.forEach(function(pkg) {
@@ -7823,11 +7827,23 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       while (reserved[nextNum]) nextNum++;
       var newId = 'RLN_' + String(nextNum).padStart(3, '0');
       nextNum++;
-      if (pkg.id !== newId) {
-        pipes.forEach(function(p){ if (p.package_id === pkg.id) p.package_id = newId; });
-        idRemap[pkg.id] = newId;
-        pkg.id = newId;
+      if (pkg.id !== newId) idRemap[pkg.id] = newId;
+    });
+    // PHASE 2 — snapshot every pipe's pending new id based on its CURRENT (pre-rename) package_id.
+    // Locked packages are never in idRemap, so their pipes get no _pendingPkgId and are untouched.
+    pipes.forEach(function(p) {
+      if (idRemap[p.package_id]) p._pendingPkgId = idRemap[p.package_id];
+    });
+    // PHASE 3 — apply pending pipe ids.
+    pipes.forEach(function(p) {
+      if (p._pendingPkgId) {
+        p.package_id = p._pendingPkgId;
+        delete p._pendingPkgId;
       }
+    });
+    // PHASE 4 — apply package id renames.
+    packages.forEach(function(pkg) {
+      if (idRemap[pkg.id]) pkg.id = idRemap[pkg.id];
     });
     // Remap any persisted assignments / locks / c6Included that pointed at pre-renumber IDs
     if (Object.keys(idRemap).length && reportManualMoves) {
@@ -8375,6 +8391,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function ensureReportMap() {
     if (reportMap) { setTimeout(function(){ reportMap.invalidateSize(); }, 50); return; }
     reportMap = L.map('reportPackagesMap').setView([-33.75, 151.25], 11);
+    // Custom pane for the selected-package leader. Lives INSIDE .leaflet-map-pane so it
+    // shares the map stacking context (which CSS transform creates regardless of z-index).
+    // z-index 350 sits between tilePane (200) and overlayPane (400) — leader is behind pipes.
+    var leaderPane = reportMap.createPane('leaderPane');
+    leaderPane.style.zIndex = 350;
+    leaderPane.style.pointerEvents = 'none';
     var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Spatial Services, NSW Department of Customer Service', maxZoom: 21 });
     var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 });
     sixAerial.addTo(reportMap);
@@ -8385,6 +8407,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   // FLOATING OVERLAY CARD + LEADER SVG — ported from live tool (lines ~10165-10230)
+  // Leader SVG goes inside the custom 'leaderPane' (z-index 350) so it stacks BEHIND
+  // overlayPane (400 — pipes) and markerPane (600 — markers) but ABOVE tilePane (200 — basemap).
+  // Card stays on the map element (above everything) for clickable controls.
   function ensureReportSelectedOverlay() {
     var mapEl = document.getElementById('reportPackagesMap');
     if (!mapEl) return false;
@@ -8392,7 +8417,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       reportSelectedLeaderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       reportSelectedLeaderSvg.classList.add('cctv-selected-leader');
       reportSelectedLeaderSvg.innerHTML = '<line></line><circle r="6"></circle>';
-      mapEl.appendChild(reportSelectedLeaderSvg);
+      var leaderPane = reportMap && reportMap.getPane && reportMap.getPane('leaderPane');
+      (leaderPane || mapEl).appendChild(reportSelectedLeaderSvg);
     }
     if (!reportSelectedOverlayCard) {
       reportSelectedOverlayCard = document.createElement('div');
@@ -8451,21 +8477,37 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (!reportMap || !reportSelectedOverlayCard || !reportSelectedLeaderSvg || reportSelectedOverlayCard.style.display === 'none') return;
     var anchor = getReportPackageAnchorLatLng(getReportSelectedPackageObj());
     if (!anchor) { reportSelectedLeaderSvg.style.display = 'none'; return; }
-    var point = reportMap.latLngToContainerPoint(anchor);
+    // SVG is parented to the leaderPane (Leaflet pane with its own translate3d transform).
+    // Use layer-point coords so they cancel the pane transform out (== correct geographic position).
+    var anchorPt = reportMap.latLngToLayerPoint(anchor);
     var cardRect = reportSelectedOverlayCard.getBoundingClientRect();
     var mapRect = reportMap.getContainer().getBoundingClientRect();
-    var startX = point.x < (cardRect.left - mapRect.left)
-      ? cardRect.left - mapRect.left
-      : cardRect.left - mapRect.left + cardRect.width / 2;
-    var startY = cardRect.top - mapRect.top + cardRect.height;
+    var cardContainerX = cardRect.left - mapRect.left;
+    var cardContainerY = cardRect.top - mapRect.top + cardRect.height;
+    var cardContainerStartX = anchorPt.x < cardContainerX
+      ? cardContainerX
+      : cardContainerX + cardRect.width / 2;
+    var cardLayerStart = reportMap.containerPointToLayerPoint(L.point(cardContainerStartX, cardContainerY));
+    // Pane has zero intrinsic size; size the SVG explicitly so its own content is paintable.
+    // Position it at the pane's origin (layer-point 0,0) so SVG-internal coords == layer-point coords.
+    var pixelOrigin = reportMap.getPixelOrigin();
+    var panePos = reportMap._getMapPanePos ? reportMap._getMapPanePos() : L.point(0, 0);
+    // Set SVG to span at least the visible map at layer-point coordinates.
+    reportSelectedLeaderSvg.setAttribute('width', String(mapRect.width));
+    reportSelectedLeaderSvg.setAttribute('height', String(mapRect.height));
+    // SVG's top-left in layer-point coords = container point (0,0) → layer point.
+    var svgOriginLayer = reportMap.containerPointToLayerPoint(L.point(0, 0));
+    reportSelectedLeaderSvg.style.left = svgOriginLayer.x + 'px';
+    reportSelectedLeaderSvg.style.top = svgOriginLayer.y + 'px';
     var line = reportSelectedLeaderSvg.querySelector('line');
     var circle = reportSelectedLeaderSvg.querySelector('circle');
-    line.setAttribute('x1', String(startX));
-    line.setAttribute('y1', String(startY));
-    line.setAttribute('x2', String(point.x));
-    line.setAttribute('y2', String(point.y));
-    circle.setAttribute('cx', String(point.x));
-    circle.setAttribute('cy', String(point.y));
+    // Convert layer-point coords to SVG-local coords by subtracting the SVG origin.
+    line.setAttribute('x1', String(cardLayerStart.x - svgOriginLayer.x));
+    line.setAttribute('y1', String(cardLayerStart.y - svgOriginLayer.y));
+    line.setAttribute('x2', String(anchorPt.x - svgOriginLayer.x));
+    line.setAttribute('y2', String(anchorPt.y - svgOriginLayer.y));
+    circle.setAttribute('cx', String(anchorPt.x - svgOriginLayer.x));
+    circle.setAttribute('cy', String(anchorPt.y - svgOriginLayer.y));
     reportSelectedLeaderSvg.style.display = 'block';
   }
 
@@ -8655,29 +8697,44 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (!selectedPackage && opts.fit !== false) fitReportMap();
   }
 
+  // Field-for-field parity with live tool's buildPipePopupHtml (live tool ~line 10865).
+  // Same field order, labels, links, and CSS variables. No C6 add-on flag (live tool omits it).
   function buildReportPipePopup(item, pkg) {
-    var assetId = String(item.asset_id || '');
-    var ciaUrl = buildCiAAssetUrl(assetId);
+    var raw = (item && item.raw) ? item.raw : {};
+    function firstStr() {
+      for (var i = 0; i < arguments.length; i++) {
+        var s = String(arguments[i] == null ? '' : arguments[i]).trim();
+        if (s) return s;
+      }
+      return '';
+    }
+    function firstPositiveNum() {
+      for (var i = 0; i < arguments.length; i++) {
+        var n = Number(arguments[i]);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      return null;
+    }
+    var assetId = firstStr(item && item.asset_id, raw['asset_id'], raw['Asset_ID'], raw['Asset ID'], raw['Asset']);
+    var sizeMm = firstPositiveNum(item && item.diameter_mm, raw['diameter'], raw['Diameter'], raw['Pipe_Diameter'], raw['SWP_Pipe Diameter_mm'], raw['SWP_Pipe_Diameter_mm']);
+    var lengthM = firstPositiveNum(item && item.length_m, raw['pipe_length'], raw['Shape_Length'], raw['Length'], raw['Spatial Length_m']);
+    // Address fallback order per spec: Formatted_Address → Address → Pipe_Start_Address → Street_Address.
+    var address = firstStr(item && item.address, raw['Formatted_Address'], raw['Address'], raw['Pipe_Start_Address'], raw['Street_Address']);
+    var streetViewUrl = address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address) : '';
+    var pkgId = firstStr(pkg && pkg.id, item && item.package_id);
+    var ciaUrl = (typeof buildCiAAssetUrl === 'function') ? buildCiAAssetUrl(assetId) : '';
     var assetLabel = esc(assetId || 'Pipe');
     var assetMarkup = ciaUrl
       ? '<a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">' + assetLabel + '</a>'
       : assetLabel;
     var titleHead = assetId ? 'ASSET ID - ' + assetMarkup : assetLabel;
-    var pkgId = String(pkg && pkg.id || '');
-    var address = String(item.address || (item.raw && (item.raw.Formatted_Address || item.raw.Address || item.raw.Pipe_Start_Address || item.raw.Street_Address)) || '').trim();
-    var streetViewUrl = address
-      ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address)
-      : '';
-    var sizeMm = Number(item.diameter_mm);
-    var lengthM = Number(item.length_m);
-    return '<div style="min-width:200px;font-size:12px;line-height:1.55;color:#1A2B3C;font-family:Segoe UI,system-ui,sans-serif">' +
-      '<div style="font-weight:800;color:#1A2B3C;margin-bottom:4px">' + titleHead + (pkgId ? ' - ' + esc(pkgId) : '') + '</div>' +
-      '<div><strong>Pipe size:</strong> ' + (Number.isFinite(sizeMm) && sizeMm > 0 ? Math.round(sizeMm) + ' mm' : '—') + '</div>' +
-      '<div><strong>Pipe length:</strong> ' + (Number.isFinite(lengthM) && lengthM > 0 ? lengthM.toFixed(1) + ' m' : '—') + '</div>' +
+    return '<div style="min-width:200px;font-size:12px;line-height:1.55;color:var(--text)">' +
+      '<div style="font-weight:800;color:var(--navy);margin-bottom:4px">' + titleHead + (pkgId ? ' - ' + esc(pkgId) : '') + '</div>' +
+      '<div><strong>Pipe size:</strong> ' + (sizeMm != null ? Math.round(sizeMm) + ' mm' : '—') + '</div>' +
+      '<div><strong>Pipe length:</strong> ' + (lengthM != null ? lengthM.toFixed(1) + ' m' : '—') + '</div>' +
       '<div><strong>Address:</strong> ' + (address ? esc(address) : '—') + '</div>' +
-      (ciaUrl ? '<div style="margin-top:6px"><a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open Asset in CiA ↗</a></div>' : '') +
-      (streetViewUrl ? '<div style="margin-top:6px"><a href="' + esc(streetViewUrl) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a></div>' : '') +
-      (item.is_c6_addon ? '<div style="color:#F18F01;margin-top:4px"><strong>C6 add-on</strong></div>' : '') +
+      (ciaUrl ? '<div style="margin-top:6px"><a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open Asset in CiA ↗</a></div>' : '') +
+      (streetViewUrl ? '<div style="margin-top:6px"><a href="' + esc(streetViewUrl) + '" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open in Google Street View ↗</a></div>' : '') +
     '</div>';
   }
 
@@ -9416,8 +9473,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.cctv-selected-map-card .title { font-weight:900; color:#111827; margin-bottom:4px; letter-spacing:.03em; }',
     '.cctv-selected-map-card .meta { color:var(--text-l); }',
     '.cctv-selected-map-card .meta div { margin:2px 0; }',
-    '.leaflet-map-pane { z-index:auto !important; }',
-    '.cctv-selected-leader { position:absolute; inset:0; z-index:350; pointer-events:none; overflow:visible; }',
+    '.cctv-selected-leader { position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }',
     '.cctv-selected-leader line { stroke:#111827; stroke-width:4; stroke-linecap:round; }',
     '.cctv-selected-leader circle { fill:#FFD166; stroke:#111827; stroke-width:3; }',
     '.ca-actions { display:flex; gap:10px; flex-wrap:wrap; }',
@@ -10807,6 +10863,12 @@ function ensureReliningPackagesMap() {
     return;
   }
   reliningPackagesMap = L.map('reliningPackagesMap').setView([-33.75, 151.25], 11);
+  // Custom pane for selected-package leader. Sits inside .leaflet-map-pane (which has a
+  // transform => its own stacking context). z-index 350 places it BETWEEN tilePane (200)
+  // and overlayPane (400), so the leader is behind pipes/markers but above the basemap.
+  const reliningLeaderPane = reliningPackagesMap.createPane('leaderPane');
+  reliningLeaderPane.style.zIndex = 350;
+  reliningLeaderPane.style.pointerEvents = 'none';
   reliningPackagesMap.on('move zoom resize', updateReliningSelectedMapOverlay);
   const sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: '&copy; Spatial Services, NSW Department of Customer Service',
@@ -10936,7 +10998,10 @@ function ensureReliningSelectedMapOverlay() {
     reliningSelectedLeaderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     reliningSelectedLeaderSvg.classList.add('cctv-selected-leader');
     reliningSelectedLeaderSvg.innerHTML = '<line></line><circle r="6"></circle>';
-    mapEl.appendChild(reliningSelectedLeaderSvg);
+    // Append to the custom leaderPane (z-index 350, INSIDE .leaflet-map-pane) so the
+    // leader sits behind pipes (overlayPane=400) and markers (markerPane=600).
+    const leaderPane = reliningPackagesMap && reliningPackagesMap.getPane && reliningPackagesMap.getPane('leaderPane');
+    (leaderPane || mapEl).appendChild(reliningSelectedLeaderSvg);
   }
   if (!reliningSelectedOverlayCard) {
     reliningSelectedOverlayCard = document.createElement('div');
@@ -10977,21 +11042,31 @@ function updateReliningSelectedMapOverlay() {
     reliningSelectedLeaderSvg.style.display = 'none';
     return;
   }
-  const point = reliningPackagesMap.latLngToContainerPoint(anchor);
+  // SVG lives in the leaderPane (a translated Leaflet pane). Use layer-point coords for both
+  // the geographic anchor and the card edge; offset by the SVG element's own origin
+  // (also in layer-point coords) so the SVG's internal coordinate space lines up correctly.
+  const anchorPt = reliningPackagesMap.latLngToLayerPoint(anchor);
   const cardRect = reliningSelectedOverlayCard.getBoundingClientRect();
   const mapRect = reliningPackagesMap.getContainer().getBoundingClientRect();
-  const startX = point.x < (cardRect.left - mapRect.left)
-    ? cardRect.left - mapRect.left
-    : cardRect.left - mapRect.left + cardRect.width / 2;
-  const startY = cardRect.top - mapRect.top + cardRect.height;
+  const cardContainerX = cardRect.left - mapRect.left;
+  const cardContainerY = cardRect.top - mapRect.top + cardRect.height;
+  const cardContainerStartX = anchorPt.x < cardContainerX
+    ? cardContainerX
+    : cardContainerX + cardRect.width / 2;
+  const cardLayerStart = reliningPackagesMap.containerPointToLayerPoint(L.point(cardContainerStartX, cardContainerY));
+  const svgOriginLayer = reliningPackagesMap.containerPointToLayerPoint(L.point(0, 0));
+  reliningSelectedLeaderSvg.setAttribute('width', String(mapRect.width));
+  reliningSelectedLeaderSvg.setAttribute('height', String(mapRect.height));
+  reliningSelectedLeaderSvg.style.left = svgOriginLayer.x + 'px';
+  reliningSelectedLeaderSvg.style.top = svgOriginLayer.y + 'px';
   const line = reliningSelectedLeaderSvg.querySelector('line');
   const circle = reliningSelectedLeaderSvg.querySelector('circle');
-  line.setAttribute('x1', String(startX));
-  line.setAttribute('y1', String(startY));
-  line.setAttribute('x2', String(point.x));
-  line.setAttribute('y2', String(point.y));
-  circle.setAttribute('cx', String(point.x));
-  circle.setAttribute('cy', String(point.y));
+  line.setAttribute('x1', String(cardLayerStart.x - svgOriginLayer.x));
+  line.setAttribute('y1', String(cardLayerStart.y - svgOriginLayer.y));
+  line.setAttribute('x2', String(anchorPt.x - svgOriginLayer.x));
+  line.setAttribute('y2', String(anchorPt.y - svgOriginLayer.y));
+  circle.setAttribute('cx', String(anchorPt.x - svgOriginLayer.x));
+  circle.setAttribute('cy', String(anchorPt.y - svgOriginLayer.y));
   reliningSelectedLeaderSvg.style.display = 'block';
 }
 
@@ -12863,6 +12938,11 @@ function ensureCctvPackagesMap() {
     return;
   }
   cctvPackagesMap = L.map('cctvPackagesMap').setView([-33.75, 151.25], 11);
+  // Custom pane for selected-package leader. Same z-index strategy as relining map:
+  // 350 puts it between tile (200) and overlay (400), so the leader is behind pipes/markers.
+  const cctvLeaderPane = cctvPackagesMap.createPane('leaderPane');
+  cctvLeaderPane.style.zIndex = 350;
+  cctvLeaderPane.style.pointerEvents = 'none';
   cctvPackagesMap.on('move zoom resize', updateCctvSelectedMapOverlay);
   const sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
     attribution: '&copy; Spatial Services, NSW Department of Customer Service',
@@ -12948,7 +13028,10 @@ function ensureCctvSelectedMapOverlay() {
     cctvSelectedLeaderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     cctvSelectedLeaderSvg.classList.add('cctv-selected-leader');
     cctvSelectedLeaderSvg.innerHTML = '<line></line><circle r="6"></circle>';
-    mapEl.appendChild(cctvSelectedLeaderSvg);
+    // Append to leaderPane (z-index 350, INSIDE .leaflet-map-pane) so the leader
+    // sits behind pipes/markers but above the basemap tiles.
+    const leaderPane = cctvPackagesMap && cctvPackagesMap.getPane && cctvPackagesMap.getPane('leaderPane');
+    (leaderPane || mapEl).appendChild(cctvSelectedLeaderSvg);
   }
   if (!cctvSelectedOverlayCard) {
     cctvSelectedOverlayCard = document.createElement('div');
@@ -12989,21 +13072,30 @@ function updateCctvSelectedMapOverlay() {
     cctvSelectedLeaderSvg.style.display = 'none';
     return;
   }
-  const point = cctvPackagesMap.latLngToContainerPoint(anchor);
+  // SVG lives in the leaderPane (translated Leaflet pane). Layer-point coords + SVG-origin
+  // offset keep the rendered geometry locked to the geographic position.
+  const anchorPt = cctvPackagesMap.latLngToLayerPoint(anchor);
   const cardRect = cctvSelectedOverlayCard.getBoundingClientRect();
   const mapRect = cctvPackagesMap.getContainer().getBoundingClientRect();
-  const startX = point.x < (cardRect.left - mapRect.left)
-    ? cardRect.left - mapRect.left
-    : cardRect.left - mapRect.left + cardRect.width / 2;
-  const startY = cardRect.top - mapRect.top + cardRect.height;
+  const cardContainerX = cardRect.left - mapRect.left;
+  const cardContainerY = cardRect.top - mapRect.top + cardRect.height;
+  const cardContainerStartX = anchorPt.x < cardContainerX
+    ? cardContainerX
+    : cardContainerX + cardRect.width / 2;
+  const cardLayerStart = cctvPackagesMap.containerPointToLayerPoint(L.point(cardContainerStartX, cardContainerY));
+  const svgOriginLayer = cctvPackagesMap.containerPointToLayerPoint(L.point(0, 0));
+  cctvSelectedLeaderSvg.setAttribute('width', String(mapRect.width));
+  cctvSelectedLeaderSvg.setAttribute('height', String(mapRect.height));
+  cctvSelectedLeaderSvg.style.left = svgOriginLayer.x + 'px';
+  cctvSelectedLeaderSvg.style.top = svgOriginLayer.y + 'px';
   const line = cctvSelectedLeaderSvg.querySelector('line');
   const circle = cctvSelectedLeaderSvg.querySelector('circle');
-  line.setAttribute('x1', String(startX));
-  line.setAttribute('y1', String(startY));
-  line.setAttribute('x2', String(point.x));
-  line.setAttribute('y2', String(point.y));
-  circle.setAttribute('cx', String(point.x));
-  circle.setAttribute('cy', String(point.y));
+  line.setAttribute('x1', String(cardLayerStart.x - svgOriginLayer.x));
+  line.setAttribute('y1', String(cardLayerStart.y - svgOriginLayer.y));
+  line.setAttribute('x2', String(anchorPt.x - svgOriginLayer.x));
+  line.setAttribute('y2', String(anchorPt.y - svgOriginLayer.y));
+  circle.setAttribute('cx', String(anchorPt.x - svgOriginLayer.x));
+  circle.setAttribute('cy', String(anchorPt.y - svgOriginLayer.y));
   cctvSelectedLeaderSvg.style.display = 'block';
 }
 
