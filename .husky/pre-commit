@@ -1,0 +1,9 @@
+#!/bin/sh
+# Pre-commit: lint and prebuild before commit.
+# Install: copy this to .git/hooks/pre-commit and chmod +x
+# OR run: ln -s ../../.husky/pre-commit .git/hooks/pre-commit
+
+if command -v npm >/dev/null 2>&1; then
+  echo "[pre-commit] running lint…"
+  npm run lint --silent
+fi
