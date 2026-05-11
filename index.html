@@ -7572,6 +7572,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   const originalAssignments = {};
   pipes.forEach(function(p) { originalAssignments[p.asset_id] = p.package_id; });
 
+  // Snapshot original packages by ID for carry-forward fields (never mutated)
+  const ORIGINAL_PACKAGES_BY_ID = {};
+  data.packages.forEach(function(p) { ORIGINAL_PACKAGES_BY_ID[p.id] = p; });
+
   // --- Manual moves: localStorage persistence ---
   const REPORT_MOVES_KEY = 'nbc-report-moves:' + (data.generated_at || 'unknown');
   let reportManualMoves = loadReportMoves();
@@ -7638,6 +7642,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         const d = haversineM(coords[i].lat, coords[i].lon, coords[j].lat, coords[j].lon);
         if (d > maxSpan) maxSpan = d;
       }
+      var original = ORIGINAL_PACKAGES_BY_ID[pkgId] || {};
       packages.push({
         id: pkgId,
         original_package_id: pkgId,
@@ -7652,7 +7657,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         condition_8_count: items.filter(function(i){ return Number(i.condition_score) === 8; }).length,
         c6_addon_count: items.filter(function(i){ return i.is_c6_addon; }).length,
         asset_ids: items.map(function(i){ return i.asset_id; }),
-        centroid: centroid
+        centroid: centroid,
+        // carry-forward fields from original snapshot (empty for newly created packages)
+        coordinate_sources: original.coordinate_sources || '',
+        distance_warning: original.distance_warning || '',
+        materialMix: original.materialMix || {},
+        conditionMix: original.conditionMix || {},
+        diameterMix: original.diameterMix || {},
+        dedicated_map_url: original.dedicated_map_url || '',
+        max_from_centroid_m: original.max_from_centroid_m || 0
       });
     });
   }
@@ -7712,6 +7725,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
     if (typeof renderReportMetaStrip === 'function') renderReportMetaStrip();
     if (typeof updateReportC6ToggleVisibility === 'function') updateReportC6ToggleVisibility();
+    if (typeof renderPerPackageReports === 'function') renderPerPackageReports();
+    if (typeof refreshFilterDropdowns === 'function') refreshFilterDropdowns();
   }
   window.applyMovesAndRender = applyMovesAndRender;
 
@@ -8146,33 +8161,37 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   applyMovesAndRender();
 
   // PER-PACKAGE WRITTEN REPORTS
-  document.getElementById('packageReports').innerHTML = packages.map(function(pkg) {
-    var color = colorFor(pkg.id);
-    var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ') || '—';
-    var bullets = reasoningFor(pkg).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
-    var anchor = pkgAnchor(pkg.id);
-    return '<section class="pkg-report" id="' + anchor + '" data-package-id="' + esc(pkg.id) + '">' +
-      '<header class="pkg-report-head">' +
-        '<span class="pipe-color" style="background:' + color + '"></span>' +
-        '<h3>' + esc(pkg.id) + '</h3>' +
-        (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
-        '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
-      '</header>' +
-      '<div class="pkg-report-meta">' +
-        '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
-        '<div><span class="lbl-mini">Pipes</span>' + fmtNum(pkg.pipe_count, 0) + '</div>' +
-        '<div><span class="lbl-mini">Length</span>' + fmtNum(pkg.total_length_m, 1) + ' m</div>' +
-        '<div><span class="lbl-mini">Cost</span>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>' +
-        '<div><span class="lbl-mini">Diameters</span>' + esc(diam) + '</div>' +
-        '<div><span class="lbl-mini">Max span</span>' + (pkg.max_span_m ? esc((pkg.max_span_m/1000).toFixed(2)) + ' km' : '—') + '</div>' +
-        ((pkg.condition_7_count || pkg.condition_8_count) ? '<div><span class="lbl-mini">Condition 7 / 8</span>' + (pkg.condition_7_count||0) + ' / ' + (pkg.condition_8_count||0) + '</div>' : '') +
-        (pkg.max_from_centroid_m ? '<div><span class="lbl-mini">Max from centre</span>' + pkg.max_from_centroid_m + ' m</div>' : '') +
-      '</div>' +
-      (pkg.distance_warning ? '<div class="pkg-report-warn">' + esc(pkg.distance_warning) + '</div>' : '') +
-      '<div class="pkg-report-bullets"><div class="lbl-mini">Reasoning</div><ul>' + bullets + '</ul></div>' +
-      (pkg.asset_ids && pkg.asset_ids.length ? '<div class="pkg-report-assets"><span class="lbl-mini">Assets in this package</span>' + linkAssetIdList(pkg.asset_ids) + '</div>' : '') +
-    '</section>';
-  }).join('') || '<div class="pkg-empty">No packages were generated.</div>';
+  function renderPerPackageReports() {
+    document.getElementById('packageReports').innerHTML = packages.map(function(pkg) {
+      var color = colorFor(pkg.id);
+      var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ') || '—';
+      var bullets = reasoningFor(pkg).map(function(b){ return '<li>' + esc(b) + '</li>'; }).join('');
+      var anchor = pkgAnchor(pkg.id);
+      return '<section class="pkg-report" id="' + anchor + '" data-package-id="' + esc(pkg.id) + '">' +
+        '<header class="pkg-report-head">' +
+          '<span class="pipe-color" style="background:' + color + '"></span>' +
+          '<h3>' + esc(pkg.id) + '</h3>' +
+          (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
+          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
+        '</header>' +
+        '<div class="pkg-report-meta">' +
+          '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
+          '<div><span class="lbl-mini">Pipes</span>' + fmtNum(pkg.pipe_count, 0) + '</div>' +
+          '<div><span class="lbl-mini">Length</span>' + fmtNum(pkg.total_length_m, 1) + ' m</div>' +
+          '<div><span class="lbl-mini">Cost</span>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>' +
+          '<div><span class="lbl-mini">Diameters</span>' + esc(diam) + '</div>' +
+          '<div><span class="lbl-mini">Max span</span>' + (pkg.max_span_m ? esc((pkg.max_span_m/1000).toFixed(2)) + ' km' : '—') + '</div>' +
+          ((pkg.condition_7_count || pkg.condition_8_count) ? '<div><span class="lbl-mini">Condition 7 / 8</span>' + (pkg.condition_7_count||0) + ' / ' + (pkg.condition_8_count||0) + '</div>' : '') +
+          (pkg.max_from_centroid_m ? '<div><span class="lbl-mini">Max from centre</span>' + pkg.max_from_centroid_m + ' m</div>' : '') +
+        '</div>' +
+        (pkg.distance_warning ? '<div class="pkg-report-warn">' + esc(pkg.distance_warning) + '</div>' : '') +
+        '<div class="pkg-report-bullets"><div class="lbl-mini">Reasoning</div><ul>' + bullets + '</ul></div>' +
+        (pkg.asset_ids && pkg.asset_ids.length ? '<div class="pkg-report-assets"><span class="lbl-mini">Assets in this package</span>' + linkAssetIdList(pkg.asset_ids) + '</div>' : '') +
+      '</section>';
+    }).join('') || '<div class="pkg-empty">No packages were generated.</div>';
+  }
+  window.renderPerPackageReports = renderPerPackageReports;
+  renderPerPackageReports();
 
   // PIPES TABLE (filterable)
   function fillSelect(id, values, fmt) {
@@ -8184,6 +8203,21 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       sel.appendChild(opt);
     });
   }
+  function refreshFilterDropdowns() {
+    var ids = ['filterPackage', 'filterSuburb', 'filterDiameter', 'filterCondition'];
+    ids.forEach(function(id) {
+      var sel = document.getElementById(id);
+      var current = sel.value;
+      // Remove all options except the first (blank "all" option)
+      while (sel.options.length > 1) sel.remove(1);
+      sel.value = current; // restore selection (may fall back to "" if value gone)
+    });
+    fillSelect('filterPackage', packages.map(function(p){ return p.id; }));
+    fillSelect('filterSuburb', uniq(pipes.map(function(p){ return p.suburb; })).sort());
+    fillSelect('filterDiameter', uniq(pipes.map(function(p){ return p.diameter_mm; })).sort(function(a,b){ return a-b; }), function(v){ return v + 'mm'; });
+    fillSelect('filterCondition', uniq(pipes.map(function(p){ return p.condition; })).sort());
+  }
+  window.refreshFilterDropdowns = refreshFilterDropdowns;
   fillSelect('filterPackage', packages.map(function(p){ return p.id; }));
   fillSelect('filterSuburb', uniq(pipes.map(function(p){ return p.suburb; })).sort());
   fillSelect('filterDiameter', uniq(pipes.map(function(p){ return p.diameter_mm; })).sort(function(a,b){ return a-b; }), function(v){ return v + 'mm'; });
