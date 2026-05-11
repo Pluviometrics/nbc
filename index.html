@@ -9366,8 +9366,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         var title = isC6 ? 'Condition 6 add-on' : (isLocked ? 'Locked pipe' : 'Unlocked pipe');
         return '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + color + ' !important;text-decoration:underline;cursor:pointer' + weight + '" title="' + esc(title) + '">' + esc(uid) + '</a>';
       }).join(', ');
-      var pkgIdCell = '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span>'
-        + '<a href="#reportPackagesMap" class="pkg-row-link" data-report-package-id="' + esc(pkg.id) + '" title="Show ' + esc(pkg.id) + ' on the map" style="font-weight:800">' + esc(pkg.id) + '</a></td>';
+      var pkgIdCell = '<td><a href="#reportPackagesMap" class="pkg-row-link" data-report-package-id="' + esc(pkg.id) + '" title="Show ' + esc(pkg.id) + ' on the map" style="font-weight:800">' + esc(pkg.id) + '</a></td>';
       var cells = [
         pkgIdCell,
         '<td>' + esc(suburb) + '</td>',
@@ -9413,7 +9412,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var anchor = pkgAnchor(pkg.id);
       return '<section class="pkg-report" id="' + anchor + '" data-package-id="' + esc(pkg.id) + '">' +
         '<header class="pkg-report-head">' +
-          '<span class="pipe-color" style="background:' + color + '"></span>' +
           '<h3>' + esc(pkg.id) + '</h3>' +
           (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
           '<button class="pkg-card-link-btn" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button>' +
@@ -9493,7 +9491,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       filtered.map(function(p) {
         return '<tr data-asset="' + esc(p.asset_id) + '" data-package-id="' + esc(p.package_id) + '">' +
           '<td>' + linkAssetId(p.asset_id) + '</td>' +
-          '<td><span class="pipe-color" style="background:' + colorFor(p.package_id) + '"></span>' + esc(p.package_id) + '</td>' +
+          '<td>' + esc(p.package_id) + '</td>' +
           '<td>' + esc(p.suburb) + '</td>' +
           '<td class="r">' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '') + '</td>' +
           '<td>' + esc(p.material) + '</td>' +
