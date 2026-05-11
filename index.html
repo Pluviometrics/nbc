@@ -9354,8 +9354,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var isSelected = pkg.id === selectedReportPackageId;
       var diam = (pkg.diameters_mm || []).map(function(d){ return 'Ø' + d; }).join(', ');
       var suburb = (pkg.suburbs || []).filter(Boolean).join(', ');
+      var pipeByAssetId = {};
+      pipes.forEach(function(p){ pipeByAssetId[String(p.asset_id)] = p; });
       var assetIds = (pkg.asset_ids || []).map(function(a){
-        return linkAssetId(typeof a === 'object' && a ? a.assetId : a);
+        var uid = String(typeof a === 'object' && a ? a.assetId : a);
+        var pipe = pipeByAssetId[uid] || {};
+        var isC6 = !!pipe.is_c6_addon;
+        var isLocked = !isC6 && isReportPipeLocked(uid);
+        var color = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
+        var weight = isC6 ? ';font-weight:700' : '';
+        var title = isC6 ? 'Condition 6 add-on' : (isLocked ? 'Locked pipe' : 'Unlocked pipe');
+        return '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + color + ' !important;text-decoration:underline;cursor:pointer' + weight + '" title="' + esc(title) + '">' + esc(uid) + '</a>';
       }).join(', ');
       var pkgIdCell = '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span>'
         + '<a href="#reportPackagesMap" class="pkg-row-link" data-report-package-id="' + esc(pkg.id) + '" title="Show ' + esc(pkg.id) + ' on the map" style="font-weight:800">' + esc(pkg.id) + '</a></td>';
