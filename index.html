@@ -8692,7 +8692,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '</main>',
     '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Report — read-only.</footer>',
     '<script id="report-data" type="application/json">' + json + '<\/script>',
-    '<script>' + runtimeJs + '<\/script>',
+    '<script>' + runtimeJs.replace(/<\/script/gi, '<\\/script') + '<\/script>',
     '</body>',
     '</html>'
   ].join('\n');
