@@ -9599,6 +9599,11 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ];
   function csvCell(v) {
     var s = String(v == null ? '' : v);
+    // CSV-injection guard: prefix with leading apostrophe so Excel/Sheets treats
+    // a leading =, +, -, @ as plain text instead of executing it as a formula.
+    if (s.length && (s.charAt(0) === '=' || s.charAt(0) === '+' || s.charAt(0) === '-' || s.charAt(0) === '@')) {
+      s = "'" + s;
+    }
     return /[,"\\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
   }
   function csvRow(arr) { return arr.map(csvCell).join(','); }
@@ -11016,7 +11021,12 @@ async function downloadReliningPackagesZip() {
     }
 
     function csvCell(v) {
-      const s = String(v ?? '');
+      let s = String(v ?? '');
+      // CSV-injection guard: prefix leading =, +, -, @ with an apostrophe so Excel
+      // does not execute them as formulas when the file is opened.
+      if (s.length && (s.charAt(0) === '=' || s.charAt(0) === '+' || s.charAt(0) === '-' || s.charAt(0) === '@')) {
+        s = "'" + s;
+      }
       if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return '"' + s.replace(/"/g, '""') + '"';
       }
@@ -13126,7 +13136,12 @@ async function downloadCctvPackagesZip() {
     }
 
     function csvCell(v) {
-      const s = String(v ?? '');
+      let s = String(v ?? '');
+      // CSV-injection guard: prefix leading =, +, -, @ with an apostrophe so Excel
+      // does not execute them as formulas when the file is opened.
+      if (s.length && (s.charAt(0) === '=' || s.charAt(0) === '+' || s.charAt(0) === '-' || s.charAt(0) === '@')) {
+        s = "'" + s;
+      }
       if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return '"' + s.replace(/"/g, '""') + '"';
       }
