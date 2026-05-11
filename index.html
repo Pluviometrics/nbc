@@ -5365,6 +5365,8 @@ function enforceReliningPackageRadius(packages, options = {}) {
   const radiusM = Number(options.proximityM);
   if (!Number.isFinite(radiusM) || radiusM <= 0) return packages;
   return (packages || []).map(pkg => {
+    // Locked packages are sealed: do not trim pipes regardless of radius.
+    if (isReliningPackageLocked(pkg.anchor_id)) return pkg;
     let assets = (pkg.assets || []).slice();
     let rejected = Number(pkg.rejected_far_candidate_count) || 0;
     let changed = true;
@@ -5386,7 +5388,7 @@ function enforceReliningPackageRadius(packages, options = {}) {
       ...pkg,
       rejected_far_candidate_count: rejected
     });
-  }).filter(pkg => (pkg.assets || []).length);
+  }).filter(pkg => (pkg.assets || []).length || isReliningPackageLocked(pkg.anchor_id));
 }
 
 function logReliningPackageDebug(packages, options = {}) {
@@ -5413,6 +5415,8 @@ function topupReliningPackages(packages, allCostedItems, options) {
   const pool = groupReliningItemsForPackaging(allCostedItems.filter(i => !packagedIds.has(i.assetId) && Number.isFinite(i.pipeCost)), options);
   const usedIds = new Set();
   const result = packages.map(pkg => {
+    // Locked packages are sealed: never top up.
+    if (isReliningPackageLocked(pkg.anchor_id)) return pkg;
     let remaining = options.maxPackageValue - pkg.total_cost;
     if (remaining <= 0) return pkg;
     const pkgGroup = options.proximityM ? (pkg.assets?.[0]?._cluster || '') : (options.groupBySuburb ? (pkg.primary_suburb || pkg.suburb || '') : '__all__');
@@ -5575,8 +5579,13 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
   }
   const excluded = new Set(Object.keys(reliningManualMoves?.c6Excluded || {}));
   const includedMap = reliningManualMoves?.c6Included || {};
+  // Locked packages are sealed: skip them during the auto-attach pit-share
+  // pass and reject manual-include targeting a locked anchor.
+  const lockedPkgIdx = new Set();
+  packages.forEach((pkg, pkgIdx) => { if (isReliningPackageLocked(pkg.anchor_id)) lockedPkgIdx.add(pkgIdx); });
   const pitToPackages = new Map();
   packages.forEach((pkg, pkgIdx) => {
+    if (lockedPkgIdx.has(pkgIdx)) return;
     (pkg.assets || []).forEach(asset => {
       [asset.usPit, asset.dsPit].forEach(pit => {
         if (!pit) return;
@@ -5634,7 +5643,8 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
       }
     }
   });
-  // Manual include pass: force-attach to chosen package regardless of diameter rule
+  // Manual include pass: force-attach to chosen package regardless of diameter rule.
+  // Reject manual-include into a locked package — locked = inviolate.
   Object.entries(includedMap).forEach(([assetId, anchorId]) => {
     if (used.has(assetId)) return;
     if (excluded.has(assetId)) return;
@@ -5642,6 +5652,7 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
     if (!c6) return;
     const pkgIdx = packages.findIndex(p => p.anchor_id === anchorId);
     if (pkgIdx === -1) return;
+    if (lockedPkgIdx.has(pkgIdx)) return; // sealed: don't attach
     const anchorAsset = (packages[pkgIdx].assets || []).find(a =>
       (c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
       (c6.dsPit && (a.usPit === c6.dsPit || a.dsPit === c6.dsPit))
@@ -5726,8 +5737,20 @@ function applyReliningManualMoves(packages, options = {}) {
   const { assignments, anchorOrigins } = reliningManualMoves;
   if (!Object.keys(assignments).length && !Object.keys(anchorOrigins).length) return packages;
 
+  // Carve out locked packages — they're sealed: do NOT manage their
+  // assignments and do NOT accept moves into them. Locked packages
+  // pass through unchanged and are appended back at the end.
+  const lockedPackages = (packages || []).filter(p => isReliningPackageLocked(p.anchor_id));
+  const lockedAnchorSet = new Set(lockedPackages.map(p => p.anchor_id));
+  const lockedAssetIds = new Set();
+  lockedPackages.forEach(p => (p.assets || []).forEach(a => {
+    const id = String(a.assetId || '').trim();
+    if (id) lockedAssetIds.add(id);
+  }));
+  const workingPackages = (packages || []).filter(p => !lockedAnchorSet.has(p.anchor_id));
+
   const assetCatalog = new Map();
-  packages.forEach(pkg => {
+  workingPackages.forEach(pkg => {
     (pkg.assets || []).forEach(asset => {
       const uid = String(asset.assetId || '');
       if (uid) assetCatalog.set(uid, { asset, currentAnchor: pkg.anchor_id });
@@ -5735,8 +5758,9 @@ function applyReliningManualMoves(packages, options = {}) {
   });
 
   const anchorPool = new Map();
-  packages.forEach(pkg => anchorPool.set(pkg.anchor_id, { existing: pkg, items: [] }));
+  workingPackages.forEach(pkg => anchorPool.set(pkg.anchor_id, { existing: pkg, items: [] }));
   Object.entries(anchorOrigins).forEach(([anchorId, info]) => {
+    if (lockedAnchorSet.has(anchorId)) return; // never resurrect locked anchors here
     if (!anchorPool.has(anchorId)) {
       anchorPool.set(anchorId, {
         existing: {
@@ -5754,20 +5778,32 @@ function applyReliningManualMoves(packages, options = {}) {
     const target = assignments[uid];
     let dest = currentAnchor;
     if (target) {
-      if (anchorPool.has(target)) dest = target;
-      else { delete assignments[uid]; assignmentsChanged = true; }
+      if (lockedAnchorSet.has(target)) {
+        // Move into a locked package is rejected; keep assignment in
+        // case the user later unlocks, just don't apply it now.
+      } else if (anchorPool.has(target)) {
+        dest = target;
+      } else {
+        delete assignments[uid];
+        assignmentsChanged = true;
+      }
     }
     anchorPool.get(dest).items.push(asset);
   });
 
   Object.keys(assignments).forEach(uid => {
+    // Preserve assignments for assets that live inside a locked package
+    // (those rows were carved out of the candidate pool, so they're not
+    // in assetCatalog — but they're not stale, they're frozen).
+    if (lockedAssetIds.has(uid)) return;
     if (!assetCatalog.has(uid)) { delete assignments[uid]; assignmentsChanged = true; }
   });
 
   if (assignmentsChanged) persistReliningManualMoves();
 
-  return [...anchorPool.values()].map(({ existing, items }) =>
+  const rebuilt = [...anchorPool.values()].map(({ existing, items }) =>
     buildReliningPackageObject(existing.package_id, items, options, existing));
+  return rebuilt.concat(lockedPackages);
 }
 
 function findReliningAssetCurrentAnchor(assetUid) {
@@ -7211,6 +7247,107 @@ async function loadPackagingPreview() {
   }
 }
 
+// Locked-package carve-out helpers
+//
+// On regeneration, packages whose anchor_id appears in
+// reliningManualMoves.locks.packages must survive UNCHANGED:
+//   - same pipe set (no additions, no removals)
+//   - same package_id (RLN_NNN preserved by the reserved-IDs guard
+//     in prioritiseAndRenumberReliningPackages)
+//   - same anchor_id
+//   - cost re-derived against the CURRENT rates table
+//
+// We achieve this by carving locked-package assets out of the
+// candidate pool BEFORE the engine builds packages, then merging the
+// re-costed locked packages back in BEFORE the priority/renumber
+// pass so the reserved-IDs guard can lock their numeric IDs.
+function _getReliningRowAssetId(row, index = 0) {
+  // Mirror the alias logic used by normaliseReliningCandidateRow so
+  // the carve-out keys line up exactly with what the engine produces.
+  return String(getValueByAliases(row, ['Asset', 'Asset Number', 'Asset_Number', 'OBJECTID', 'MAPKEY', 'CATLG_ID']) || `asset-${index + 1}`).trim();
+}
+
+function _collectLockedPackageSnapshots() {
+  const prev = lastPackagingGeneration?.packages;
+  if (!Array.isArray(prev) || !prev.length) return [];
+  if (!reliningManualMoves?.locks?.packages) return [];
+  return prev
+    .filter(pkg => pkg && pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id))
+    .map(pkg => ({
+      // shallow-copy the package shell, deep-copy assets so subsequent
+      // re-costing does not touch the live lastPackagingGeneration.
+      ...pkg,
+      assets: (pkg.assets || []).map(asset => ({ ...asset })),
+      asset_ids: [...(pkg.asset_ids || [])],
+      diameters_mm: [...(pkg.diameters_mm || [])],
+      suburbs: [...(pkg.suburbs || [])]
+    }));
+}
+
+function _buildLockedAssetIdSet(snapshots) {
+  const set = new Set();
+  (snapshots || []).forEach(pkg => {
+    (pkg.assets || []).forEach(asset => {
+      const id = String(asset.assetId || asset.Asset || '').trim();
+      if (id) set.add(id);
+    });
+  });
+  return set;
+}
+
+function _filterRowsExcludingAssetIds(rows, lockedIds) {
+  if (!lockedIds || lockedIds.size === 0) return rows;
+  return (rows || []).filter((row, index) => !lockedIds.has(_getReliningRowAssetId(row, index)));
+}
+
+function _filterPoolExcludingAssetIds(pool, lockedIds) {
+  if (!lockedIds || lockedIds.size === 0 || !Array.isArray(pool)) return pool;
+  return pool.filter(item => !lockedIds.has(String(item?.assetId || '').trim()));
+}
+
+function _recostLockedPackages(snapshots, options) {
+  // Recompute pipe_cost / ratePerM per asset against the CURRENT
+  // rates table; rebuild package totals via buildReliningPackageObject.
+  // Pipe membership is preserved exactly — if a rate match disappears
+  // we keep the previous pipe_cost rather than dropping the pipe.
+  return (snapshots || []).map(pkg => {
+    const recostedAssets = (pkg.assets || []).map(asset => {
+      const raw = asset.raw || {};
+      const rateInfo = (raw && Object.keys(raw).length)
+        ? getReliningRateInfoForRow(raw, options)
+        : { rate: null, lengthM: asset.lengthM, diameter: asset.diameterMm };
+      const lengthM = Number.isFinite(rateInfo.lengthM) ? rateInfo.lengthM : Number(asset.lengthM);
+      let pipeCost = (Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM)) ? rateInfo.rate * lengthM : null;
+      if (Number.isFinite(pipeCost)) {
+        if (options.trafficControl !== false) pipeCost += 2000;
+        if (options.projectInitiation !== false) pipeCost *= 1.15;
+      }
+      const finalCost = Number.isFinite(pipeCost) ? pipeCost : (Number.isFinite(asset.pipeCost) ? asset.pipeCost : null);
+      const finalRate = Number.isFinite(rateInfo.rate) ? rateInfo.rate : (Number.isFinite(asset.ratePerM) ? asset.ratePerM : null);
+      const orphaned = !raw || Object.keys(raw).length === 0;
+      return {
+        ...asset,
+        package_id: pkg.package_id,
+        ratePerM: finalRate,
+        rate_per_m: finalRate,
+        pipeCost: finalCost,
+        pipe_cost: finalCost,
+        rateDescriptor: rateInfo.descriptor || asset.rateDescriptor || '',
+        rateMatchCount: Number.isFinite(rateInfo.matchCount) ? rateInfo.matchCount : (asset.rateMatchCount || 0),
+        costStatus: Number.isFinite(finalCost) ? 'Costed' : 'Uncosted',
+        _orphaned: orphaned ? true : (asset._orphaned || false)
+      };
+    });
+    // buildReliningPackageObject rebuilds totals/diameters/etc. from items,
+    // and `existing` (passed last) preserves anchor_id, original_package_id,
+    // priority fields, etc.
+    return buildReliningPackageObject(pkg.package_id, recostedAssets, options, {
+      ...pkg,
+      original_package_id: pkg.original_package_id || pkg.package_id
+    });
+  });
+}
+
 async function generateReliningPackages() {
   try {
     if (!reliningAssetsRows.length) throw new Error('Upload the assets file first.');
@@ -7218,7 +7355,20 @@ async function generateReliningPackages() {
     showLoad('Filtering relining candidates...');
     await waitForPaint();
     const options = getReliningPackagingOptions();
-    const preview = buildReliningPackagingPreview(reliningAssetsRows, options);
+    // --- Locked-package carve-out: capture locked snapshots and exclude
+    // their assets from the candidate pool before any engine work. ---
+    const lockedSnapshots = _collectLockedPackageSnapshots();
+    const lockedAssetIds = _buildLockedAssetIdSet(lockedSnapshots);
+    const carvedRows = _filterRowsExcludingAssetIds(reliningAssetsRows, lockedAssetIds);
+    const preview = buildReliningPackagingPreview(carvedRows, options);
+    // Belt-and-braces: also strip locked assets from c6Pool / costed in case
+    // a locked-asset row slipped through (e.g. duplicate IDs in the register).
+    if (lockedAssetIds.size) {
+      preview.costed = _filterPoolExcludingAssetIds(preview.costed, lockedAssetIds);
+      preview.uncosted = _filterPoolExcludingAssetIds(preview.uncosted, lockedAssetIds);
+      preview.eligible = _filterPoolExcludingAssetIds(preview.eligible, lockedAssetIds);
+      preview.c6Pool = _filterPoolExcludingAssetIds(preview.c6Pool, lockedAssetIds);
+    }
     lastReliningPackagingPreview = preview;
     setLoadTxt('Matching relining rates...');
     await waitForPaint();
@@ -7240,14 +7390,23 @@ async function generateReliningPackages() {
         if (options.reliningMode === 'Condition 8 only') lowerMode = 'Condition 7 only';
         else if (options.reliningMode === 'Condition 7 only') lowerMode = 'Condition 8 only';
         if (lowerMode) {
-          const lowerPreview = buildReliningPackagingPreview(reliningAssetsRows, { ...options, reliningMode: lowerMode });
-          packages = topupReliningPackages(packages, lowerPreview.costed, options);
+          const lowerPreview = buildReliningPackagingPreview(carvedRows, { ...options, reliningMode: lowerMode });
+          const lowerCosted = _filterPoolExcludingAssetIds(lowerPreview.costed, lockedAssetIds);
+          packages = topupReliningPackages(packages, lowerCosted, options);
         }
       }
     }
     packages = enforceReliningPackageRadius(packages, options);
+    // --- Merge locked packages back: re-cost against current rates,
+    // preserve anchor_id / package_id / asset list / priority fields. ---
+    if (lockedSnapshots.length) {
+      const recosted = _recostLockedPackages(lockedSnapshots, options);
+      packages = packages.concat(recosted);
+    }
     setLoadTxt('Prioritising and renumbering packages...');
     await waitForPaint();
+    // prioritiseAndRenumberReliningPackages already reserves locked-package
+    // numeric IDs so unlocked packages renumber around them.
     packages = prioritiseAndRenumberReliningPackages(packages);
     packages = enforceReliningPackageRadius(packages, options);
     packages = ensurePackageAnchors(packages);
