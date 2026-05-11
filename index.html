@@ -7596,12 +7596,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return RELINING_PACKAGE_COLORS[Math.abs(i) % RELINING_PACKAGE_COLORS.length];
   }
 
-  function reportPipeWeight(d) {
-    var v = Number(d);
-    if (!v || isNaN(v) || v <= 0) return 2;
-    return Math.max(2, Math.min(12, v / 50));
-  }
-
   function renderReportPackagesMap(opts) {
     opts = opts || {};
     ensureReportMap();
@@ -7876,8 +7870,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         '</dl>' +
         (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
         '<div class="pkg-card-actions">' +
-          '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
-          '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
+          (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
+          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
           '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
         '</div>' +
         '</div>';
@@ -7909,7 +7903,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td class="r">' + esc(maxSpanKm) + '</td>' +
           '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
           '<td>' + esc(notes.join('; ')) + '</td>' +
-          '<td><a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · <a class="pkg-row-link" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+          '<td>' + (pkg.dedicated_map_url ? '<a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · ' : '') + '<button class="pkg-row-link" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit;text-decoration:underline" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
           '</tr>';
       }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
   }
@@ -7943,8 +7937,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '<header class="pkg-report-head">' +
         '<span class="pipe-color" style="background:' + color + '"></span>' +
         '<h3>' + esc(pkg.id) + '</h3>' +
-        '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' +
-        '<a class="pkg-card-link-btn" href="#mapPanel" data-package-id="' + esc(pkg.id) + '">Highlight ↓</a>' +
+        (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
+        '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
       '</header>' +
       '<div class="pkg-report-meta">' +
         '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
@@ -8021,246 +8015,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   });
   renderPipes();
 
-  // MAP
-  var map = null;
-  var assetMarkers = {};
-  var markersByPackage = {};
-  var polylinesByPackage = {};
-  var packageBounds = {};
-  var selectedPackageId = null;
-
-  function packagePopupHtml(pkg) {
-    var assetIdsShown = (pkg.asset_ids || []).slice(0, 10);
-    var assetList = assetIdsShown.length ? linkAssetIdList(assetIdsShown) : '';
-    var more = (pkg.asset_ids || []).length > 10 ? ' …' : '';
-    var html = '';
-    html += '<div style="min-width:220px;max-width:280px;font-family:Segoe UI,system-ui,sans-serif">';
-    html += '<div style="font-weight:800;color:#1A2B3C;margin-bottom:6px;font-size:14px">' + esc(pkg.id) + '</div>';
-    html += '<div style="font-size:12px;color:#5A6B7A;line-height:1.55">';
-    html += '<div><strong>Suburbs:</strong> ' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>';
-    html += '<div><strong>Pipes:</strong> ' + pkg.pipe_count + '</div>';
-    html += '<div><strong>Length:</strong> ' + Number(pkg.total_length_m).toFixed(1) + ' m</div>';
-    html += '<div><strong>Max span:</strong> ' + Math.round(pkg.max_span_m) + ' m</div>';
-    if (pkg.max_from_centroid_m) html += '<div><strong>Max from centre:</strong> ' + pkg.max_from_centroid_m + ' m</div>';
-    if (options.proximityM) html += '<div><strong>Search radius:</strong> ' + options.proximityM + ' m</div>';
-    var diamKeys = Object.keys(pkg.diameterMix || {});
-    if (diamKeys.length) html += '<div><strong>Diameters:</strong> ' + esc(diamKeys.map(function(k){ return k + 'mm × ' + pkg.diameterMix[k]; }).join(', ')) + '</div>';
-    if (pkg.distance_warning) html += '<div style="color:#b91c1c"><strong>Warning:</strong> ' + esc(pkg.distance_warning) + '</div>';
-    html += '<div><strong>Cost:</strong> ' + esc(fmtCurrency(pkg.total_cost) || '—') + '</div>';
-    html += '<div><strong>Assets:</strong> ' + (assetList || 'None') + more + '</div>';
-    html += '</div>';
-    html += '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">';
-    html += '<a class="select-pkg-map-link" href="' + esc(pkg.dedicated_map_url || '#mapPanel') + '" target="_blank" rel="noopener" style="padding:5px 10px;font-size:11px;background:#005F5B;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open map ↗</a>';
-    html += '<a class="select-pkg-link" href="#' + pkgAnchor(pkg.id) + '" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#00847F;color:#fff;border:0;border-radius:4px;font-weight:600;text-decoration:none">Open report ↓</a>';
-    html += '<button class="select-pkg-btn" data-package-id="' + esc(pkg.id) + '" style="padding:5px 10px;font-size:11px;background:#1A2B3C;color:#fff;border:0;border-radius:4px;cursor:pointer;font-weight:600">Highlight</button>';
-    html += '</div>';
-    html += '</div>';
-    return html;
-  }
-
-  function setSelection(id, opts) {
-    opts = opts || {};
-    selectedPackageId = id || null;
-    Object.keys(polylinesByPackage).forEach(function(pid) {
-      var pl = polylinesByPackage[pid];
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      pl.setStyle({ weight: sel ? 3 : 2.5, opacity: sel ? 0.95 : (dim ? 0.12 : 0.75), dashArray: '12 9' });
-      if (sel && pl.bringToFront) pl.bringToFront();
-    });
-    Object.keys(markersByPackage).forEach(function(pid) {
-      var sel = (pid === selectedPackageId);
-      var dim = (selectedPackageId && pid !== selectedPackageId);
-      markersByPackage[pid].forEach(function(m) {
-        m.setStyle({ radius: sel ? 9 : 5, opacity: sel ? 1 : (dim ? 0.25 : 1), fillOpacity: sel ? 1 : (dim ? 0.18 : 0.78), weight: sel ? 2.5 : 1.5, color: sel ? '#111827' : '#fff' });
-      });
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('#packagesTable tr.package-row'), function(tr) {
-      tr.classList.toggle('selected', tr.getAttribute('data-package-id') === selectedPackageId);
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('.pkg-card[data-package-id]'), function(card) {
-      card.classList.toggle('selected', card.getAttribute('data-package-id') === selectedPackageId);
-    });
-    Array.prototype.forEach.call(document.querySelectorAll('.pkg-report[data-package-id]'), function(sec) {
-      sec.classList.toggle('selected', sec.getAttribute('data-package-id') === selectedPackageId);
-    });
-    var sub = document.getElementById('mapSubtitle');
-    var clearBtn = document.getElementById('clearBtn');
-    if (selectedPackageId) {
-      var pkg = packages[pkgIndex[selectedPackageId]];
-      sub.innerHTML = '<strong>' + esc(selectedPackageId) + '</strong> · ' + pkg.pipe_count + ' pipes · ' + Number(pkg.total_length_m).toFixed(1) + ' m' + (pkg.max_span_m ? ' · span ' + Math.round(pkg.max_span_m) + ' m' : '');
-      if (clearBtn) clearBtn.disabled = false;
-    } else {
-      sub.textContent = 'No package selected';
-      if (clearBtn) clearBtn.disabled = true;
-    }
-    if (selectedPackageId && opts.zoom !== false && map && packageBounds[selectedPackageId]) {
-      map.flyToBounds(packageBounds[selectedPackageId], { duration: 0.5 });
-    }
-  }
-
-  function initMap() {
-    var mapEl = document.getElementById('map');
-    if (typeof L === 'undefined') {
-      document.getElementById('mapPanel').insertAdjacentHTML('beforeend', '<div class="map-warning">Leaflet failed to load (offline or CDN blocked) — map disabled. Tables and reasoning remain functional.</div>');
-      return;
-    }
-    map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
-    var tileFailedNoticed = false;
-    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: '&copy; Spatial Services, NSW Department of Customer Service', maxZoom: 21
-    });
-    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap, &copy; CARTO', subdomains: 'abcd', maxZoom: 19
-    });
-    sixAerial.on('tileerror', function() {
-      if (tileFailedNoticed) return; tileFailedNoticed = true;
-      var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
-      n.textContent = 'Aerial tiles could not be loaded (offline?). Toggle to Streets in the map control, or use markers and connectors.';
-      mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
-    });
-    sixAerial.addTo(map);
-    L.control.layers(
-      { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
-      null,
-      { position: 'topright', collapsed: true }
-    ).addTo(map);
-
-    var allPoints = [];
-    packages.forEach(function(pkg) {
-      var color = colorFor(pkg.id);
-      var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
-      pkgPipes.forEach(function(p) { allPoints.push([p.lat, p.lon]); });
-      // Nearest-neighbour ordering through pipe centres — same generator the
-      // live map uses for its selected-package join line. No centroid involved.
-      var pkgPoints = [];
-      if (pkgPipes.length >= 2) {
-        var nnRemaining = pkgPipes.slice(1).map(function(p) { return { lat: p.lat, lon: p.lon }; });
-        var nnOrdered = [{ lat: pkgPipes[0].lat, lon: pkgPipes[0].lon }];
-        while (nnRemaining.length) {
-          var nnLast = nnOrdered[nnOrdered.length - 1];
-          var nnBest = 0;
-          var nnBestDistSq = Infinity;
-          for (var nnI = 0; nnI < nnRemaining.length; nnI += 1) {
-            var nnDLat = nnRemaining[nnI].lat - nnLast.lat;
-            var nnDLon = nnRemaining[nnI].lon - nnLast.lon;
-            var nnDistSq = nnDLat * nnDLat + nnDLon * nnDLon;
-            if (nnDistSq < nnBestDistSq) { nnBestDistSq = nnDistSq; nnBest = nnI; }
-          }
-          nnOrdered.push(nnRemaining.splice(nnBest, 1)[0]);
-        }
-        pkgPoints = nnOrdered.map(function(c) { return [c.lat, c.lon]; });
-      } else if (pkgPipes.length === 1) {
-        pkgPoints = [[pkgPipes[0].lat, pkgPipes[0].lon]];
-      }
-      if (pkgPoints.length > 1) {
-        // White halo underneath, black dashed on top — matches the live map.
-        L.polyline(pkgPoints, { color: '#FFFFFF', weight: 5, opacity: 0.55, dashArray: '12 9', interactive: false }).addTo(map);
-        var pl = L.polyline(pkgPoints, { color: '#000000', weight: 2.5, opacity: 0.75, dashArray: '12 9', interactive: false }).addTo(map);
-        polylinesByPackage[pkg.id] = pl;
-      }
-      var pipeMarkers = [];
-      pkgPipes.forEach(function(p) {
-        var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
-        marker.bindPopup(
-          '<strong>' + (p.asset_id ? 'ASSET ID - ' + linkAssetId(p.asset_id) : 'Pipe') + (p.package_id ? ' - ' + esc(p.package_id) : '') + '</strong><br>' +
-          'Suburb: ' + esc(p.suburb) + '<br>' +
-          'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '&mdash;') + '<br>' +
-          (p.material ? 'Material: ' + esc(p.material) + '<br>' : '') +
-          'Condition: ' + esc(p.condition || '—') + '<br>' +
-          'Length: ' + fmtNum(p.length_m, 1) + ' m' +
-          (p.pipe_cost ? '<br>Cost: ' + esc(fmtCurrency(p.pipe_cost)) : '') +
-          (p.address ? '<br>Address: ' + esc(p.address) : '') +
-          (p.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '')
-        );
-        marker.on('click', function(e) { L.DomEvent.stopPropagation(e); setSelection(pkg.id, { zoom: false }); });
-        marker.addTo(map);
-        assetMarkers[p.asset_id] = marker;
-        pipeMarkers.push(marker);
-      });
-      markersByPackage[pkg.id] = pipeMarkers;
-      if (pkgPoints.length) packageBounds[pkg.id] = L.latLngBounds(pkgPoints).pad(0.25);
-    });
-
-    if (allPoints.length) {
-      map.fitBounds(L.latLngBounds(allPoints).pad(0.1));
-    } else {
-      map.setView([-33.75, 151.27], 11);
-      var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
-      n.textContent = 'No pipe coordinates available — map shows default extent only.';
-      mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
-    }
-  }
-  initMap();
-
-  // BUTTONS
-  var fitBtn = document.getElementById('fitBtn');
-  if (fitBtn) fitBtn.addEventListener('click', function() {
-    if (!map) return;
-    var pts = [];
-    Object.keys(packageBounds).forEach(function(pid) { var b = packageBounds[pid]; if (b) { pts.push(b.getNorthEast()); pts.push(b.getSouthWest()); } });
-    if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.05));
-  });
-  document.getElementById('clearBtn').addEventListener('click', function() { setSelection(null); });
-
-  // PACKAGE / PIPE / CARD INTERACTIONS
-  document.getElementById('packagesTable').addEventListener('click', function(e) {
-    var link = e.target.closest && e.target.closest('a.pkg-row-link');
-    if (link) return;
-    var tr = e.target.closest && e.target.closest('tr.package-row');
-    if (!tr) return;
-    setSelection(tr.getAttribute('data-package-id'));
-  });
-
-  document.getElementById('pipesTable').addEventListener('click', function(e) {
-    var tr = e.target.closest && e.target.closest('tr[data-asset]');
-    if (!tr) return;
-    Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
-    tr.classList.add('selected');
-    var asset = tr.getAttribute('data-asset');
-    var pkgId = tr.getAttribute('data-package-id');
-    var marker = assetMarkers[asset];
-    if (pkgId) setSelection(pkgId, { zoom: false });
-    if (marker && map) { map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 16)); marker.openPopup(); }
-  });
-
-  document.body.addEventListener('click', function(e) {
-    var btn = e.target.closest && e.target.closest('.select-pkg-btn');
-    if (btn) {
-      var id = btn.getAttribute('data-package-id');
-      if (id) setSelection(id);
-      return;
-    }
-    var card = e.target.closest && e.target.closest('.pkg-card[data-package-id]');
-    if (card && !e.target.closest('a')) {
-      setSelection(card.getAttribute('data-package-id'));
-    }
-  });
-
-  // DEEP-LINK HANDLING — #pkg-RLN_007 selects that package; jumping to #mapPanel scrolls to map
-  function handleHash() {
-    var h = (location.hash || '').replace(/^#/, '');
-    if (!h) return;
-    if (h === 'mapPanel') return;
-    if (h.indexOf('pkg-') === 0) {
-      var matched = packages.find(function(p) { return pkgAnchor(p.id) === h; });
-      if (matched) setSelection(matched.id);
-    }
-  }
-  window.addEventListener('hashchange', handleHash);
-  handleHash();
-
-  // Map-link buttons in cards / rows / reports — also select the package and (when going to #mapPanel) smooth-scroll.
-  document.body.addEventListener('click', function(e) {
-    var a = e.target.closest && e.target.closest('a.pkg-card-link-btn, a.pkg-row-link, a.select-pkg-link');
-    if (!a) return;
-    var id = a.getAttribute('data-package-id');
-    if (id && pkgIndex[id] != null) setSelection(id, { zoom: true });
-    if (a.getAttribute('href') === '#mapPanel') {
-      var mp = document.getElementById('mapPanel');
-      if (mp && mp.scrollIntoView) { e.preventDefault(); mp.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-    }
-  });
 })();
 `;
 
@@ -8409,22 +8163,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<label class="export-btn" id="reportC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowC6AddOns" checked onchange="renderReportPackagesMap({fit:false})" style="margin:0"> Show package C6 add-ons</label>',
     '</div>',
     '<div id="reportPackagesMap" style="height:520px;border:1px solid #e5e7eb;border-radius:8px"></div>',
-    '</div>',
-    '</div>',
-    '<div class="pkg-panel" id="mapPanel">',
-    '<div class="lbl">Package Map</div>',
-    '<div class="cctv-map-wrap">',
-    '<div class="cctv-map-toolbar">',
-    '<div>',
-    '<div class="cctv-map-title">Relining Package Map</div>',
-    '<div class="cctv-map-sub" id="mapSubtitle">No package selected</div>',
-    '</div>',
-    '<div class="ca-actions">',
-    '<button type="button" class="export-btn" id="fitBtn">Fit Packages</button>',
-    '<button type="button" class="export-btn" id="clearBtn" disabled>Clear Selection</button>',
-    '</div>',
-    '</div>',
-    '<div id="map"></div>',
     '</div>',
     '</div>',
     '<div class="pkg-panel"><div class="lbl">Per-Package Written Reports</div><div id="packageReports"></div></div>',
