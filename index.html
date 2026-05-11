@@ -9624,24 +9624,23 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       SUBURB:    6,  // F
       DIAMETER:  7,  // G
       LENGTH:    8,  // H
-      CONDSCORE: 9,  // I
-      CONDITION: 10, // J
-      US_NODE:   11, // K
-      DS_NODE:   12, // L
-      RATE:      13, // M
-      COST:      14, // N
-      MAPS:      15, // O
-      DONE:      16  // P
+      CONDITION: 9,  // I
+      US_NODE:   10, // J
+      DS_NODE:   11, // K
+      RATE:      12, // L
+      COST:      13, // M
+      MAPS:      14, // N
+      DONE:      15  // O
     };
     ws.columns = [
       { width: 4 },{ width: 5 },{ width: 14 },{ width: 12 },{ width: 36 },
-      { width: 18 },{ width: 10 },{ width: 10 },{ width: 14 },{ width: 32 },
-      { width: 12 },{ width: 12 },{ width: 11 },{ width: 14 },{ width: 10 },
-      { width: 10 },{ width: 4 }
+      { width: 18 },{ width: 10 },{ width: 10 },{ width: 32 },{ width: 12 },
+      { width: 12 },{ width: 11 },{ width: 14 },{ width: 10 },{ width: 10 },
+      { width: 4 }
     ];
 
     function paintRow(rowIdx, fillArgb) {
-      for (var c = 1; c <= 17; c++) {
+      for (var c = 1; c <= 16; c++) {
         ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
       }
     }
@@ -9650,8 +9649,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     ws.getRow(2).height = 52;
     paintRow(2, NAVY_DARK);
-    ws.mergeCells('M2:P2');
-    var c2 = ws.getCell('M2');
+    ws.mergeCells('L2:O2');
+    var c2 = ws.getCell('L2');
     c2.value = String(meta.packageId || '');
     c2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
     c2.font = { name: 'Arial', size: 20, bold: true, color: { argb: WHITE } };
@@ -9661,17 +9660,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     paintRow(3, NAVY_DARK);
 
     ws.getRow(4).height = 18;
-    ws.mergeCells('B4:P4');
+    ws.mergeCells('B4:O4');
     var c4 = ws.getCell('B4');
     c4.value = 'STORMWATER ASSET MANAGEMENT  \\u00b7  PIPE RELINING PROGRAM';
     c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
     c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(5).height = 28;
-    ws.mergeCells('B5:P5');
+    ws.mergeCells('B5:O5');
     var c5 = ws.getCell('B5');
     c5.value = (kind === 'cctv'
       ? 'CCTV Inspection Package  \\u2014  Works Schedule'
@@ -9680,17 +9679,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
     c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(6).height = 18;
-    ws.mergeCells('B6:P6');
+    ws.mergeCells('B6:O6');
     var c6 = ws.getCell('B6');
     c6.value = 'Prepared by Stormwater Asset Management  \\u00b7  Contractor use only  \\u00b7  For field verification';
     c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
     c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(7).height = 6;
 
@@ -9708,9 +9707,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var spanDisp = (Number.isFinite(meta.maxSpanKm) ? meta.maxSpanKm.toFixed(1) : '0.0') + ' km';
     paintTile('B8:D8', 'PACKAGE',        String(meta.packageId || ''));
     paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
-    paintTile('H8:J8', 'TOTAL LENGTH',   lengthDisp);
-    paintTile('K8:M8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-    paintTile('N8:P8', 'MAX SPREAD',     spanDisp);
+    paintTile('H8:I8', 'TOTAL LENGTH',   lengthDisp);
+    paintTile('J8:L8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
+    paintTile('M8:O8', 'MAX SPREAD',     spanDisp);
 
     ws.getRow(9).height = 6;
     ws.getRow(10).height = 3;
@@ -9718,9 +9717,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     ws.getRow(12).height = 22;
     var headers = (kind === 'cctv')
-      ? ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done']
-      : ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done'];
-    for (var i = 0; i < 15; i++) {
+      ? ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done']
+      : ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done'];
+    for (var i = 0; i < 14; i++) {
       var hCell = ws.getCell(12, 2 + i);
       hCell.value = headers[i];
       hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -9785,16 +9784,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       gCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
       gCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var hCell2 = ws.getCell(r, COL.CONDSCORE);
-      var score = Number(item.conditionScore) || 0;
-      hCell2.value = score || null;
-      hCell2.numFmt = '0';
-      var scoreColor = TEXT_DARK;
-      if (score === 7 || score === 8) scoreColor = RED;
-      else if (score === 6) scoreColor = ORANGE;
-      hCell2.font = { name: 'Arial', size: 10, bold: true, color: { argb: scoreColor } };
-      hCell2.alignment = { horizontal: 'center', vertical: 'middle' };
-
       var iCell = ws.getCell(r, COL.CONDITION);
       iCell.value = String(item.conditionLabel || '');
       iCell.font = { name: 'Arial', size: 8, color: { argb: TEXT_GREY } };
@@ -9802,12 +9791,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
       var jCell = ws.getCell(r, COL.US_NODE);
       jCell.value = item.usNode == null ? '' : item.usNode;
-      jCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
+      jCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
       jCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
       var kCell = ws.getCell(r, COL.DS_NODE);
       kCell.value = item.dsNode == null ? '' : item.dsNode;
-      kCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
+      kCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
       kCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
       var lCell = ws.getCell(r, COL.RATE);
@@ -9864,14 +9853,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       gTot.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
       gTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var lTot = ws.getCell('M' + totalsRowIdx);
-      lTot.value = { formula: 'AVERAGE(M' + startDataRow + ':M' + lastDataRow + ')' };
-      lTot.numFmt = '0.00';
-      lTot.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
-      lTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+      // L: Rate — left blank (no AVERAGE formula)
 
-      var mTot = ws.getCell('N' + totalsRowIdx);
-      mTot.value = { formula: 'SUM(N' + startDataRow + ':N' + lastDataRow + ')' };
+      var mTot = ws.getCell('M' + totalsRowIdx);
+      mTot.value = { formula: 'SUM(M' + startDataRow + ':M' + lastDataRow + ')' };
       mTot.numFmt = '"$"#,##0.00';
       mTot.font = { name: 'Arial', size: 11, bold: true, color: { argb: TEXT_DARK } };
       mTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
@@ -9879,7 +9864,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     var footerRow = totalsRowIdx + 2;
     ws.getRow(footerRow).height = 14;
-    ws.mergeCells('B' + footerRow + ':P' + footerRow);
+    ws.mergeCells('B' + footerRow + ':O' + footerRow);
     var footer = ws.getCell('B' + footerRow);
     footer.value = 'Northern Beaches Council  \\u00b7  Stormwater Asset Management  \\u00b7  This document is prepared for contractor use.';
     footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
@@ -11320,10 +11305,10 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   const sheetName = String(meta.packageId || 'Package').slice(0, 31);
   const ws = wb.addWorksheet(sheetName, { views: [{ showGridLines: false }] });
 
-  // Column widths: A (4) + 15 content cols + Q (4) = 17 columns
+  // Column widths: A (4) + 14 content cols + P (4) = 16 columns
   // B # | C Asset ID | D CiA | E Address | F Suburb | G Ø (mm) | H Length (m) |
-  // I Cond. Score | J Condition | K US Node | L DS Node | M Rate ($/m) |
-  // N Cost ($) | O Maps | P Done
+  // I Condition | J US Node | K DS Node | L Rate ($/m) |
+  // M Cost ($) | N Maps | O Done
   const COL = {
     ROWNUM:    2,  // B
     ASSET_ID:  3,  // C
@@ -11332,37 +11317,35 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     SUBURB:    6,  // F
     DIAMETER:  7,  // G
     LENGTH:    8,  // H
-    CONDSCORE: 9,  // I
-    CONDITION: 10, // J
-    US_NODE:   11, // K
-    DS_NODE:   12, // L
-    RATE:      13, // M
-    COST:      14, // N
-    MAPS:      15, // O
-    DONE:      16  // P
+    CONDITION: 9,  // I
+    US_NODE:   10, // J
+    DS_NODE:   11, // K
+    RATE:      12, // L
+    COST:      13, // M
+    MAPS:      14, // N
+    DONE:      15  // O
   };
   ws.columns = [
     { width: 4 },   // A gutter
     { width: 5 },   // B #
     { width: 14 },  // C Asset ID
-    { width: 12 },  // D CiA  (NEW)
+    { width: 12 },  // D CiA
     { width: 36 },  // E Address
     { width: 18 },  // F Suburb
     { width: 10 },  // G Diameter
     { width: 10 },  // H Length
-    { width: 14 },  // I Cond Score
-    { width: 32 },  // J Condition
-    { width: 12 },  // K US Node
-    { width: 12 },  // L DS Node
-    { width: 11 },  // M Rate
-    { width: 14 },  // N Cost
-    { width: 10 },  // O Maps
-    { width: 10 },  // P Done
-    { width: 4 }    // Q gutter
+    { width: 32 },  // I Condition
+    { width: 12 },  // J US Node
+    { width: 12 },  // K DS Node
+    { width: 11 },  // L Rate
+    { width: 14 },  // M Cost
+    { width: 10 },  // N Maps
+    { width: 10 },  // O Done
+    { width: 4 }    // P gutter
   ];
 
   function paintRow(rowIdx, fillArgb) {
-    for (let c = 1; c <= 17; c++) {
+    for (let c = 1; c <= 16; c++) {
       ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
     }
   }
@@ -11370,11 +11353,11 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   // Row 1: blank (height 8)
   ws.getRow(1).height = 8;
 
-  // Row 2: Package id pill (M2:P2 merged) on dark navy band
+  // Row 2: Package id pill (L2:O2 merged) on dark navy band
   ws.getRow(2).height = 52;
   paintRow(2, NAVY_DARK);
-  ws.mergeCells('M2:P2');
-  const c2 = ws.getCell('M2');
+  ws.mergeCells('L2:O2');
+  const c2 = ws.getCell('L2');
   c2.value = String(meta.packageId || '');
   c2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
   c2.font = { name: 'Arial', size: 20, bold: true, color: { argb: WHITE } };
@@ -11386,19 +11369,19 @@ function buildStyledPackageWorkbook(meta, items, kind) {
 
   // Row 4: kicker text
   ws.getRow(4).height = 18;
-  ws.mergeCells('B4:P4');
+  ws.mergeCells('B4:O4');
   const c4 = ws.getCell('B4');
   c4.value = 'STORMWATER ASSET MANAGEMENT  ·  PIPE RELINING PROGRAM';
   c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
   c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-  // also fill A4 and Q4 to match the dark band
+  // also fill A4 and P4 to match the dark band
   ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 5: title
   ws.getRow(5).height = 28;
-  ws.mergeCells('B5:P5');
+  ws.mergeCells('B5:O5');
   const c5 = ws.getCell('B5');
   c5.value = (kind === 'cctv'
     ? 'CCTV Inspection Package  —  Works Schedule'
@@ -11407,18 +11390,18 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
   c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 6: subtitle
   ws.getRow(6).height = 18;
-  ws.mergeCells('B6:P6');
+  ws.mergeCells('B6:O6');
   const c6 = ws.getCell('B6');
   c6.value = 'Prepared by Stormwater Asset Management  ·  Contractor use only  ·  For field verification';
   c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
   c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 7: blank gap
   ws.getRow(7).height = 6;
@@ -11438,21 +11421,21 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   const spanDisp = (Number.isFinite(meta.maxSpanKm) ? meta.maxSpanKm.toFixed(1) : '0.0') + ' km';
   paintTile('B8:D8', 'PACKAGE',        String(meta.packageId || ''));
   paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
-  paintTile('H8:J8', 'TOTAL LENGTH',   lengthDisp);
-  paintTile('K8:M8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-  paintTile('N8:P8', 'MAX SPREAD',     spanDisp);
+  paintTile('H8:I8', 'TOTAL LENGTH',   lengthDisp);
+  paintTile('J8:L8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
+  paintTile('M8:O8', 'MAX SPREAD',     spanDisp);
 
   // Rows 9-11: blank decorative
   ws.getRow(9).height = 6;
   ws.getRow(10).height = 3;
   ws.getRow(11).height = 4;
 
-  // Row 12: header row (cols B..P)
+  // Row 12: header row (cols B..O)
   ws.getRow(12).height = 22;
   const headers = (kind === 'cctv')
-    ? ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done']
-    : ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done'];
-  for (let i = 0; i < 15; i++) {
+    ? ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done']
+    : ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done'];
+  for (let i = 0; i < 14; i++) {
     const cell = ws.getCell(12, 2 + i);
     cell.value = headers[i];
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -11525,36 +11508,25 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     gCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
     gCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // I: Cond. Score (color rules)
-    const hCell = ws.getCell(r, COL.CONDSCORE);
-    const score = Number(item.conditionScore) || 0;
-    hCell.value = score || null;
-    hCell.numFmt = '0';
-    let scoreColor = TEXT_DARK;
-    if (score === 7 || score === 8) scoreColor = RED;
-    else if (score === 6) scoreColor = ORANGE;
-    hCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: scoreColor } };
-    hCell.alignment = { horizontal: 'center', vertical: 'middle' };
-
-    // J: Condition
+    // I: Condition
     const iCell = ws.getCell(r, COL.CONDITION);
     iCell.value = String(item.conditionLabel || '');
     iCell.font = { name: 'Arial', size: 8, color: { argb: TEXT_GREY } };
     iCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1, wrapText: false };
 
-    // K: US Node
+    // J: US Node
     const jCell = ws.getCell(r, COL.US_NODE);
     jCell.value = item.usNode == null ? '' : item.usNode;
-    jCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
+    jCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
     jCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // L: DS Node
+    // K: DS Node
     const kCell = ws.getCell(r, COL.DS_NODE);
     kCell.value = item.dsNode == null ? '' : item.dsNode;
-    kCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
+    kCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
     kCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // M: Rate (2dp)
+    // L: Rate (2dp)
     const lCell = ws.getCell(r, COL.RATE);
     const rate = Number(item.ratePerM);
     lCell.value = Number.isFinite(rate) ? rate : null;
@@ -11562,7 +11534,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     lCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_GREY } };
     lCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // N: Cost (currency)
+    // M: Cost (currency)
     const mCell = ws.getCell(r, COL.COST);
     const cost = Number(item.cost);
     mCell.value = Number.isFinite(cost) ? cost : null;
@@ -11570,7 +11542,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     mCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     mCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // O: Maps hyperlink
+    // N: Maps hyperlink
     const nCell = ws.getCell(r, COL.MAPS);
     const addrText = String(item.address || '').trim();
     if (addrText) {
@@ -11582,7 +11554,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     nCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: !!addrText };
     nCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // P: Done (empty checkbox-style cell)
+    // O: Done (empty checkbox-style cell)
     const oCell = ws.getCell(r, COL.DONE);
     oCell.value = '';
     oCell.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
@@ -11615,16 +11587,11 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     gTot.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     gTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // M: AVERAGE(M13:M<lastDataRow>) — Rate
-    const lTot = ws.getCell('M' + totalsRow);
-    lTot.value = { formula: 'AVERAGE(M' + startDataRow + ':M' + lastDataRow + ')' };
-    lTot.numFmt = '0.00';
-    lTot.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
-    lTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
+    // L: Rate — left blank (no AVERAGE formula)
 
-    // N: SUM(N13:N<lastDataRow>) — Cost
-    const mTot = ws.getCell('N' + totalsRow);
-    mTot.value = { formula: 'SUM(N' + startDataRow + ':N' + lastDataRow + ')' };
+    // M: SUM(M13:M<lastDataRow>) — Cost
+    const mTot = ws.getCell('M' + totalsRow);
+    mTot.value = { formula: 'SUM(M' + startDataRow + ':M' + lastDataRow + ')' };
     mTot.numFmt = '"$"#,##0.00';
     mTot.font = { name: 'Arial', size: 11, bold: true, color: { argb: TEXT_DARK } };
     mTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
@@ -11633,7 +11600,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   // Footer (totalsRow + 2)
   const footerRow = totalsRow + 2;
   ws.getRow(footerRow).height = 14;
-  ws.mergeCells('B' + footerRow + ':P' + footerRow);
+  ws.mergeCells('B' + footerRow + ':O' + footerRow);
   const footer = ws.getCell('B' + footerRow);
   footer.value = 'Northern Beaches Council  ·  Stormwater Asset Management  ·  This document is prepared for contractor use.';
   footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
