@@ -7818,10 +7818,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       return String(a.id).localeCompare(String(b.id));
     });
     // Reserve numeric IDs for locked packages — they keep their current id.
+    // NOTE: this code lives inside a template literal — the regex must use \\d (which
+    // emits \d in the runtime), not bare \d (which the template-literal parser strips
+    // to plain "d", silently breaking the digit class and leaking pipes into RLN_001).
     var reserved = {};
     packages.forEach(function(pkg) {
       if (isReportPackageLocked(pkg.id)) {
-        var m = String(pkg.id || '').match(/(\d+)$/);
+        var m = String(pkg.id || '').match(/(\\d+)$/);
         if (m) reserved[Number(m[1])] = true;
       }
     });
@@ -8131,7 +8134,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       });
     }
     saveReportMoves();
-    applyMovesAndRender();
+    // Lock toggles are pure metadata — never trigger applyMovesAndRender (which
+    // would re-prioritise + renumber and shuffle pipe assignments).
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
   }
   window.reportToggleAllPackagesLock = reportToggleAllPackagesLock;
 
@@ -8148,7 +8156,11 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       assets.forEach(function(a){ reportManualMoves.locks.pipes[a.asset_id] = true; });
     }
     saveReportMoves();
-    applyMovesAndRender();
+    // Lock toggles are pure metadata — never trigger applyMovesAndRender.
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
   }
   window.reportTogglePackageLock = reportTogglePackageLock;
 
@@ -8161,7 +8173,11 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       reportManualMoves.locks.pipes[u] = true;
     }
     saveReportMoves();
-    applyMovesAndRender();
+    // Lock toggles are pure metadata — never trigger applyMovesAndRender.
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
   }
   window.reportTogglePipeLock = reportTogglePipeLock;
 
