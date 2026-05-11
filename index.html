@@ -5724,6 +5724,33 @@ function persistReliningManualMoves() {
   }
 }
 
+function translateLocksForExport(moves, packages) {
+  if (!moves) return {};
+  var anchorToPkgId = {};
+  (packages || []).forEach(function(p) {
+    if (p && p.anchor_id && p.package_id) anchorToPkgId[p.anchor_id] = p.package_id;
+  });
+  var translated = JSON.parse(JSON.stringify(moves));
+  if (translated.locks && translated.locks.packages) {
+    var newPkgLocks = {};
+    Object.keys(translated.locks.packages).forEach(function(k) {
+      newPkgLocks[anchorToPkgId[k] || k] = translated.locks.packages[k];
+    });
+    translated.locks.packages = newPkgLocks;
+  }
+  if (translated.assignments) {
+    Object.keys(translated.assignments).forEach(function(uid) {
+      translated.assignments[uid] = anchorToPkgId[translated.assignments[uid]] || translated.assignments[uid];
+    });
+  }
+  if (translated.c6Included) {
+    Object.keys(translated.c6Included).forEach(function(uid) {
+      translated.c6Included[uid] = anchorToPkgId[translated.c6Included[uid]] || translated.c6Included[uid];
+    });
+  }
+  return translated;
+}
+
 function generateReliningAnchorId() {
   return 'anc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 }
@@ -11065,7 +11092,7 @@ async function downloadReliningPackagesZip() {
 
     // locks.json — only included if the user opted in (not for contractor ZIPs)
     if (document.getElementById('pkgIncludeLocks')?.checked) {
-      zip.file('locks.json', JSON.stringify(reliningManualMoves || {}, null, 2));
+      zip.file('locks.json', JSON.stringify(translateLocksForExport(reliningManualMoves, packages), null, 2));
     }
 
     // file_list.txt
