@@ -7714,6 +7714,65 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   window.applyMovesAndRender = applyMovesAndRender;
 
+  function renderReportEditPanel() {
+    var area = document.getElementById('reportEditArea');
+    if (!area) return;
+    if (!packages.length) { area.innerHTML = '<div class="pkg-empty">No packages.</div>'; return; }
+    var optsHtml = packages.map(function(p){ return '<option value="' + esc(p.id) + '">' + esc(p.id) + '</option>'; }).join('');
+    var newOpt = '<option value="__new__">+ Create new package</option>';
+    var sorted = pipes.slice().sort(function(a,b){
+      return String(a.package_id).localeCompare(String(b.package_id))
+        || String(a.asset_id).localeCompare(String(b.asset_id));
+    });
+    var rows = sorted.map(function(p) {
+      var movedFromOriginal = reportManualMoves.assignments[p.asset_id] != null
+        && reportManualMoves.assignments[p.asset_id] !== originalAssignments[p.asset_id];
+      return '<tr' + (movedFromOriginal ? ' style="background:#FEF3C7"' : '') + '>'
+        + '<td style="padding:6px 8px;font-family:monospace;font-size:11px"><strong>' + esc(p.package_id) + '</strong></td>'
+        + '<td style="padding:6px 8px;font-family:monospace;font-size:11px">' + esc(p.asset_id) + '</td>'
+        + '<td style="padding:6px 8px;font-size:11px">Ø' + esc(p.diameter_mm || '') + 'mm</td>'
+        + '<td style="padding:6px 8px;font-size:11px">' + esc(p.suburb) + '</td>'
+        + '<td style="padding:6px 8px;font-size:11px">' + Number(p.length_m || 0).toFixed(1) + ' m</td>'
+        + '<td style="padding:6px 8px;font-size:11px">' + fmtCurrency(p.pipe_cost) + '</td>'
+        + '<td style="padding:6px 8px">'
+          + '<select onchange="onMovePipe(\'' + esc(p.asset_id) + '\', this.value)" title="IDs may renumber after move">'
+          + '<option value="" disabled selected>Move to…</option>'
+          + optsHtml + newOpt
+          + '</select>'
+        + '</td>'
+      + '</tr>';
+    }).join('');
+    area.innerHTML =
+      '<table style="width:100%;border-collapse:collapse;font-family:Segoe UI,system-ui,sans-serif">'
+        + '<thead><tr style="background:#f3f4f6;text-align:left">'
+          + '<th style="padding:8px;font-size:11px">Package</th>'
+          + '<th style="padding:8px;font-size:11px">Asset</th>'
+          + '<th style="padding:8px;font-size:11px">Dia</th>'
+          + '<th style="padding:8px;font-size:11px">Suburb</th>'
+          + '<th style="padding:8px;font-size:11px">Length</th>'
+          + '<th style="padding:8px;font-size:11px">Cost</th>'
+          + '<th style="padding:8px;font-size:11px">Move to package</th>'
+        + '</tr></thead><tbody>' + rows + '</tbody>'
+      + '</table>';
+  }
+
+  window.onMovePipe = function(assetId, target) {
+    if (!target) return;
+    var targetId = target;
+    if (target === '__new__') {
+      var maxNum = packages.reduce(function(m, p) {
+        var match = String(p.id).match(/(\d+)$/);
+        return Math.max(m, match ? Number(match[1]) : 0);
+      }, 0);
+      targetId = 'RLN_' + String(maxNum + 1).padStart(3, '0');
+    }
+    reportManualMoves.assignments[assetId] = targetId;
+    saveReportMoves();
+    applyMovesAndRender();
+  };
+
+  window.renderReportEditPanel = renderReportEditPanel;
+
   var RELINING_PACKAGE_COLORS = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
   var RELINING_SELECT_COLOR = '#1E63D9';
   var RELINING_DIM_COLOR = '#7B2CBF';
@@ -8026,8 +8085,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     }).join('');
     document.getElementById('packageCards').innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
   }
-  renderReportPackageCards();
-
   // PACKAGES TABLE
   function renderReportPackagesTable() {
     var packagesTbl = document.getElementById('packagesTable');
@@ -8055,8 +8112,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '</tr>';
       }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
   }
-  renderReportPackagesTable();
-
   // PACKAGE MAP CLICK WIRING
   document.getElementById('packageCards').addEventListener('click', function(e) {
     if (e.target.closest && e.target.closest('a')) return;
@@ -8072,8 +8127,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     selectReportPackage(row.dataset.packageId);
   });
 
-  updateReportC6ToggleVisibility();
-  renderReportPackagesMap({ fit: true });
+  applyMovesAndRender();
 
   // PER-PACKAGE WRITTEN REPORTS
   document.getElementById('packageReports').innerHTML = packages.map(function(pkg) {
@@ -8328,7 +8382,16 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '</div>',
     '</div>',
     '<div id="report-subpage-edit" class="subpage">',
-    '<div style="padding:24px;color:#6B7280;font-size:13px;text-align:center">Edit panel will render here once Task 5 is complete.</div>',
+    '<div class="pkg-panel">',
+    '<div class="lbl">Edit Packages</div>',
+    '<div style="font-size:12px;color:#6B7280;margin-top:6px;line-height:1.5">',
+    'Move pipes between packages. Manual moves persist in this browser (per-report).',
+    'Use <em>+ Create new package</em> in any pipe\'s <strong>Move to package</strong> dropdown.',
+    '<strong style="color:#1A2B3C">Note:</strong> Package IDs renumber by priority after every edit, matching the live tool. The pipe you moved stays in its new package; only the ID label may change.',
+    '</div>',
+    '<div style="margin-top:10px"><button class="export-btn" type="button" onclick="resetReportMoves()">Reset all moves</button></div>',
+    '</div>',
+    '<div id="reportEditArea" style="margin-top:12px"></div>',
     '</div>',
     '</main>',
     '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Report — read-only.</footer>',
