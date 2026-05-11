@@ -5534,13 +5534,38 @@ function addPackagePriority(packages) {
 }
 
 function prioritiseAndRenumberReliningPackages(packages) {
-  return addPackagePriority(packages)
-    .map((pkg, index) => ({
+  // addPackagePriority sorts ALL packages by priority and stamps package_priority_rank.
+  const prioritised = addPackagePriority(packages);
+  // Reserve numeric IDs for locked packages — they keep their current package_id.
+  const reserved = new Set();
+  prioritised.forEach(pkg => {
+    if (isReliningPackageLocked(pkg.anchor_id)) {
+      const m = String(pkg.package_id || '').match(/(\d+)$/);
+      if (m) reserved.add(Number(m[1]));
+    }
+  });
+  // Walk integers 1..inf and hand them out to unlocked packages in priority order,
+  // skipping any reserved (locked) integer. Locked packages keep their existing ID.
+  let next = 1;
+  return prioritised.map(pkg => {
+    if (isReliningPackageLocked(pkg.anchor_id)) {
+      return {
+        ...pkg,
+        original_package_id: pkg.original_package_id || pkg.package_id,
+        // keep package_id; ensure all assets share it
+        assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: pkg.package_id }))
+      };
+    }
+    while (reserved.has(next)) next++;
+    const newId = `RLN_${String(next).padStart(3, '0')}`;
+    next++;
+    return {
       ...pkg,
       original_package_id: pkg.original_package_id || pkg.package_id,
-      package_id: `RLN_${String(index + 1).padStart(3, '0')}`,
-      assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: `RLN_${String(index + 1).padStart(3, '0')}` }))
-    }));
+      package_id: newId,
+      assets: (pkg.assets || []).map(asset => ({ ...asset, package_id: newId }))
+    };
+  });
 }
 
 function attachC6AddOns(packages, c6Pool, options = {}) {
@@ -6087,13 +6112,15 @@ function switchReliningSubtab(name) {
 
 function reliningEditTargetOptionsHtml(currentAnchor) {
   const packages = lastPackagingGeneration?.packages || [];
-  const opts = packages.map(p => {
-    const isCurrent = p.anchor_id === currentAnchor;
-    const tag = p.manual_origin ? ' (manual)' : '';
-    const suburbs = (p.suburbs || [p.suburb]).filter(Boolean).join(', ') || 'no suburb';
-    const label = `${p.package_id}${tag} — ${suburbs} (${p.pipe_count} pipes)`;
-    return `<option value="${escapeHtml(p.anchor_id || '')}"${isCurrent ? ' selected disabled' : ''}>${escapeHtml(label)}</option>`;
-  }).join('');
+  const opts = packages
+    .filter(p => p.anchor_id === currentAnchor || !isReliningPackageLocked(p.anchor_id))
+    .map(p => {
+      const isCurrent = p.anchor_id === currentAnchor;
+      const tag = p.manual_origin ? ' (manual)' : '';
+      const suburbs = (p.suburbs || [p.suburb]).filter(Boolean).join(', ') || 'no suburb';
+      const label = `${p.package_id}${tag} — ${suburbs} (${p.pipe_count} pipes)`;
+      return `<option value="${escapeHtml(p.anchor_id || '')}"${isCurrent ? ' selected disabled' : ''}>${escapeHtml(label)}</option>`;
+    }).join('');
   return `${opts}<option value="__NEW__">+ Create new package</option>`;
 }
 
@@ -6212,7 +6239,9 @@ function renderEditPackagesPanel() {
       const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
       const assetLinkHtml = `<a href="#reliningPackagesMap" data-relining-asset-id="${encodeURIComponent(uid)}" style="${assetStyle};cursor:pointer" title="Show this pipe on the map">${escapeHtml(uid)}</a>`;
       const moveCellHtml = isC6
-        ? `<button class="export-btn" type="button" data-relining-c6-remove data-asset-uid="${escapeHtml(uid)}" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>`
+        ? (pkgLockState === 'all'
+            ? ''
+            : `<button class="export-btn" type="button" data-relining-c6-remove data-asset-uid="${escapeHtml(uid)}" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>`)
         : `<select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">${reliningEditTargetOptionsHtml(pkg.anchor_id)}</select>`;
       const clearCellHtml = isC6 ? '' : (isMoveOrigin ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : '');
       const lockCellHtml = isC6 ? '' : `<button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button>`;
@@ -6231,7 +6260,7 @@ function renderEditPackagesPanel() {
     }).join('');
     let c6FooterHtml = '';
     const c6Active = lastPackagingGeneration?.options?.reliningMode === 'Condition 6, 7 and 8';
-    if (c6Active) {
+    if (c6Active && pkgLockState !== 'all') {
       const qualifying = getQualifyingC6ForPackage(pkg);
       if (qualifying.length) {
         const opts = qualifying
@@ -7776,9 +7805,24 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       }
       return String(a.id).localeCompare(String(b.id));
     });
+    // Reserve numeric IDs for locked packages — they keep their current id.
+    var reserved = {};
+    packages.forEach(function(pkg) {
+      if (isReportPackageLocked(pkg.id)) {
+        var m = String(pkg.id || '').match(/(\d+)$/);
+        if (m) reserved[Number(m[1])] = true;
+      }
+    });
     var idRemap = {};
-    packages.forEach(function(pkg, i) {
-      const newId = 'RLN_' + String(i+1).padStart(3, '0');
+    var nextNum = 1;
+    packages.forEach(function(pkg) {
+      if (isReportPackageLocked(pkg.id)) {
+        // Locked — keep the existing id, do not renumber.
+        return;
+      }
+      while (reserved[nextNum]) nextNum++;
+      var newId = 'RLN_' + String(nextNum).padStart(3, '0');
+      nextNum++;
       if (pkg.id !== newId) {
         pipes.forEach(function(p){ if (p.package_id === pkg.id) p.package_id = newId; });
         idRemap[pkg.id] = newId;
@@ -7988,14 +8032,16 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function reportEditTargetOptionsHtml(currentPkgId) {
-    var opts = packages.map(function(p) {
-      var isCurrent = p.id === currentPkgId;
-      var isManual = !!p.manual_origin;
-      var tag = isManual ? ' (manual)' : '';
-      var suburbs = (p.suburbs || []).filter(Boolean).join(', ') || 'no suburb';
-      var label = p.id + tag + ' — ' + suburbs + ' (' + (p.pipe_count || 0) + ' pipes)';
-      return '<option value="' + esc(p.id) + '"' + (isCurrent ? ' selected disabled' : '') + '>' + esc(label) + '</option>';
-    }).join('');
+    var opts = packages
+      .filter(function(p){ return p.id === currentPkgId || !isReportPackageLocked(p.id); })
+      .map(function(p) {
+        var isCurrent = p.id === currentPkgId;
+        var isManual = !!p.manual_origin;
+        var tag = isManual ? ' (manual)' : '';
+        var suburbs = (p.suburbs || []).filter(Boolean).join(', ') || 'no suburb';
+        var label = p.id + tag + ' — ' + suburbs + ' (' + (p.pipe_count || 0) + ' pipes)';
+        return '<option value="' + esc(p.id) + '"' + (isCurrent ? ' selected disabled' : '') + '>' + esc(label) + '</option>';
+      }).join('');
     return opts + '<option value="__NEW__">+ Create new package</option>';
   }
 
@@ -8265,7 +8311,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         var assetLinkHtml = '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(uid) + '" style="color:' + assetColor + ' !important;text-decoration:underline;cursor:pointer" title="Show this pipe on the map">' + esc(uid) + '</a>';
         var moveCellHtml;
         if (isC6) {
-          moveCellHtml = '<button class="export-btn" type="button" data-report-c6-remove data-asset-uid="' + esc(uid) + '" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>';
+          moveCellHtml = (pkgLockState === 'all')
+            ? ''
+            : '<button class="export-btn" type="button" data-report-c6-remove data-asset-uid="' + esc(uid) + '" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>';
         } else {
           moveCellHtml = '<select data-report-edit-target data-asset-uid="' + esc(uid) + '" data-current-pkg="' + esc(pkg.id || '') + '">' + reportEditTargetOptionsHtml(pkg.id) + '</select>';
         }
@@ -8284,7 +8332,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       }).join('');
 
       var c6FooterHtml = '';
-      if (c6Active) {
+      if (c6Active && pkgLockState !== 'all') {
         var qualifying = getQualifyingC6ForReportPackage(pkg);
         if (qualifying.length) {
           var qOpts = qualifying.slice().sort(function(a,b){ return String(a.asset_id).localeCompare(String(b.asset_id)); }).map(function(c) {
