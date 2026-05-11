@@ -5807,19 +5807,6 @@ function moveReliningAssetToPackage(assetUid, targetAnchorId) {
   if (!reliningManualMoves.moveOrigins) reliningManualMoves.moveOrigins = {};
   reliningManualMoves.locks.pipes[uid] = true;
   reliningManualMoves.moveOrigins[uid] = true;
-  // Lock all existing pipes in the target package so it stays intact on rerun
-  if (targetPkg) {
-    (targetPkg.assets || []).forEach(a => {
-      const aUid = String(a.assetId || '');
-      if (aUid && aUid !== uid) {
-        reliningManualMoves.locks.pipes[aUid] = true;
-        if (!reliningManualMoves.assignments[aUid]) {
-          reliningManualMoves.assignments[aUid] = targetAnchorId;
-        }
-      }
-    });
-    reliningManualMoves.locks.packages[targetAnchorId] = true;
-  }
   persistReliningManualMoves();
   reapplyManualEditsToCurrentGeneration();
 }
@@ -5838,7 +5825,6 @@ function createNewReliningPackageForAsset(assetUid) {
   reliningManualMoves.assignments[uid] = newAnchor;
   if (!reliningManualMoves.locks) reliningManualMoves.locks = { pipes: {}, packages: {} };
   if (!reliningManualMoves.moveOrigins) reliningManualMoves.moveOrigins = {};
-  reliningManualMoves.locks.packages[newAnchor] = true;
   reliningManualMoves.locks.pipes[uid] = true;
   reliningManualMoves.moveOrigins[uid] = true;
   persistReliningManualMoves();
@@ -8192,12 +8178,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     reportManualMoves.assignments[u] = targetPkgId;
     reportManualMoves.locks.pipes[u] = true;
     reportManualMoves.moveOrigins[u] = true;
-    // Lock all existing pipes in target package so it stays intact
-    pipes.filter(function(p){ return p.package_id === targetPkgId && String(p.asset_id) !== u; }).forEach(function(a){
-      reportManualMoves.locks.pipes[a.asset_id] = true;
-      if (!reportManualMoves.assignments[a.asset_id]) reportManualMoves.assignments[a.asset_id] = targetPkgId;
-    });
-    reportManualMoves.locks.packages[targetPkgId] = true;
     saveReportMoves();
     applyMovesAndRender();
   }
@@ -8215,7 +8195,6 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var newPkgId = 'RLN_' + String(maxNum + 1).padStart(3, '0');
     reportManualMoves.assignments[u] = newPkgId;
     reportManualMoves.locks.pipes[u] = true;
-    reportManualMoves.locks.packages[newPkgId] = true;
     reportManualMoves.moveOrigins[u] = true;
     saveReportMoves();
     applyMovesAndRender();
