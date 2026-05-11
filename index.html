@@ -8163,6 +8163,79 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 1000);
   };
 
+  // ---------- Lock file load helpers ----------
+
+  function setLocksStatus(text, isError) {
+    var el = document.getElementById(\'reportLocksStatus\');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? \'#9A6B00\' : \'#5A6B7A\';
+  }
+
+  function mergeLocksData(parsed) {
+    if (!parsed || typeof parsed !== \'object\') throw new Error(\'Invalid lock file format.\');
+    reportManualMoves = {
+      assignments:   (parsed.assignments && typeof parsed.assignments === \'object\') ? parsed.assignments : {},
+      anchorOrigins: (parsed.anchorOrigins && typeof parsed.anchorOrigins === \'object\') ? parsed.anchorOrigins : {},
+      locks: {
+        pipes:    (parsed.locks && parsed.locks.pipes && typeof parsed.locks.pipes === \'object\') ? parsed.locks.pipes : {},
+        packages: (parsed.locks && parsed.locks.packages && typeof parsed.locks.packages === \'object\') ? parsed.locks.packages : {}
+      },
+      moveOrigins: (parsed.moveOrigins && typeof parsed.moveOrigins === \'object\') ? parsed.moveOrigins : {},
+      c6Excluded:  (parsed.c6Excluded && typeof parsed.c6Excluded === \'object\') ? parsed.c6Excluded : {},
+      c6Included:  (parsed.c6Included && typeof parsed.c6Included === \'object\') ? parsed.c6Included : {}
+    };
+    saveReportMoves();
+    if (typeof applyMovesAndRender === \'function\') applyMovesAndRender();
+  }
+
+  window.loadReportLockFile = async function(event) {
+    var file = event.target.files && event.target.files[0];
+    event.target.value = \'\';
+    if (!file) return;
+    try {
+      var json;
+      if (file.name.toLowerCase().endsWith(\'.zip\')) {
+        if (typeof JSZip === \'undefined\') { alert(\'JSZip not loaded — refresh and try again.\'); return; }
+        var zip = await JSZip.loadAsync(file);
+        var entry = zip.file(\'locks.json\');
+        if (!entry) { alert(\'No locks.json found in that ZIP.\'); return; }
+        json = await entry.async(\'string\');
+      } else {
+        json = await file.text();
+      }
+      var parsed = JSON.parse(json);
+      mergeLocksData(parsed);
+      setLocksStatus(\'Locks: loaded from \' + file.name);
+    } catch (err) {
+      alert(\'Failed to load lock file: \' + (err && err.message || err));
+      setLocksStatus(\'Locks: load failed\', true);
+    }
+  };
+
+  // Auto-fetch ./locks.json when served over http (silently skipped on file://)
+  (async function tryAutoLoadLocks() {
+    try {
+      // If the user has already edited in this browser, keep their state
+      if (reportManualMoves && (
+        Object.keys(reportManualMoves.assignments || {}).length ||
+        Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).length ||
+        Object.keys((reportManualMoves.locks && reportManualMoves.locks.pipes) || {}).length
+      )) {
+        setLocksStatus(\'Locks: restored from this browser\');
+        return;
+      }
+      var res = await fetch(\'./locks.json\', { cache: \'no-store\' });
+      if (!res.ok) throw new Error(\'HTTP \' + res.status);
+      var json = await res.text();
+      var parsed = JSON.parse(json);
+      mergeLocksData(parsed);
+      setLocksStatus(\'Locks: auto-loaded from ./locks.json\');
+    } catch (err) {
+      setLocksStatus(\'Locks: stored locally only (auto-load needs http server or use Load Lock File button)\');
+    }
+  })();
+
   // ---------- Edit Packages panel — full parity with live tool's renderEditPackagesPanel ----------
 
   function reportReorderAssetsByC6Anchor(assets) {
@@ -9748,7 +9821,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<div>',
     '<div class="pkg-title">Pipe Relining Packaging — Report</div>',
     '<div class="pkg-sub">Static read-only summary of generated packages. The data, options, costs, and reasoning shown here mirror the live tool at the time the report was produced.</div>',
+    '<div id="reportLocksStatus" style="font-size:10px;color:#5A6B7A;margin-top:2px"></div>',
     '</div>',
+    '<label class="export-btn" style="cursor:pointer;margin-right:6px">Load Lock File<input type="file" accept=".json,.zip" style="display:none" onchange="loadReportLockFile(event)"/><\/label>',
     '<button class="export-btn" type="button" onclick="saveReportLockFile()" style="margin-right:6px">Save Lock File</button>',
     '<input type="text" id="reportEditedBy" placeholder="Edited by (your name)" style="font-size:12px;padding:4px 8px;border:1px solid #DDE3E8;border-radius:6px;width:160px;margin-right:6px"/>',
     '<label style="font-size:11px;color:#6B7280;margin-right:8px"><input type="checkbox" id="reportIncludeLocks"/> Include lock file</label>',
