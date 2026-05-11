@@ -7564,8 +7564,155 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var packages = data.packages || [];
   var summary = data.summary || {};
   var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
-  var pkgIndex = {};
+  let pkgIndex = {};
   packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+
+  // Snapshot original pipe-to-package assignments (before any manual moves)
+  const originalAssignments = {};
+  pipes.forEach(function(p) { originalAssignments[p.asset_id] = p.package_id; });
+
+  // --- Manual moves: localStorage persistence ---
+  const REPORT_MOVES_KEY = 'nbc-report-moves:' + (data.generated_at || 'unknown');
+  let reportManualMoves = loadReportMoves();
+
+  function loadReportMoves() {
+    try {
+      const raw = localStorage.getItem(REPORT_MOVES_KEY);
+      if (!raw) return emptyMoves();
+      const parsed = JSON.parse(raw);
+      return {
+        assignments: parsed.assignments || {},
+        anchorOrigins: parsed.anchorOrigins || {},
+        locks: { pipes: (parsed.locks && parsed.locks.pipes) || {}, packages: (parsed.locks && parsed.locks.packages) || {} },
+        moveOrigins: parsed.moveOrigins || {}
+      };
+    } catch (e) { return emptyMoves(); }
+  }
+
+  function emptyMoves() {
+    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+  }
+
+  function saveReportMoves() {
+    try { localStorage.setItem(REPORT_MOVES_KEY, JSON.stringify(reportManualMoves)); }
+    catch (e) { console.warn('[Report] Failed to persist moves:', e); }
+  }
+
+  function resetReportMoves() {
+    if (!confirm('Clear all manual edits and return to the original generated state?')) return;
+    reportManualMoves = emptyMoves();
+    saveReportMoves();
+    applyMovesAndRender();
+  }
+
+  window.resetReportMoves = resetReportMoves;
+
+  // --- Core rebuild helpers ---
+  function haversineM(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = function(d) { return d * Math.PI / 180; };
+    const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function rebuildPackagesFromPipes() {
+    const byPkg = new Map();
+    pipes.forEach(function(p) {
+      if (!byPkg.has(p.package_id)) byPkg.set(p.package_id, []);
+      byPkg.get(p.package_id).push(p);
+    });
+    packages.length = 0;
+    byPkg.forEach(function(items, pkgId) {
+      const lengths = items.map(function(i){ return Number(i.length_m) || 0; });
+      const costs = items.map(function(i){ return Number(i.pipe_cost) || 0; });
+      const diameters = Array.from(new Set(items.map(function(i){ return Number(i.diameter_mm); }).filter(Number.isFinite))).sort(function(a,b){ return a-b; });
+      const suburbs = Array.from(new Set(items.map(function(i){ return i.suburb; }).filter(Boolean)));
+      const coords = items.filter(function(i){ return Number.isFinite(i.lat) && Number.isFinite(i.lon); });
+      const centroid = coords.length
+        ? [coords.reduce(function(s,c){return s+c.lat;},0)/coords.length, coords.reduce(function(s,c){return s+c.lon;},0)/coords.length]
+        : null;
+      let maxSpan = 0;
+      for (let i = 0; i < coords.length; i++) for (let j = i+1; j < coords.length; j++) {
+        const d = haversineM(coords[i].lat, coords[i].lon, coords[j].lat, coords[j].lon);
+        if (d > maxSpan) maxSpan = d;
+      }
+      packages.push({
+        id: pkgId,
+        original_package_id: pkgId,
+        suburbs: suburbs,
+        diameters_mm: diameters,
+        pipe_count: items.length,
+        total_length_m: lengths.reduce(function(a,b){return a+b;}, 0),
+        total_cost: costs.reduce(function(a,b){return a+b;}, 0),
+        max_span_m: maxSpan,
+        condition_6_count: items.filter(function(i){ return i.is_c6_addon || Number(i.condition_score) === 6; }).length,
+        condition_7_count: items.filter(function(i){ return Number(i.condition_score) === 7; }).length,
+        condition_8_count: items.filter(function(i){ return Number(i.condition_score) === 8; }).length,
+        c6_addon_count: items.filter(function(i){ return i.is_c6_addon; }).length,
+        asset_ids: items.map(function(i){ return i.asset_id; }),
+        centroid: centroid
+      });
+    });
+  }
+
+  function prioritiseAndRenumberReportPackages() {
+    packages.forEach(function(pkg) {
+      const items = pipes.filter(function(p){ return p.package_id === pkg.id; });
+      pkg.package_total_pipe_priority = items.reduce(function(s,i){ return s + (Number(i.pipe_priority_score)||0); }, 0);
+      pkg.package_max_pipe_priority   = items.reduce(function(m,i){ return Math.max(m, Number(i.pipe_priority_score)||0); }, 0);
+      pkg.package_high_crit_count     = items.filter(function(i){ return !i.is_c6_addon && Number(i.criticality_1dp) >= 4.0; }).length;
+      pkg.package_large_diam_count    = items.filter(function(i){ return !i.is_c6_addon && Number(i.diameter_mm) >= 525; }).length;
+      pkg.package_xlarge_diam_count   = items.filter(function(i){ return !i.is_c6_addon && Number(i.diameter_mm) >= 900; }).length;
+      pkg.package_worst_condition     = items.reduce(function(m,i){ return Math.max(m, Number(i.condition_score)||0); }, 0);
+      pkg.package_priority_score = pkg.package_total_pipe_priority
+        + 1 * pkg.package_max_pipe_priority
+        + 5 * pkg.package_high_crit_count
+        + 3 * pkg.package_large_diam_count
+        + 4 * pkg.package_xlarge_diam_count
+        + 2 * pkg.package_worst_condition;
+    });
+    packages.sort(function(a, b) {
+      const keys = ['package_priority_score','package_total_pipe_priority','package_high_crit_count','package_large_diam_count','package_worst_condition','total_length_m','pipe_count'];
+      for (let k = 0; k < keys.length; k++) {
+        const d = (Number(b[keys[k]])||0) - (Number(a[keys[k]])||0);
+        if (d !== 0) return d;
+      }
+      return String(a.id).localeCompare(String(b.id));
+    });
+    packages.forEach(function(pkg, i) {
+      const newId = 'RLN_' + String(i+1).padStart(3, '0');
+      if (pkg.id !== newId) {
+        pipes.forEach(function(p){ if (p.package_id === pkg.id) p.package_id = newId; });
+        pkg.id = newId;
+      }
+    });
+    pkgIndex = {};
+    packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+  }
+
+  function applyMovesAndRender() {
+    // 1. Reset every pipe to its original package
+    pipes.forEach(function(p) { p.package_id = originalAssignments[p.asset_id]; });
+    // 2. Apply manual assignments on top
+    Object.keys(reportManualMoves.assignments || {}).forEach(function(assetId) {
+      const target = reportManualMoves.assignments[assetId];
+      const pipe = pipes.find(function(p){ return p.asset_id === assetId; });
+      if (pipe) pipe.package_id = target;
+    });
+    // 3. Rebuild package objects from current pipe assignments
+    rebuildPackagesFromPipes();
+    // 4. Re-prioritise + renumber
+    prioritiseAndRenumberReportPackages();
+    // 5. Re-render everything
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
+    if (typeof renderReportMetaStrip === 'function') renderReportMetaStrip();
+    if (typeof updateReportC6ToggleVisibility === 'function') updateReportC6ToggleVisibility();
+  }
+  window.applyMovesAndRender = applyMovesAndRender;
 
   var RELINING_PACKAGE_COLORS = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
   var RELINING_SELECT_COLOR = '#1E63D9';
