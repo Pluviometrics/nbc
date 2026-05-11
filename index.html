@@ -7777,7 +7777,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         Street_Address: raw['Street_Address'] ?? '',
         Address: raw['Address'] ?? '',
         SW_Upstream_Node: raw['SW_Upstream Node'] ?? raw['SW_Upstream_Node'] ?? '',
-        SW_Downstream_Node: raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? ''
+        SW_Downstream_Node: raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? '',
+        Old_TechOne_ID: raw['Old_TechOne_ID'] ?? raw['Old TechOne ID'] ?? raw['OLD_TECHONE_ID'] ?? ''
       }
     };
   }));
@@ -9630,17 +9631,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       RATE:      12, // L
       COST:      13, // M
       MAPS:      14, // N
-      DONE:      15  // O
+      DONE:      15, // O
+      OLD_T1:    16  // P
     };
     ws.columns = [
       { width: 4 },{ width: 5 },{ width: 14 },{ width: 12 },{ width: 36 },
       { width: 18 },{ width: 10 },{ width: 10 },{ width: 32 },{ width: 12 },
       { width: 12 },{ width: 11 },{ width: 14 },{ width: 10 },{ width: 10 },
-      { width: 4 }
+      { width: 14 },{ width: 4 }
     ];
 
     function paintRow(rowIdx, fillArgb) {
-      for (var c = 1; c <= 16; c++) {
+      for (var c = 1; c <= 17; c++) {
         ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
       }
     }
@@ -9660,17 +9662,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     paintRow(3, NAVY_DARK);
 
     ws.getRow(4).height = 18;
-    ws.mergeCells('B4:O4');
+    ws.mergeCells('B4:P4');
     var c4 = ws.getCell('B4');
     c4.value = 'STORMWATER ASSET MANAGEMENT  \\u00b7  PIPE RELINING PROGRAM';
     c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
     c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(5).height = 28;
-    ws.mergeCells('B5:O5');
+    ws.mergeCells('B5:P5');
     var c5 = ws.getCell('B5');
     c5.value = (kind === 'cctv'
       ? 'CCTV Inspection Package  \\u2014  Works Schedule'
@@ -9679,17 +9681,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
     c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(6).height = 18;
-    ws.mergeCells('B6:O6');
+    ws.mergeCells('B6:P6');
     var c6 = ws.getCell('B6');
     c6.value = 'Prepared by Stormwater Asset Management  \\u00b7  Contractor use only  \\u00b7  For field verification';
     c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
     c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(7).height = 6;
 
@@ -9709,7 +9711,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
     paintTile('H8:I8', 'TOTAL LENGTH',   lengthDisp);
     paintTile('J8:L8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-    paintTile('M8:O8', 'MAX SPREAD',     spanDisp);
+    paintTile('M8:P8', 'MAX SPREAD',     spanDisp);
 
     ws.getRow(9).height = 6;
     ws.getRow(10).height = 3;
@@ -9717,9 +9719,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     ws.getRow(12).height = 22;
     var headers = (kind === 'cctv')
-      ? ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done']
-      : ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done'];
-    for (var i = 0; i < 14; i++) {
+      ? ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done','Old_TechOne_ID']
+      : ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done','Old_TechOne_ID'];
+    for (var i = 0; i < 15; i++) {
       var hCell = ws.getCell(12, 2 + i);
       hCell.value = headers[i];
       hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -9834,6 +9836,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
         right:  { style: 'thin', color: { argb: 'FFCCCCCC' } }
       };
+
+      // P: Old_TechOne_ID (legacy asset id from prior register)
+      var pCell = ws.getCell(r, COL.OLD_T1);
+      var oldT1 = String((item.raw && item.raw.Old_TechOne_ID) || '').trim();
+      pCell.value = oldT1;
+      pCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
+      pCell.alignment = { horizontal: 'center', vertical: 'middle' };
     });
 
     var lastDataRow = startDataRow + items.length - 1;
@@ -9864,7 +9873,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     var footerRow = totalsRowIdx + 2;
     ws.getRow(footerRow).height = 14;
-    ws.mergeCells('B' + footerRow + ':O' + footerRow);
+    ws.mergeCells('B' + footerRow + ':P' + footerRow);
     var footer = ws.getCell('B' + footerRow);
     footer.value = 'Northern Beaches Council  \\u00b7  Stormwater Asset Management  \\u00b7  This document is prepared for contractor use.';
     footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
@@ -9915,7 +9924,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         usNode: raw.SW_Upstream_Node || item.upstream || '',
         dsNode: raw.SW_Downstream_Node || item.downstream || '',
         ratePerM: Number.isFinite(item.rate_per_m) ? item.rate_per_m : null,
-        cost: cost
+        cost: cost,
+        raw: { Old_TechOne_ID: raw.Old_TechOne_ID || '' }
       };
     });
     var maxSpanKm = Number.isFinite(pkg.max_span_m) ? pkg.max_span_m / 1000 : 0;
@@ -11286,9 +11296,10 @@ function buildProvenanceLines({ toolKind, packageCount }) {
 // Layout: 17 columns A..Q; A and Q are 4-wide gutters, B..P hold the content.
 // Returns an ExcelJS Workbook ready for await wb.xlsx.writeBuffer().
 // items[]: { assetId, address, suburb, diameter, lengthM, conditionScore,
-//            conditionLabel, usNode, dsNode, ratePerM, cost }
+//            conditionLabel, usNode, dsNode, ratePerM, cost, raw? }
 // meta: { packageId, pipeCount, totalLengthM, totalCost, maxSpanKm }
 // kind: 'relining' | 'cctv'
+// Column P holds Old_TechOne_ID (read from item.raw.Old_TechOne_ID; blank if absent).
 // =====================================================================
 function buildStyledPackageWorkbook(meta, items, kind) {
   const TEAL = 'FF3DBDB8';
@@ -11310,10 +11321,10 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   const sheetName = String(meta.packageId || 'Package').slice(0, 31);
   const ws = wb.addWorksheet(sheetName, { views: [{ showGridLines: false }] });
 
-  // Column widths: A (4) + 14 content cols + P (4) = 16 columns
+  // Column widths: A (4) + 15 content cols + Q (4) = 17 columns
   // B # | C Asset ID | D CiA | E Address | F Suburb | G Ø (mm) | H Length (m) |
   // I Condition | J US Node | K DS Node | L Rate ($/m) |
-  // M Cost ($) | N Maps | O Done
+  // M Cost ($) | N Maps | O Done | P Old_TechOne_ID
   const COL = {
     ROWNUM:    2,  // B
     ASSET_ID:  3,  // C
@@ -11328,7 +11339,8 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     RATE:      12, // L
     COST:      13, // M
     MAPS:      14, // N
-    DONE:      15  // O
+    DONE:      15, // O
+    OLD_T1:    16  // P
   };
   ws.columns = [
     { width: 4 },   // A gutter
@@ -11346,11 +11358,12 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     { width: 14 },  // M Cost
     { width: 10 },  // N Maps
     { width: 10 },  // O Done
-    { width: 4 }    // P gutter
+    { width: 14 },  // P Old_TechOne_ID
+    { width: 4 }    // Q gutter
   ];
 
   function paintRow(rowIdx, fillArgb) {
-    for (let c = 1; c <= 16; c++) {
+    for (let c = 1; c <= 17; c++) {
       ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
     }
   }
@@ -11374,19 +11387,19 @@ function buildStyledPackageWorkbook(meta, items, kind) {
 
   // Row 4: kicker text
   ws.getRow(4).height = 18;
-  ws.mergeCells('B4:O4');
+  ws.mergeCells('B4:P4');
   const c4 = ws.getCell('B4');
   c4.value = 'STORMWATER ASSET MANAGEMENT  ·  PIPE RELINING PROGRAM';
   c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
   c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-  // also fill A4 and P4 to match the dark band
+  // also fill A4 and Q4 to match the dark band
   ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 5: title
   ws.getRow(5).height = 28;
-  ws.mergeCells('B5:O5');
+  ws.mergeCells('B5:P5');
   const c5 = ws.getCell('B5');
   c5.value = (kind === 'cctv'
     ? 'CCTV Inspection Package  —  Works Schedule'
@@ -11395,18 +11408,18 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
   c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 6: subtitle
   ws.getRow(6).height = 18;
-  ws.mergeCells('B6:O6');
+  ws.mergeCells('B6:P6');
   const c6 = ws.getCell('B6');
   c6.value = 'Prepared by Stormwater Asset Management  ·  Contractor use only  ·  For field verification';
   c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
   c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 7: blank gap
   ws.getRow(7).height = 6;
@@ -11428,19 +11441,19 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
   paintTile('H8:I8', 'TOTAL LENGTH',   lengthDisp);
   paintTile('J8:L8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-  paintTile('M8:O8', 'MAX SPREAD',     spanDisp);
+  paintTile('M8:P8', 'MAX SPREAD',     spanDisp);
 
   // Rows 9-11: blank decorative
   ws.getRow(9).height = 6;
   ws.getRow(10).height = 3;
   ws.getRow(11).height = 4;
 
-  // Row 12: header row (cols B..O)
+  // Row 12: header row (cols B..P)
   ws.getRow(12).height = 22;
   const headers = (kind === 'cctv')
-    ? ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done']
-    : ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done'];
-  for (let i = 0; i < 14; i++) {
+    ? ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done','Old_TechOne_ID']
+    : ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done','Old_TechOne_ID'];
+  for (let i = 0; i < 15; i++) {
     const cell = ws.getCell(12, 2 + i);
     cell.value = headers[i];
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -11570,6 +11583,15 @@ function buildStyledPackageWorkbook(meta, items, kind) {
       bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
       right:  { style: 'thin', color: { argb: 'FFCCCCCC' } }
     };
+
+    // P: Old_TechOne_ID (legacy asset id from prior register)
+    const pCell = ws.getCell(r, COL.OLD_T1);
+    const oldT1 = String(
+      (item.raw && (item.raw.Old_TechOne_ID || item.raw['Old TechOne ID'] || item.raw.OLD_TECHONE_ID)) || ''
+    ).trim();
+    pCell.value = oldT1;
+    pCell.font = { name: 'Arial', size: 8, color: { argb: 'FF000000' } };
+    pCell.alignment = { horizontal: 'center', vertical: 'middle' };
   });
 
   // TOTALS row (N+1 where N = startDataRow + items.length - 1)
@@ -11605,7 +11627,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   // Footer (totalsRow + 2)
   const footerRow = totalsRow + 2;
   ws.getRow(footerRow).height = 14;
-  ws.mergeCells('B' + footerRow + ':O' + footerRow);
+  ws.mergeCells('B' + footerRow + ':P' + footerRow);
   const footer = ws.getCell('B' + footerRow);
   footer.value = 'Northern Beaches Council  ·  Stormwater Asset Management  ·  This document is prepared for contractor use.';
   footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
@@ -11710,6 +11732,7 @@ async function downloadReliningPackagesZip() {
         const rawObserved = String(getValueByAliases(raw, ['Observed_Condition', 'Observed Condition']) || '').trim();
         const condLabel = rawObserved
           || String(raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '');
+        const oldT1 = String(getValueByAliases(raw, ['Old_TechOne_ID', 'Old TechOne ID', 'OLD_TECHONE_ID']) || '').trim();
         return {
           assetId: item.assetId,
           address: pipeStreetAddress(raw),
@@ -11721,7 +11744,8 @@ async function downloadReliningPackagesZip() {
           usNode: raw['SW_Upstream Node']  ?? raw['SW_Upstream_Node']  ?? raw['Upstream Node']   ?? '',
           dsNode: raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? raw['Downstream Node'] ?? '',
           ratePerM: Number.isFinite(item.ratePerM) ? item.ratePerM : null,
-          cost: cost
+          cost: cost,
+          raw: { Old_TechOne_ID: oldT1 }
         };
       });
 
