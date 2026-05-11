@@ -9616,15 +9616,32 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var sheetName = String(meta.packageId || 'Package').slice(0, 31);
     var ws = wb.addWorksheet(sheetName, { views: [{ showGridLines: false }] });
 
+    var COL = {
+      ROWNUM:    2,  // B
+      ASSET_ID:  3,  // C
+      CIA:       4,  // D
+      ADDRESS:   5,  // E
+      SUBURB:    6,  // F
+      DIAMETER:  7,  // G
+      LENGTH:    8,  // H
+      CONDSCORE: 9,  // I
+      CONDITION: 10, // J
+      US_NODE:   11, // K
+      DS_NODE:   12, // L
+      RATE:      13, // M
+      COST:      14, // N
+      MAPS:      15, // O
+      DONE:      16  // P
+    };
     ws.columns = [
-      { width: 4 },{ width: 5 },{ width: 14 },{ width: 36 },{ width: 18 },
-      { width: 10 },{ width: 10 },{ width: 14 },{ width: 32 },{ width: 12 },
-      { width: 12 },{ width: 11 },{ width: 14 },{ width: 10 },{ width: 10 },
-      { width: 4 }
+      { width: 4 },{ width: 5 },{ width: 14 },{ width: 12 },{ width: 36 },
+      { width: 18 },{ width: 10 },{ width: 10 },{ width: 14 },{ width: 32 },
+      { width: 12 },{ width: 12 },{ width: 11 },{ width: 14 },{ width: 10 },
+      { width: 10 },{ width: 4 }
     ];
 
     function paintRow(rowIdx, fillArgb) {
-      for (var c = 1; c <= 16; c++) {
+      for (var c = 1; c <= 17; c++) {
         ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
       }
     }
@@ -9633,8 +9650,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     ws.getRow(2).height = 52;
     paintRow(2, NAVY_DARK);
-    ws.mergeCells('L2:O2');
-    var c2 = ws.getCell('L2');
+    ws.mergeCells('M2:P2');
+    var c2 = ws.getCell('M2');
     c2.value = String(meta.packageId || '');
     c2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
     c2.font = { name: 'Arial', size: 20, bold: true, color: { argb: WHITE } };
@@ -9644,17 +9661,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     paintRow(3, NAVY_DARK);
 
     ws.getRow(4).height = 18;
-    ws.mergeCells('B4:O4');
+    ws.mergeCells('B4:P4');
     var c4 = ws.getCell('B4');
     c4.value = 'STORMWATER ASSET MANAGEMENT  \\u00b7  PIPE RELINING PROGRAM';
     c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
     c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(5).height = 28;
-    ws.mergeCells('B5:O5');
+    ws.mergeCells('B5:P5');
     var c5 = ws.getCell('B5');
     c5.value = (kind === 'cctv'
       ? 'CCTV Inspection Package  \\u2014  Works Schedule'
@@ -9663,17 +9680,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
     c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(6).height = 18;
-    ws.mergeCells('B6:O6');
+    ws.mergeCells('B6:P6');
     var c6 = ws.getCell('B6');
     c6.value = 'Prepared by Stormwater Asset Management  \\u00b7  Contractor use only  \\u00b7  For field verification';
     c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
     c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
     c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
     ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-    ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+    ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
     ws.getRow(7).height = 6;
 
@@ -9693,7 +9710,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
     paintTile('H8:J8', 'TOTAL LENGTH',   lengthDisp);
     paintTile('K8:M8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-    paintTile('N8:O8', 'MAX SPREAD',     spanDisp);
+    paintTile('N8:P8', 'MAX SPREAD',     spanDisp);
 
     ws.getRow(9).height = 6;
     ws.getRow(10).height = 3;
@@ -9701,9 +9718,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     ws.getRow(12).height = 22;
     var headers = (kind === 'cctv')
-      ? ['#','Asset ID','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done']
-      : ['#','Asset ID','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done'];
-    for (var i = 0; i < 14; i++) {
+      ? ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','\\u2713 Done']
+      : ['#','Asset ID','CiA','Address','Suburb','\\u00d8 (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','\\u2713 Done'];
+    for (var i = 0; i < 15; i++) {
       var hCell = ws.getCell(12, 2 + i);
       hCell.value = headers[i];
       hCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -9718,12 +9735,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var altFill = (idx % 2 === 0) ? WHITE : ROW_ALT;
       paintRow(r, altFill);
 
-      var bCell = ws.getCell(r, 2);
+      var bCell = ws.getCell(r, COL.ROWNUM);
       bCell.value = idx + 1;
       bCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
       bCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var cCell = ws.getCell(r, 3);
+      var cCell = ws.getCell(r, COL.ASSET_ID);
       var assetId = String(item.assetId == null ? '' : item.assetId);
       var ciaUrl = buildCiAAssetUrl(assetId);
       if (ciaUrl) {
@@ -9734,31 +9751,41 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       cCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK }, underline: !!ciaUrl };
       cCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-      var dCell = ws.getCell(r, 4);
+      var ciaCell = ws.getCell(r, COL.CIA);
+      if (ciaUrl) {
+        ciaCell.value = { text: 'Open in CiA', hyperlink: ciaUrl, tooltip: 'Open ' + assetId + ' in CiA' };
+        ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: true };
+      } else {
+        ciaCell.value = '';
+        ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' } };
+      }
+      ciaCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+      var dCell = ws.getCell(r, COL.ADDRESS);
       dCell.value = String(item.address || '');
       dCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
       dCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-      var eCell = ws.getCell(r, 5);
+      var eCell = ws.getCell(r, COL.SUBURB);
       eCell.value = String(item.suburb || '');
       eCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
       eCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-      var fCell = ws.getCell(r, 6);
+      var fCell = ws.getCell(r, COL.DIAMETER);
       var diam = Math.round(Number(item.diameter) || 0);
       fCell.value = diam || null;
       fCell.numFmt = '0';
       fCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
       fCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var gCell = ws.getCell(r, 7);
+      var gCell = ws.getCell(r, COL.LENGTH);
       var lenM = Number(item.lengthM);
       gCell.value = Number.isFinite(lenM) ? Number(lenM.toFixed(1)) : null;
       gCell.numFmt = '0.0';
       gCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
       gCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var hCell2 = ws.getCell(r, 8);
+      var hCell2 = ws.getCell(r, COL.CONDSCORE);
       var score = Number(item.conditionScore) || 0;
       hCell2.value = score || null;
       hCell2.numFmt = '0';
@@ -9768,36 +9795,36 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       hCell2.font = { name: 'Arial', size: 10, bold: true, color: { argb: scoreColor } };
       hCell2.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var iCell = ws.getCell(r, 9);
+      var iCell = ws.getCell(r, COL.CONDITION);
       iCell.value = String(item.conditionLabel || '');
       iCell.font = { name: 'Arial', size: 8, color: { argb: TEXT_GREY } };
       iCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-      var jCell = ws.getCell(r, 10);
+      var jCell = ws.getCell(r, COL.US_NODE);
       jCell.value = item.usNode == null ? '' : item.usNode;
       jCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
       jCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var kCell = ws.getCell(r, 11);
+      var kCell = ws.getCell(r, COL.DS_NODE);
       kCell.value = item.dsNode == null ? '' : item.dsNode;
       kCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
       kCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var lCell = ws.getCell(r, 12);
+      var lCell = ws.getCell(r, COL.RATE);
       var rate = Number(item.ratePerM);
       lCell.value = Number.isFinite(rate) ? rate : null;
       lCell.numFmt = '0.00';
       lCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_GREY } };
       lCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var mCell = ws.getCell(r, 13);
+      var mCell = ws.getCell(r, COL.COST);
       var cost = Number(item.cost);
       mCell.value = Number.isFinite(cost) ? cost : null;
       mCell.numFmt = '"$"#,##0.00';
       mCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
       mCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var nCell = ws.getCell(r, 14);
+      var nCell = ws.getCell(r, COL.MAPS);
       var addrText = String(item.address || '').trim();
       if (addrText) {
         var mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addrText);
@@ -9808,7 +9835,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       nCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: !!addrText };
       nCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      var oCell = ws.getCell(r, 15);
+      var oCell = ws.getCell(r, COL.DONE);
       oCell.value = '';
       oCell.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
       oCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -9824,27 +9851,27 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var totalsRowIdx = lastDataRow + 1;
     ws.getRow(totalsRowIdx).height = 22;
     paintRow(totalsRowIdx, TOTALS_FILL);
-    ws.mergeCells('B' + totalsRowIdx + ':E' + totalsRowIdx);
+    ws.mergeCells('B' + totalsRowIdx + ':F' + totalsRowIdx);
     var tHead = ws.getCell('B' + totalsRowIdx);
     tHead.value = 'TOTALS  \\u2014  ' + items.length + (items.length === 1 ? ' pipe' : ' pipes');
     tHead.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     tHead.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
     if (items.length > 0) {
-      var gTot = ws.getCell('G' + totalsRowIdx);
-      gTot.value = { formula: 'SUM(G' + startDataRow + ':G' + lastDataRow + ')' };
+      var gTot = ws.getCell('H' + totalsRowIdx);
+      gTot.value = { formula: 'SUM(H' + startDataRow + ':H' + lastDataRow + ')' };
       gTot.numFmt = '0.0';
       gTot.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
       gTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var lTot = ws.getCell('L' + totalsRowIdx);
-      lTot.value = { formula: 'AVERAGE(L' + startDataRow + ':L' + lastDataRow + ')' };
+      var lTot = ws.getCell('M' + totalsRowIdx);
+      lTot.value = { formula: 'AVERAGE(M' + startDataRow + ':M' + lastDataRow + ')' };
       lTot.numFmt = '0.00';
       lTot.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
       lTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-      var mTot = ws.getCell('M' + totalsRowIdx);
-      mTot.value = { formula: 'SUM(M' + startDataRow + ':M' + lastDataRow + ')' };
+      var mTot = ws.getCell('N' + totalsRowIdx);
+      mTot.value = { formula: 'SUM(N' + startDataRow + ':N' + lastDataRow + ')' };
       mTot.numFmt = '"$"#,##0.00';
       mTot.font = { name: 'Arial', size: 11, bold: true, color: { argb: TEXT_DARK } };
       mTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
@@ -9852,7 +9879,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     var footerRow = totalsRowIdx + 2;
     ws.getRow(footerRow).height = 14;
-    ws.mergeCells('B' + footerRow + ':O' + footerRow);
+    ws.mergeCells('B' + footerRow + ':P' + footerRow);
     var footer = ws.getCell('B' + footerRow);
     footer.value = 'Northern Beaches Council  \\u00b7  Stormwater Asset Management  \\u00b7  This document is prepared for contractor use.';
     footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
@@ -11266,7 +11293,7 @@ function buildProvenanceLines({ toolKind, packageCount }) {
 // Styled per-package workbook helper (ExcelJS)
 // Used by live tool (downloadReliningPackagesZip), standalone (exportReportZip
 // — inlined into runtime IIFE), and CCTV (downloadCctvPackagesZip).
-// Layout: 16 columns A..P; A and P are 4-wide gutters, B..O hold the content.
+// Layout: 17 columns A..Q; A and Q are 4-wide gutters, B..P hold the content.
 // Returns an ExcelJS Workbook ready for await wb.xlsx.writeBuffer().
 // items[]: { assetId, address, suburb, diameter, lengthM, conditionScore,
 //            conditionLabel, usNode, dsNode, ratePerM, cost }
@@ -11293,31 +11320,49 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   const sheetName = String(meta.packageId || 'Package').slice(0, 31);
   const ws = wb.addWorksheet(sheetName, { views: [{ showGridLines: false }] });
 
-  // Column widths: A (4) + 14 content cols + P (4) = 16 columns
-  // B # | C Asset ID | D Address | E Suburb | F Ø (mm) | G Length (m) |
-  // H Cond. Score | I Condition | J US Node | K DS Node | L Rate ($/m) |
-  // M Cost ($) | N Maps | O Done
+  // Column widths: A (4) + 15 content cols + Q (4) = 17 columns
+  // B # | C Asset ID | D CiA | E Address | F Suburb | G Ø (mm) | H Length (m) |
+  // I Cond. Score | J Condition | K US Node | L DS Node | M Rate ($/m) |
+  // N Cost ($) | O Maps | P Done
+  const COL = {
+    ROWNUM:    2,  // B
+    ASSET_ID:  3,  // C
+    CIA:       4,  // D
+    ADDRESS:   5,  // E
+    SUBURB:    6,  // F
+    DIAMETER:  7,  // G
+    LENGTH:    8,  // H
+    CONDSCORE: 9,  // I
+    CONDITION: 10, // J
+    US_NODE:   11, // K
+    DS_NODE:   12, // L
+    RATE:      13, // M
+    COST:      14, // N
+    MAPS:      15, // O
+    DONE:      16  // P
+  };
   ws.columns = [
     { width: 4 },   // A gutter
     { width: 5 },   // B #
     { width: 14 },  // C Asset ID
-    { width: 36 },  // D Address
-    { width: 18 },  // E Suburb
-    { width: 10 },  // F Diameter
-    { width: 10 },  // G Length
-    { width: 14 },  // H Cond Score
-    { width: 32 },  // I Condition
-    { width: 12 },  // J US Node
-    { width: 12 },  // K DS Node
-    { width: 11 },  // L Rate
-    { width: 14 },  // M Cost
-    { width: 10 },  // N Maps
-    { width: 10 },  // O Done
-    { width: 4 }    // P gutter
+    { width: 12 },  // D CiA  (NEW)
+    { width: 36 },  // E Address
+    { width: 18 },  // F Suburb
+    { width: 10 },  // G Diameter
+    { width: 10 },  // H Length
+    { width: 14 },  // I Cond Score
+    { width: 32 },  // J Condition
+    { width: 12 },  // K US Node
+    { width: 12 },  // L DS Node
+    { width: 11 },  // M Rate
+    { width: 14 },  // N Cost
+    { width: 10 },  // O Maps
+    { width: 10 },  // P Done
+    { width: 4 }    // Q gutter
   ];
 
   function paintRow(rowIdx, fillArgb) {
-    for (let c = 1; c <= 16; c++) {
+    for (let c = 1; c <= 17; c++) {
       ws.getCell(rowIdx, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fillArgb } };
     }
   }
@@ -11325,11 +11370,11 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   // Row 1: blank (height 8)
   ws.getRow(1).height = 8;
 
-  // Row 2: Package id pill (L2:O2 merged) on dark navy band
+  // Row 2: Package id pill (M2:P2 merged) on dark navy band
   ws.getRow(2).height = 52;
   paintRow(2, NAVY_DARK);
-  ws.mergeCells('L2:O2');
-  const c2 = ws.getCell('L2');
+  ws.mergeCells('M2:P2');
+  const c2 = ws.getCell('M2');
   c2.value = String(meta.packageId || '');
   c2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: TEAL } };
   c2.font = { name: 'Arial', size: 20, bold: true, color: { argb: WHITE } };
@@ -11341,19 +11386,19 @@ function buildStyledPackageWorkbook(meta, items, kind) {
 
   // Row 4: kicker text
   ws.getRow(4).height = 18;
-  ws.mergeCells('B4:O4');
+  ws.mergeCells('B4:P4');
   const c4 = ws.getCell('B4');
   c4.value = 'STORMWATER ASSET MANAGEMENT  ·  PIPE RELINING PROGRAM';
   c4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c4.font = { name: 'Arial', size: 8, color: { argb: TEAL } };
   c4.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-  // also fill A4 and P4 to match the dark band
+  // also fill A4 and Q4 to match the dark band
   ws.getCell('A4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q4').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 5: title
   ws.getRow(5).height = 28;
-  ws.mergeCells('B5:O5');
+  ws.mergeCells('B5:P5');
   const c5 = ws.getCell('B5');
   c5.value = (kind === 'cctv'
     ? 'CCTV Inspection Package  —  Works Schedule'
@@ -11362,18 +11407,18 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   c5.font = { name: 'Arial', size: 16, bold: true, color: { argb: WHITE } };
   c5.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q5').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 6: subtitle
   ws.getRow(6).height = 18;
-  ws.mergeCells('B6:O6');
+  ws.mergeCells('B6:P6');
   const c6 = ws.getCell('B6');
   c6.value = 'Prepared by Stormwater Asset Management  ·  Contractor use only  ·  For field verification';
   c6.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
   c6.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
   c6.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
   ws.getCell('A6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
-  ws.getCell('P6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
+  ws.getCell('Q6').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY_DARK } };
 
   // Row 7: blank gap
   ws.getRow(7).height = 6;
@@ -11395,19 +11440,19 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   paintTile('E8:G8', 'PIPES',          String(Number(meta.pipeCount) || 0));
   paintTile('H8:J8', 'TOTAL LENGTH',   lengthDisp);
   paintTile('K8:M8', kind === 'cctv' ? 'TOTAL COST' : 'ESTIMATED COST', fmtMoney0(meta.totalCost));
-  paintTile('N8:O8', 'MAX SPREAD',     spanDisp);
+  paintTile('N8:P8', 'MAX SPREAD',     spanDisp);
 
   // Rows 9-11: blank decorative
   ws.getRow(9).height = 6;
   ws.getRow(10).height = 3;
   ws.getRow(11).height = 4;
 
-  // Row 12: header row (cols B..O)
+  // Row 12: header row (cols B..P)
   ws.getRow(12).height = 22;
   const headers = (kind === 'cctv')
-    ? ['#','Asset ID','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done']
-    : ['#','Asset ID','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done'];
-  for (let i = 0; i < 14; i++) {
+    ? ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/hr)','Cost ($)','Maps','✓ Done']
+    : ['#','Asset ID','CiA','Address','Suburb','Ø (mm)','Length (m)','Cond. Score','Condition','US Node','DS Node','Rate ($/m)','Cost ($)','Maps','✓ Done'];
+  for (let i = 0; i < 15; i++) {
     const cell = ws.getCell(12, 2 + i);
     cell.value = headers[i];
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } };
@@ -11424,13 +11469,13 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     paintRow(r, altFill);
 
     // B: row number
-    const bCell = ws.getCell(r, 2);
+    const bCell = ws.getCell(r, COL.ROWNUM);
     bCell.value = idx + 1;
     bCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
     bCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // C: Asset ID (hyperlink to CiA when numeric)
-    const cCell = ws.getCell(r, 3);
+    const cCell = ws.getCell(r, COL.ASSET_ID);
     const assetId = String(item.assetId == null ? '' : item.assetId);
     const ciaUrl = buildCiAAssetUrl(assetId);
     if (ciaUrl) {
@@ -11441,36 +11486,47 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     cCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK }, underline: !!ciaUrl };
     cCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-    // D: Address
-    const dCell = ws.getCell(r, 4);
+    // D: CiA ("Open in CiA" hyperlink — empty when no CiA URL)
+    const ciaCell = ws.getCell(r, COL.CIA);
+    if (ciaUrl) {
+      ciaCell.value = { text: 'Open in CiA', hyperlink: ciaUrl, tooltip: 'Open ' + assetId + ' in CiA' };
+      ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: true };
+    } else {
+      ciaCell.value = '';
+      ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' } };
+    }
+    ciaCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // E: Address
+    const dCell = ws.getCell(r, COL.ADDRESS);
     dCell.value = String(item.address || '');
     dCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
     dCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1, wrapText: false };
 
-    // E: Suburb
-    const eCell = ws.getCell(r, 5);
+    // F: Suburb
+    const eCell = ws.getCell(r, COL.SUBURB);
     eCell.value = String(item.suburb || '');
     eCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
     eCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-    // F: Diameter (integer)
-    const fCell = ws.getCell(r, 6);
+    // G: Diameter (integer)
+    const fCell = ws.getCell(r, COL.DIAMETER);
     const diam = Math.round(Number(item.diameter) || 0);
     fCell.value = diam || null;
     fCell.numFmt = '0';
     fCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     fCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // G: Length (1dp)
-    const gCell = ws.getCell(r, 7);
+    // H: Length (1dp)
+    const gCell = ws.getCell(r, COL.LENGTH);
     const lenM = Number(item.lengthM);
     gCell.value = Number.isFinite(lenM) ? Number(lenM.toFixed(1)) : null;
     gCell.numFmt = '0.0';
     gCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_DARK } };
     gCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // H: Cond. Score (color rules)
-    const hCell = ws.getCell(r, 8);
+    // I: Cond. Score (color rules)
+    const hCell = ws.getCell(r, COL.CONDSCORE);
     const score = Number(item.conditionScore) || 0;
     hCell.value = score || null;
     hCell.numFmt = '0';
@@ -11480,42 +11536,42 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     hCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: scoreColor } };
     hCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // I: Condition
-    const iCell = ws.getCell(r, 9);
+    // J: Condition
+    const iCell = ws.getCell(r, COL.CONDITION);
     iCell.value = String(item.conditionLabel || '');
     iCell.font = { name: 'Arial', size: 8, color: { argb: TEXT_GREY } };
     iCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1, wrapText: false };
 
-    // J: US Node
-    const jCell = ws.getCell(r, 10);
+    // K: US Node
+    const jCell = ws.getCell(r, COL.US_NODE);
     jCell.value = item.usNode == null ? '' : item.usNode;
     jCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
     jCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // K: DS Node
-    const kCell = ws.getCell(r, 11);
+    // L: DS Node
+    const kCell = ws.getCell(r, COL.DS_NODE);
     kCell.value = item.dsNode == null ? '' : item.dsNode;
     kCell.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
     kCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // L: Rate (2dp)
-    const lCell = ws.getCell(r, 12);
+    // M: Rate (2dp)
+    const lCell = ws.getCell(r, COL.RATE);
     const rate = Number(item.ratePerM);
     lCell.value = Number.isFinite(rate) ? rate : null;
     lCell.numFmt = '0.00';
     lCell.font = { name: 'Arial', size: 9, color: { argb: TEXT_GREY } };
     lCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // M: Cost (currency)
-    const mCell = ws.getCell(r, 13);
+    // N: Cost (currency)
+    const mCell = ws.getCell(r, COL.COST);
     const cost = Number(item.cost);
     mCell.value = Number.isFinite(cost) ? cost : null;
     mCell.numFmt = '"$"#,##0.00';
     mCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     mCell.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // N: Maps hyperlink
-    const nCell = ws.getCell(r, 14);
+    // O: Maps hyperlink
+    const nCell = ws.getCell(r, COL.MAPS);
     const addrText = String(item.address || '').trim();
     if (addrText) {
       const mapsUrl = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addrText);
@@ -11526,8 +11582,8 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     nCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: !!addrText };
     nCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // O: Done (empty checkbox-style cell)
-    const oCell = ws.getCell(r, 15);
+    // P: Done (empty checkbox-style cell)
+    const oCell = ws.getCell(r, COL.DONE);
     oCell.value = '';
     oCell.font = { name: 'Arial', size: 9, color: { argb: MUTED } };
     oCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -11545,30 +11601,30 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   ws.getRow(totalsRow).height = 22;
   paintRow(totalsRow, TOTALS_FILL);
 
-  ws.mergeCells('B' + totalsRow + ':E' + totalsRow);
+  ws.mergeCells('B' + totalsRow + ':F' + totalsRow);
   const tHead = ws.getCell('B' + totalsRow);
   tHead.value = 'TOTALS  —  ' + items.length + (items.length === 1 ? ' pipe' : ' pipes');
   tHead.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
   tHead.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
   if (items.length > 0) {
-    // G: SUM(G13:G<lastDataRow>)
-    const gTot = ws.getCell('G' + totalsRow);
-    gTot.value = { formula: 'SUM(G' + startDataRow + ':G' + lastDataRow + ')' };
+    // H: SUM(H13:H<lastDataRow>) — Length
+    const gTot = ws.getCell('H' + totalsRow);
+    gTot.value = { formula: 'SUM(H' + startDataRow + ':H' + lastDataRow + ')' };
     gTot.numFmt = '0.0';
     gTot.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK } };
     gTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // L: AVERAGE(L13:L<lastDataRow>)
-    const lTot = ws.getCell('L' + totalsRow);
-    lTot.value = { formula: 'AVERAGE(L' + startDataRow + ':L' + lastDataRow + ')' };
+    // M: AVERAGE(M13:M<lastDataRow>) — Rate
+    const lTot = ws.getCell('M' + totalsRow);
+    lTot.value = { formula: 'AVERAGE(M' + startDataRow + ':M' + lastDataRow + ')' };
     lTot.numFmt = '0.00';
     lTot.font = { name: 'Arial', size: 8, color: { argb: MUTED } };
     lTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
 
-    // M: SUM(M13:M<lastDataRow>)
-    const mTot = ws.getCell('M' + totalsRow);
-    mTot.value = { formula: 'SUM(M' + startDataRow + ':M' + lastDataRow + ')' };
+    // N: SUM(N13:N<lastDataRow>) — Cost
+    const mTot = ws.getCell('N' + totalsRow);
+    mTot.value = { formula: 'SUM(N' + startDataRow + ':N' + lastDataRow + ')' };
     mTot.numFmt = '"$"#,##0.00';
     mTot.font = { name: 'Arial', size: 11, bold: true, color: { argb: TEXT_DARK } };
     mTot.alignment = { horizontal: 'right', vertical: 'middle', indent: 1 };
@@ -11577,7 +11633,7 @@ function buildStyledPackageWorkbook(meta, items, kind) {
   // Footer (totalsRow + 2)
   const footerRow = totalsRow + 2;
   ws.getRow(footerRow).height = 14;
-  ws.mergeCells('B' + footerRow + ':O' + footerRow);
+  ws.mergeCells('B' + footerRow + ':P' + footerRow);
   const footer = ws.getCell('B' + footerRow);
   footer.value = 'Northern Beaches Council  ·  Stormwater Asset Management  ·  This document is prepared for contractor use.';
   footer.font = { name: 'Arial', size: 7, italic: true, color: { argb: MUTED } };
