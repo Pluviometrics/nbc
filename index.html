@@ -8051,6 +8051,30 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function applyMovesAndRender() {
+    // PHASE 0a — translate any leftover anchor_id values from pre-fix localStorage sessions
+    var anchorToPkgId = {};
+    (data.packages || []).forEach(function(p) {
+      if (p && p.anchor_id && p.id) anchorToPkgId[p.anchor_id] = p.id;
+    });
+    if (Object.keys(anchorToPkgId).length) {
+      var dirty = false;
+      Object.keys(reportManualMoves.assignments || {}).forEach(function(uid) {
+        var t = reportManualMoves.assignments[uid];
+        if (anchorToPkgId[t]) { reportManualMoves.assignments[uid] = anchorToPkgId[t]; dirty = true; }
+      });
+      var newPkgLocks = {};
+      Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).forEach(function(k) {
+        var newKey = anchorToPkgId[k] || k;
+        if (newKey !== k) dirty = true;
+        newPkgLocks[newKey] = reportManualMoves.locks.packages[k];
+      });
+      reportManualMoves.locks.packages = newPkgLocks;
+      Object.keys(reportManualMoves.c6Included || {}).forEach(function(uid) {
+        var t = reportManualMoves.c6Included[uid];
+        if (anchorToPkgId[t]) { reportManualMoves.c6Included[uid] = anchorToPkgId[t]; dirty = true; }
+      });
+      if (dirty) saveReportMoves();
+    }
     // 0. Honour c6Excluded/c6Included by mutating the pipes array itself
     var c6Excluded = (reportManualMoves && reportManualMoves.c6Excluded) || {};
     var c6Included = (reportManualMoves && reportManualMoves.c6Included) || {};
@@ -9832,6 +9856,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.pkg-lock-btn.unlocked{color:#16a34a}',
     '.pkg-lock-btn.partial{color:#d97706}',
     '.pkg-lock-btn-pkg{font-size:16px;padding:3px 7px;margin-left:6px}',
+    '.edit-pkg-asset-row a{color:inherit}',
     '</style>',
     '</head>',
     '<body>',
