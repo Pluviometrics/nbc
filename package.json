@@ -1,0 +1,17 @@
+{
+  "name": "nbc-stormwater-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "NBC Stormwater packaging + relining tool — single-page web app",
+  "type": "module",
+  "scripts": {
+    "build": "node prebuild.mjs",
+    "lint": "eslint --ext .js,.html .",
+    "serve": "npx http-server -p 5173 -c-1 .",
+    "test:smoke": "playwright test smoke.spec.js"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0",
+    "@playwright/test": "^1.45.0"
+  }
+}

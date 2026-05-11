@@ -2,3 +2,7 @@
 # local-only scratch — added during 2026-04-27 cleanup
 bom_station_activity_cache.json
 _libs/
+
+# tooling — added during 2026-05-12 ops-tooling pass
+node_modules/
+.eslintcache
