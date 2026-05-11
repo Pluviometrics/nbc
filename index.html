@@ -7763,7 +7763,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         + '<td style="padding:6px 8px;font-size:11px">' + Number(p.length_m || 0).toFixed(1) + ' m</td>'
         + '<td style="padding:6px 8px;font-size:11px">' + fmtCurrency(p.pipe_cost) + '</td>'
         + '<td style="padding:6px 8px">'
-          + '<select onchange="onMovePipe(\'' + esc(p.asset_id) + '\', this.value)" title="IDs may renumber after move">'
+          + '<select onchange="onMovePipe(\\'' + esc(p.asset_id) + '\\', this.value)" title="IDs may renumber after move">'
           + '<option value="" disabled selected>Move to…</option>'
           + optsHtml + newOpt
           + '</select>'
