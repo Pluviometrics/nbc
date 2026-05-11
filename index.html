@@ -6345,11 +6345,13 @@ function toggleReliningAllPackagesLock() {
 }
 
 // ── CCTV manual-edit mirror of the Relining plumbing above ───────────
-// CCTV packages have no anchor_id (no Condition-6 add-on concept either),
-// so assignments/locks are keyed by package_id. Phase A is plumbing only;
-// the Edit Packages UI hooks in Phase B will fill the typeof-guarded
-// reapply/render calls below.
-const CCTV_MANUAL_MOVES_KEY = 'nbcCctvManualMoves_v1';
+// CCTV packages now carry a stable anchor_id stamped at build time
+// (see buildFixedCentreCctvPackages / buildCctvPackagesPortable /
+// rebuildCctvPackageFromItems). All manual-edit state below is keyed
+// by anchor_id, NOT package_id, so edits/locks survive
+// prioritiseAndRenumberCctvPackages renaming. Phase B's Edit Packages
+// UI hooks fill in the typeof-guarded reapply/render calls below.
+const CCTV_MANUAL_MOVES_KEY = 'nbcCctvManualMoves_v2';
 let cctvManualMoves = loadCctvManualMoves();
 
 function loadCctvManualMoves() {
@@ -6427,39 +6429,48 @@ function manualCctvAssignmentCount() {
   return Object.keys(cctvManualMoves?.assignments || {}).length;
 }
 
-function findCctvAssetCurrentPackage(assetUid) {
+// Helper: locate a CCTV package by its stable anchor_id in the current generation.
+function findCctvPackageByAnchor(anchorId) {
+  if (!lastCctvPackagingGeneration || !anchorId) return null;
+  const id = String(anchorId);
+  return (lastCctvPackagingGeneration.packages || []).find(p => p.anchor_id === id) || null;
+}
+
+// Returns the current anchor_id of the package containing this asset,
+// or null if the asset is not present in the current generation.
+function findCctvAssetCurrentAnchor(assetUid) {
   if (!lastCctvPackagingGeneration) return null;
   const uid = String(assetUid);
   for (const pkg of lastCctvPackagingGeneration.packages || []) {
     for (const asset of pkg.assets || []) {
-      if (String(asset.assetId) === uid) return pkg.package_id;
+      if (String(asset.assetId) === uid) return pkg.anchor_id;
     }
   }
   return null;
 }
 
-function moveCctvAssetToPackage(assetUid, targetPackageId) {
+function moveCctvAssetToPackage(assetUid, targetAnchorId) {
   if (!lastCctvPackagingGeneration) return;
   if (!cctvManualMoves) cctvManualMoves = { assignments: {}, packageOrigins: {} };
   const uid = String(assetUid);
-  const sourcePackage = findCctvAssetCurrentPackage(uid);
-  if (!sourcePackage) { alert('Asset not found in current packaging.'); return; }
-  if (sourcePackage === targetPackageId) return;
-  const targetPkg = (lastCctvPackagingGeneration.packages || []).find(p => p.package_id === targetPackageId);
-  if (!targetPkg && !cctvManualMoves.packageOrigins[targetPackageId]) {
+  const sourceAnchor = findCctvAssetCurrentAnchor(uid);
+  if (!sourceAnchor) { alert('Asset not found in current packaging.'); return; }
+  if (sourceAnchor === targetAnchorId) return;
+  const targetPkg = findCctvPackageByAnchor(targetAnchorId);
+  if (!targetPkg && !cctvManualMoves.packageOrigins[targetAnchorId]) {
     alert('Target package not found.');
     return;
   }
   pushCctvMoveHistory('Move pipe');
-  cctvManualMoves.assignments[uid] = targetPackageId;
-  if (!cctvManualMoves.packageOrigins[targetPackageId]) {
-    cctvManualMoves.packageOrigins[targetPackageId] = {
+  cctvManualMoves.assignments[uid] = targetAnchorId;
+  if (!cctvManualMoves.packageOrigins[targetAnchorId]) {
+    cctvManualMoves.packageOrigins[targetAnchorId] = {
       kind: 'existing',
       created_at: new Date().toISOString(),
       last_package_id: targetPkg?.package_id || ''
     };
   } else if (targetPkg) {
-    cctvManualMoves.packageOrigins[targetPackageId].last_package_id = targetPkg.package_id;
+    cctvManualMoves.packageOrigins[targetAnchorId].last_package_id = targetPkg.package_id;
   }
   if (!cctvManualMoves.locks) cctvManualMoves.locks = { pipes: {}, packages: {} };
   if (!cctvManualMoves.moveOrigins) cctvManualMoves.moveOrigins = {};
@@ -6469,23 +6480,24 @@ function moveCctvAssetToPackage(assetUid, targetPackageId) {
   if (typeof reapplyCctvManualEditsToCurrentGeneration === 'function') reapplyCctvManualEditsToCurrentGeneration();
 }
 
-function generateCctvPackageId() {
-  return 'cctv_pkg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+function generateCctvAnchorId() {
+  // Match Relining's anchor_id format so CCTV and Relining share one ID scheme.
+  return generateReliningAnchorId();
 }
 
 function createNewCctvPackageForAsset(assetUid) {
   if (!lastCctvPackagingGeneration) return;
   if (!cctvManualMoves) cctvManualMoves = { assignments: {}, packageOrigins: {} };
   const uid = String(assetUid);
-  if (!findCctvAssetCurrentPackage(uid)) { alert('Asset not found in current packaging.'); return; }
+  if (!findCctvAssetCurrentAnchor(uid)) { alert('Asset not found in current packaging.'); return; }
   pushCctvMoveHistory('Create package');
-  const newPkgId = generateCctvPackageId();
-  cctvManualMoves.packageOrigins[newPkgId] = {
+  const newAnchor = generateCctvAnchorId();
+  cctvManualMoves.packageOrigins[newAnchor] = {
     kind: 'new',
     created_at: new Date().toISOString(),
     last_package_id: ''
   };
-  cctvManualMoves.assignments[uid] = newPkgId;
+  cctvManualMoves.assignments[uid] = newAnchor;
   if (!cctvManualMoves.locks) cctvManualMoves.locks = { pipes: {}, packages: {} };
   if (!cctvManualMoves.moveOrigins) cctvManualMoves.moveOrigins = {};
   cctvManualMoves.locks.pipes[uid] = true;
@@ -6516,28 +6528,28 @@ function isCctvPipeLocked(uid) {
   return !!(cctvManualMoves?.locks?.pipes?.[String(uid)]);
 }
 
-function isCctvPackageLocked(packageId) {
-  return !!(cctvManualMoves?.locks?.packages?.[String(packageId)]);
+function isCctvPackageLocked(anchorId) {
+  return !!(cctvManualMoves?.locks?.packages?.[String(anchorId)]);
 }
 
 function getCctvPackageLockState(pkg) {
   const assets = pkg?.assets || [];
-  if (!assets.length) return isCctvPackageLocked(pkg?.package_id) ? 'all' : 'none';
+  if (!assets.length) return isCctvPackageLocked(pkg?.anchor_id) ? 'all' : 'none';
   const lockedCount = assets.filter(a => isCctvPipeLocked(String(a.assetId || ''))).length;
   if (lockedCount === assets.length) return 'all';
   if (lockedCount === 0) return 'none';
   return 'partial';
 }
 
-function lockCctvPipe(uid, packageId) {
+function lockCctvPipe(uid, anchorId) {
   _ensureCctvLocks();
   const u = String(uid);
   cctvManualMoves.locks.pipes[u] = true;
   // See lockReliningPipe: avoid bloating assignments with a no-op self-assignment
   // when the lock target equals the pipe's natural package.
-  const target = String(packageId);
-  const naturalPackage = findCctvAssetCurrentPackage(u);
-  if (naturalPackage === target) {
+  const target = String(anchorId);
+  const naturalAnchor = findCctvAssetCurrentAnchor(u);
+  if (naturalAnchor === target) {
     delete cctvManualMoves.assignments[u];
   } else {
     cctvManualMoves.assignments[u] = target;
@@ -6552,12 +6564,12 @@ function unlockCctvPipe(uid) {
   if (cctvManualMoves.moveOrigins) delete cctvManualMoves.moveOrigins[u];
 }
 
-function lockCctvPackage(packageId, assets) {
+function lockCctvPackage(anchorId, assets) {
   _ensureCctvLocks();
-  const id = String(packageId);
+  const id = String(anchorId);
   cctvManualMoves.locks.packages[id] = true;
   if (!cctvManualMoves.packageOrigins[id]) {
-    const pkg = (lastCctvPackagingGeneration?.packages || []).find(p => p.package_id === packageId);
+    const pkg = findCctvPackageByAnchor(anchorId);
     cctvManualMoves.packageOrigins[id] = {
       kind: 'existing',
       created_at: new Date().toISOString(),
@@ -6573,29 +6585,29 @@ function lockCctvPackage(packageId, assets) {
   persistCctvManualMoves();
 }
 
-function unlockCctvPackage(packageId, assets) {
+function unlockCctvPackage(anchorId, assets) {
   if (!cctvManualMoves?.locks) return;
-  delete cctvManualMoves.locks.packages[String(packageId)];
+  delete cctvManualMoves.locks.packages[String(anchorId)];
   (assets || []).forEach(a => unlockCctvPipe(String(a.assetId || '')));
   persistCctvManualMoves();
 }
 
-function toggleCctvPipeLock(uid, packageId) {
+function toggleCctvPipeLock(uid, anchorId) {
   pushCctvMoveHistory('Toggle pipe lock');
   if (isCctvPipeLocked(uid)) { unlockCctvPipe(uid); persistCctvManualMoves(); }
-  else { lockCctvPipe(uid, packageId); persistCctvManualMoves(); }
+  else { lockCctvPipe(uid, anchorId); persistCctvManualMoves(); }
   if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
   if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
 }
 
-function toggleCctvPackageLock(packageId) {
-  const pkg = (lastCctvPackagingGeneration?.packages || []).find(p => p.package_id === packageId);
+function toggleCctvPackageLock(anchorId) {
+  const pkg = findCctvPackageByAnchor(anchorId);
   const assets = pkg?.assets || [];
   pushCctvMoveHistory('Toggle package lock');
-  if (getCctvPackageLockState(pkg || { package_id: packageId }) === 'all') {
-    unlockCctvPackage(packageId, assets);
+  if (getCctvPackageLockState(pkg || { anchor_id: anchorId }) === 'all') {
+    unlockCctvPackage(anchorId, assets);
   } else {
-    lockCctvPackage(packageId, assets);
+    lockCctvPackage(anchorId, assets);
   }
   if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
   if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
@@ -6614,9 +6626,9 @@ function toggleCctvAllPackagesLock() {
   const packages = lastCctvPackagingGeneration?.packages || [];
   pushCctvMoveHistory('Toggle all packages lock');
   if (getCctvGlobalLockState() === 'all') {
-    packages.forEach(pkg => unlockCctvPackage(pkg.package_id, pkg.assets || []));
+    packages.forEach(pkg => unlockCctvPackage(pkg.anchor_id, pkg.assets || []));
   } else {
-    packages.forEach(pkg => lockCctvPackage(pkg.package_id, pkg.assets || []));
+    packages.forEach(pkg => lockCctvPackage(pkg.anchor_id, pkg.assets || []));
   }
   if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
   if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
@@ -14098,6 +14110,7 @@ function buildCctvPackagesPortable(candidates, options, rateMeta) {
     const assetIds = items.map(item => item.assetId);
     const assetLinks = items.map(item => buildEsriAssetLink(item.assetId, esriOptions));
     return {
+      anchor_id: generateReliningAnchorId(),
       package_id: `CCTV_${String(index + 1).padStart(3, '0')}`,
       suburb,
       primary_suburb: suburb,
@@ -14235,6 +14248,7 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
     const assetLinks = items.map(item => buildEsriAssetLink(item.assetId, esriOptions));
 
     return {
+      anchor_id: generateReliningAnchorId(),
       package_id: `CCTV_${String(index + 1).padStart(3, '0')}`,
       suburb,
       primary_suburb: suburb,
@@ -14273,7 +14287,7 @@ function buildFixedCentreCctvPackages(candidates, options, rateMeta) {
   }).filter(pkg => !pkg.spatially_invalid);
 }
 
-function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOptions) {
+function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOptions, existingAnchorId) {
   const clusterCenter = meanCoordinate(items);
   const totalLengthM = items.reduce((sum, item) => sum + (item.lengthM || 0), 0);
   const surveyHours = calculateCctvSurveyHours(totalLengthM, items.length, options);
@@ -14295,6 +14309,7 @@ function rebuildCctvPackageFromItems(items, index, options, rateMeta, esriOption
   const assetIds = items.map(item => item.assetId);
   const assetLinks = items.map(item => buildEsriAssetLink(item.assetId, esriOptions));
   return {
+    anchor_id: existingAnchorId || generateReliningAnchorId(),
     package_id: `CCTV_${String(index + 1).padStart(3, '0')}`,
     suburb,
     primary_suburb: suburb,
@@ -14338,6 +14353,7 @@ function consolidateSmallCctvPackages(packages, options, rateMeta) {
   const maxDistanceM = options.consolidateSmallDistanceM || 500;
   const drafts = packages.map((pkg, originalIndex) => ({
     originalIndex,
+    anchor_id: pkg.anchor_id || null,
     isOriginalSmall: (pkg.pipe_count || pkg.assets?.length || 0) <= maxPipes,
     items: (pkg.assets || []).map(item => ({ ...item })),
     center: Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon) ? { lat: pkg.lat, lon: pkg.lon } : meanCoordinate(pkg.assets || [])
@@ -14371,7 +14387,7 @@ function consolidateSmallCctvPackages(packages, options, rateMeta) {
   const esriOptions = getCctvEsriLinkOptions();
   return drafts
     .filter(draft => draft.mergedInto == null)
-    .map((draft, index) => rebuildCctvPackageFromItems(draft.items, index, options, rateMeta, esriOptions));
+    .map((draft, index) => rebuildCctvPackageFromItems(draft.items, index, options, rateMeta, esriOptions, draft.anchor_id));
 }
 
 function renderCctvPackagingMeta(preview, rateMeta, options) {
