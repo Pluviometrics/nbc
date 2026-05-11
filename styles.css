@@ -168,6 +168,14 @@ body.busy-ui button,body.busy-ui .run-btn,body.busy-ui .export-btn{cursor:progre
 .export-btn{padding:7px 14px;background:var(--teal);color:white;border:none;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
 .export-btn:hover{background:var(--teal-d)}
 
+/* Focus-visible ring for keyboard navigation (WCAG 2.4.7) */
+button:focus-visible,
+.export-btn:focus-visible,
+.run-btn:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:5px;height:5px}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
