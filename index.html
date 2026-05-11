@@ -8229,6 +8229,125 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   });
   renderPipes();
 
+  // --- ZIP EXPORT HELPERS ---------------------------------------------------
+  var ZIP_HEADERS = [
+    'package_id','Asset','SWP_Pipe Diameter_mm','Spatial Length_m',
+    'SW_Condition','Observed_Condition','SW_Upstream Node','SW_Downstream Node',
+    'rate_per_m','pipe_cost','Address','Asset Suburb',
+    'Max Distance Between Pipes (km)','Google_Street_View'
+  ];
+  function csvCell(v) {
+    var s = String(v == null ? '' : v);
+    return /[,"\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }
+  function csvRow(arr) { return arr.map(csvCell).join(','); }
+  function fmtCurrencyCents(v) {
+    if (!Number.isFinite(v)) return '';
+    return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function streetViewUrl(addr) {
+    var a = String(addr || '').trim();
+    return a ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(a) : '';
+  }
+  function maxSpanText(pkg) {
+    return Number.isFinite(pkg.max_span_m) ? (pkg.max_span_m / 1000).toFixed(1) + ' km' : '0.0 km';
+  }
+  function buildPackageCsv(pkg) {
+    var items = pipes.filter(function(p){ return p.package_id === pkg.id; });
+    var lines = [csvRow(ZIP_HEADERS)];
+    var totalLen = 0, totalCost = 0;
+    items.forEach(function(item) {
+      var len = Number(item.length_m) || 0;
+      var cost = Number(item.pipe_cost) || 0;
+      totalLen += len; totalCost += cost;
+      var addr = (item.raw && (item.raw.Formatted_Address || item.raw.Address || item.raw.Pipe_Start_Address || item.raw.Street_Address)) || item.address || '';
+      lines.push(csvRow([
+        pkg.id, item.asset_id, item.diameter_mm || '', len ? len.toFixed(1) + ' m' : '',
+        (item.raw && item.raw.SW_Condition) || item.condition || '',
+        (item.raw && item.raw.Observed_Condition) || '',
+        (item.raw && item.raw.SW_Upstream_Node) || item.upstream || '',
+        (item.raw && item.raw.SW_Downstream_Node) || item.downstream || '',
+        Number.isFinite(item.rate_per_m) ? item.rate_per_m : '',
+        cost ? fmtCurrencyCents(cost) : '',
+        addr, String(item.suburb || '').toUpperCase(),
+        '', streetViewUrl(addr)
+      ]));
+    });
+    var totalsRow = ZIP_HEADERS.map(function(){ return ''; });
+    totalsRow[ZIP_HEADERS.indexOf('package_id')] = 'Totals';
+    totalsRow[ZIP_HEADERS.indexOf('Spatial Length_m')] = totalLen.toFixed(2) + ' m';
+    totalsRow[ZIP_HEADERS.indexOf('pipe_cost')] = fmtCurrencyCents(totalCost);
+    totalsRow[ZIP_HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxSpanText(pkg);
+    lines.push(csvRow(totalsRow));
+    return { csv: lines.join('\n'), totalLen: totalLen, totalCost: totalCost };
+  }
+  function buildProvenanceLines() {
+    var editedByEl = document.getElementById('reportEditedBy');
+    var editedBy = (editedByEl && editedByEl.value || '').trim() || 'unknown';
+    var orig = data.provenance || {};
+    return [
+      'Original generated_at: ' + (orig.generated_at || data.generated_at || ''),
+      'Edited in standalone editor on: ' + new Date().toISOString(),
+      'Edited by: ' + editedBy,
+      'Source: NBC Relining Tool — standalone editor re-export',
+      'Package count: ' + packages.length,
+      'Pipe count: ' + pipes.length
+    ];
+  }
+  window.exportReportZip = async function() {
+    if (!packages.length) { alert('No packages to export.'); return; }
+    if (typeof JSZip === 'undefined') { alert('JSZip not loaded — refresh and try again.'); return; }
+    var zip = new JSZip();
+    var csvNames = [];
+    var summaryRows = [['Package ID','Suburb','Diameters (mm)','Max Distance Between Pipes (km)','Pipes','Cond 7','Cond 8','Length (m)','Cost ($)','Asset IDs']];
+    var provLines = buildProvenanceLines();
+    var summaryLines = ['PACKAGE SUMMARY','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']);
+    packages.forEach(function(pkg, idx) {
+      var built = buildPackageCsv(pkg);
+      var filename = pkg.id + '_pipes.csv';
+      csvNames.push(filename);
+      zip.file(filename, '﻿' + built.csv);
+      var items = pipes.filter(function(p){ return p.package_id === pkg.id; });
+      var diametersStr = (pkg.diameters_mm || []).join(', ');
+      var suburbsStr = (pkg.suburbs || []).join(', ');
+      var maxDist = maxSpanText(pkg);
+      summaryLines.push('Package:    ' + pkg.id);
+      summaryLines.push('Suburb:     ' + suburbsStr);
+      summaryLines.push('Diameters:  ' + diametersStr);
+      summaryLines.push('Pipes:      ' + items.length);
+      summaryLines.push('Cond 7:     ' + Number(pkg.condition_7_count || 0));
+      summaryLines.push('Cond 8:     ' + Number(pkg.condition_8_count || 0));
+      summaryLines.push('Length:     ' + built.totalLen.toLocaleString('en-AU', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + 'm');
+      summaryLines.push('Max Dist:   ' + maxDist);
+      summaryLines.push('Cost:       $' + Math.round(built.totalCost).toLocaleString('en-AU'));
+      summaryLines.push('------------------------------------------------------------');
+      if (idx < packages.length - 1) summaryLines.push('');
+      summaryRows.push([pkg.id, suburbsStr, diametersStr, maxDist, items.length, Number(pkg.condition_7_count||0), Number(pkg.condition_8_count||0), Math.round(built.totalLen*10)/10, Math.round(built.totalCost), items.map(function(i){return i.asset_id;}).join(', ')]);
+    });
+    zip.file('package_summary.txt', summaryLines.join('\n'));
+    var sortedNames = csvNames.slice().sort();
+    zip.file('file_list.txt', ['PACKAGE FILE LIST','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']).concat(sortedNames).join('\n'));
+    zip.file('provenance.txt', provLines.join('\n') + '\n');
+    if (typeof XLSX !== 'undefined') {
+      var wb1 = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb1, XLSX.utils.aoa_to_sheet(summaryRows), 'Package Summary');
+      zip.file('package_summary.xlsx', XLSX.write(wb1, { type: 'array', bookType: 'xlsx' }));
+      var wb2 = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb2, XLSX.utils.aoa_to_sheet([['Filename']].concat(sortedNames.map(function(n){return [n];}))), 'File List');
+      zip.file('file_list.xlsx', XLSX.write(wb2, { type: 'array', bookType: 'xlsx' }));
+    }
+    if (document.getElementById('reportIncludeLocks') && document.getElementById('reportIncludeLocks').checked) {
+      zip.file('locks.json', JSON.stringify(reportManualMoves, null, 2));
+    }
+    var blob = await zip.generateAsync({ type: 'blob' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'relining_packages_edited_' + new Date().toISOString().slice(0,10) + '.zip';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 1000);
+  };
+
 })();
 `;
 
@@ -8357,6 +8476,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<div class="pkg-sub">Static read-only summary of generated packages. The data, options, costs, and reasoning shown here mirror the live tool at the time the report was produced.</div>',
     '</div>',
     '<button class="export-btn" type="button" onclick="saveReportLockFile()" style="margin-right:6px">Save Lock File</button>',
+    '<input type="text" id="reportEditedBy" placeholder="Edited by (your name)" style="font-size:12px;padding:4px 8px;border:1px solid #DDE3E8;border-radius:6px;width:160px;margin-right:6px"/>',
+    '<label style="font-size:11px;color:#6B7280;margin-right:8px"><input type="checkbox" id="reportIncludeLocks"/> Include lock file</label>',
+    '<button class="export-btn" type="button" onclick="exportReportZip()" style="background:#00847F;color:#fff">Export Work Order Pack (ZIP)</button>',
     '<div class="pkg-status-chip"><span class="pkg-dot"></span><span id="reportStatusText">Report</span></div>',
     '</div>',
     '<div class="subtab-bar">',
