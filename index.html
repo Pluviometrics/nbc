@@ -7936,15 +7936,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
 
   // META STRIP
-  var meta = [
-    { label: 'Total Packages', value: fmtNum(summary.package_count, 0) || String(packages.length) },
-    { label: 'Total Pipes', value: fmtNum(summary.pipe_count, 0) || String(pipes.length) },
-    { label: 'Total Length', value: (fmtNum(summary.total_length_m, 1) || '0') + ' m' },
-    { label: 'Estimated Cost', value: fmtCurrency(summary.total_cost) || '$0' }
-  ];
-  document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
-    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
-  }).join('');
+  function renderReportMetaStrip() {
+    var meta = [
+      { label: 'Total Packages', value: fmtNum(packages.length, 0) },
+      { label: 'Total Pipes', value: fmtNum(pipes.length, 0) },
+      { label: 'Total Length', value: fmtNum(packages.reduce(function(s,p){return s+(p.total_length_m||0);}, 0), 1) + ' m' },
+      { label: 'Estimated Cost', value: fmtCurrency(packages.reduce(function(s,p){return s+(p.total_cost||0);}, 0)) || '$0' }
+    ];
+    document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
+      return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+    }).join('');
+  }
+  window.renderReportMetaStrip = renderReportMetaStrip;
 
   // OPTIONS STRIP — read-only display of the packaging rules used
   function fmtSizeGroups(g) {
