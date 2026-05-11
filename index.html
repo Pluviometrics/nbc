@@ -7714,6 +7714,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   window.applyMovesAndRender = applyMovesAndRender;
 
+  window.saveReportLockFile = function() {
+    var blob = new Blob([JSON.stringify(reportManualMoves, null, 2)], { type: \'application/json\' });
+    var generated = (data.generated_at || \'\').replace(/[:T]/g,\'-\').replace(/\\..*$/, \'\') || \'unknown\';
+    var filename = \'relining_locks_\' + generated + \'.json\';
+    var a = document.createElement(\'a\');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 1000);
+  };
+
   function renderReportEditPanel() {
     var area = document.getElementById('reportEditArea');
     if (!area) return;
@@ -8344,6 +8356,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<div class="pkg-title">Pipe Relining Packaging — Report</div>',
     '<div class="pkg-sub">Static read-only summary of generated packages. The data, options, costs, and reasoning shown here mirror the live tool at the time the report was produced.</div>',
     '</div>',
+    '<button class="export-btn" type="button" onclick="saveReportLockFile()" style="margin-right:6px">Save Lock File</button>',
     '<div class="pkg-status-chip"><span class="pkg-dot"></span><span id="reportStatusText">Report</span></div>',
     '</div>',
     '<div class="subtab-bar">',
