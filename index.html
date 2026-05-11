@@ -8454,19 +8454,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       return;
     }
     var c6Count = Number.isFinite(Number(pkg.c6_addon_count)) ? Number(pkg.c6_addon_count) : 0;
-    var pkgPipes = pipes.filter(function(p){ return p.package_id === pkg.id; });
-    var assetIdsAll = (pkg.asset_ids && pkg.asset_ids.length) ? pkg.asset_ids : pkgPipes.map(function(p){ return p.asset_id; }).filter(Boolean);
-    var assetSummary = assetIdsAll.slice(0, 8).map(function(id){ return esc(id); }).join(', ');
-    if (assetIdsAll.length > 8) assetSummary += ' +' + (assetIdsAll.length - 8) + ' more';
-    var suburbs = (pkg.suburbs && pkg.suburbs.length) ? pkg.suburbs.join(', ') : '';
     reportSelectedOverlayCard.innerHTML =
       '<div class="title">' + esc(pkg.id) + '</div>' +
       '<div class="meta">' +
-        (suburbs ? '<div><strong>Suburbs:</strong> ' + esc(suburbs) + '</div>' : '') +
         '<div><strong>Pipes:</strong> ' + (pkg.pipe_count || 0) + ' · <strong>Spread:</strong> ' + Number(pkg.max_span_m || 0).toFixed(0) + ' m</div>' +
         '<div><strong>Length:</strong> ' + Number(pkg.total_length_m || 0).toFixed(1) + ' m · <strong>Cost:</strong> ' + (fmtCurrency(pkg.total_cost) || '—') + '</div>' +
-        '<div><strong>C6 Add-Ons:</strong> ' + c6Count + '</div>' +
-        (assetSummary ? '<div style="margin-top:4px;font-size:10.5px"><strong>Assets:</strong> ' + assetSummary + '</div>' : '') +
+        '<div><strong>Number of Condition 6 Pipes:</strong> ' + c6Count + '</div>' +
       '</div>';
     reportSelectedOverlayCard.style.display = 'block';
     reportSelectedLeaderSvg.style.display = 'block';
@@ -9469,7 +9462,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.cctv-map-title { font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-l); }',
     '.cctv-map-sub { font-size:11px; color:var(--text-l); margin-top:3px; }',
     '.cctv-selected-banner { margin-top:5px; display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#111827; color:#FFD166; border:1px solid #FFD166; font-size:10px; font-weight:900; letter-spacing:.035em; box-shadow:0 5px 12px rgba(17,24,39,.18); }',
-    '.cctv-selected-map-card { position:absolute; top:12px; right:12px; z-index:650; max-width:min(300px,calc(100% - 78px)); background:rgba(255,255,255,.96); border:2px solid #111827; border-radius:12px; box-shadow:0 12px 28px rgba(17,24,39,.22); padding:10px 12px; color:var(--text); font-size:11px; line-height:1.45; pointer-events:auto; }',
+    '.cctv-selected-map-card { position:absolute; top:60px; right:12px; z-index:650; max-width:min(300px,calc(100% - 78px)); background:rgba(255,255,255,.96); border:2px solid #111827; border-radius:12px; box-shadow:0 12px 28px rgba(17,24,39,.22); padding:10px 12px; color:var(--text); font-size:11px; line-height:1.45; pointer-events:auto; user-select:text; -webkit-user-select:text; }',
     '.cctv-selected-map-card .title { font-weight:900; color:#111827; margin-bottom:4px; letter-spacing:.03em; }',
     '.cctv-selected-map-card .meta { color:var(--text-l); }',
     '.cctv-selected-map-card .meta div { margin:2px 0; }',
