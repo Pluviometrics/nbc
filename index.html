@@ -7656,6 +7656,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     const safeId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
     return {
       id: pkg.package_id,
+      anchor_id: pkg.anchor_id || '',
       original_package_id: pkg.original_package_id || pkg.package_id,
       suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
       diameters_mm: pkg.diameters_mm || pkg.diameters || [],
@@ -8174,16 +8175,44 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
   function mergeLocksData(parsed) {
     if (!parsed || typeof parsed !== \'object\') throw new Error(\'Invalid lock file format.\');
+
+    // Build anchor_id → package_id map from the snapshot embedded at report build time.
+    var anchorToPkgId = {};
+    (data.packages || []).forEach(function(p) {
+      if (p && p.anchor_id && p.id) anchorToPkgId[p.anchor_id] = p.id;
+    });
+
+    // Translate locks.packages keys (live-tool saves use anchor_id as key).
+    var translatedPkgLocks = {};
+    Object.keys((parsed.locks && parsed.locks.packages) || {}).forEach(function(key) {
+      var pkgId = anchorToPkgId[key] || key;
+      translatedPkgLocks[pkgId] = parsed.locks.packages[key];
+    });
+
+    // Translate assignments values (live-tool saves anchor_id as the assignment target).
+    var translatedAssignments = {};
+    Object.keys(parsed.assignments || {}).forEach(function(uid) {
+      var target = parsed.assignments[uid];
+      translatedAssignments[uid] = anchorToPkgId[target] || target;
+    });
+
+    // Translate c6Included values (also point at anchor_id in live-tool saves).
+    var translatedC6Included = {};
+    Object.keys(parsed.c6Included || {}).forEach(function(uid) {
+      var target = parsed.c6Included[uid];
+      translatedC6Included[uid] = anchorToPkgId[target] || target;
+    });
+
     reportManualMoves = {
-      assignments:   (parsed.assignments && typeof parsed.assignments === \'object\') ? parsed.assignments : {},
+      assignments:   translatedAssignments,
       anchorOrigins: (parsed.anchorOrigins && typeof parsed.anchorOrigins === \'object\') ? parsed.anchorOrigins : {},
       locks: {
         pipes:    (parsed.locks && parsed.locks.pipes && typeof parsed.locks.pipes === \'object\') ? parsed.locks.pipes : {},
-        packages: (parsed.locks && parsed.locks.packages && typeof parsed.locks.packages === \'object\') ? parsed.locks.packages : {}
+        packages: translatedPkgLocks
       },
       moveOrigins: (parsed.moveOrigins && typeof parsed.moveOrigins === \'object\') ? parsed.moveOrigins : {},
       c6Excluded:  (parsed.c6Excluded && typeof parsed.c6Excluded === \'object\') ? parsed.c6Excluded : {},
-      c6Included:  (parsed.c6Included && typeof parsed.c6Included === \'object\') ? parsed.c6Included : {}
+      c6Included:  translatedC6Included
     };
     saveReportMoves();
     if (typeof applyMovesAndRender === \'function\') applyMovesAndRender();
