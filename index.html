@@ -7866,6 +7866,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
   let pkgIndex = {};
   packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+  var _reportSortState = { column: null, dir: 'asc' };
 
   // Snapshot original pipe-to-package assignments (before any manual moves)
   const originalAssignments = {};
@@ -9335,6 +9336,54 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     document.getElementById('packageCards').innerHTML = html || '<div class="pkg-empty">No stream summary available.</div>';
   }
   // PACKAGES TABLE — mirrors live tool's renderGeneratedPackages
+  function _getReportPkgSortValue(pkg, column) {
+    switch (column) {
+      case 'package_id':         return String(pkg.id || '');
+      case 'suburb':             return (pkg.suburbs || []).filter(Boolean).join(', ');
+      case 'pipe_count':         return Number(pkg.pipe_count) || 0;
+      case 'condition_6_count':  return Number(pkg.condition_6_count) || 0;
+      case 'condition_7_count':  return Number(pkg.condition_7_count) || 0;
+      case 'condition_8_count':  return Number(pkg.condition_8_count) || 0;
+      case 'total_length_m':     return Number(pkg.total_length_m) || 0;
+      case 'total_cost':         return Number(pkg.total_cost) || 0;
+      case 'max_span_m':         return Number(pkg.max_span_m) || 0;
+      case 'diameters_mm':       return (pkg.diameters_mm || []).join(', ');
+      case 'asset_ids':          return Array.isArray(pkg.asset_ids) ? pkg.asset_ids.length : 0;
+      default:                   return pkg[column];
+    }
+  }
+  function _sortReportPkgs(arr) {
+    if (!_reportSortState.column) return arr.slice();
+    var dir = _reportSortState.dir === 'desc' ? -1 : 1;
+    return arr.slice().sort(function(a, b) {
+      var av = _getReportPkgSortValue(a, _reportSortState.column);
+      var bv = _getReportPkgSortValue(b, _reportSortState.column);
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      var cmp;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
+      return cmp * dir;
+    });
+  }
+  function _reportSortIndicator(column) {
+    if (_reportSortState.column !== column) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+    return _reportSortState.dir === 'desc'
+      ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+      : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+  }
+  window.sortReportPackagesByColumn = function(column) {
+    if (_reportSortState.column === column) {
+      _reportSortState.dir = _reportSortState.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      _reportSortState.column = column;
+      var numericCols = { pipe_count:1, condition_6_count:1, condition_7_count:1, condition_8_count:1, total_length_m:1, total_cost:1, max_span_m:1, asset_ids:1 };
+      _reportSortState.dir = numericCols[column] ? 'desc' : 'asc';
+    }
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+  };
+
   function renderReportPackagesTable() {
     var packagesTbl = document.getElementById('packagesTable');
     if (!packages.length) {
@@ -9342,15 +9391,28 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       return;
     }
     var showC6Col = packages.some(function(p){ return Number(p.condition_6_count) > 0; });
-    // Build column header list
-    var headers = ['Package', 'Suburb', 'Pipes'];
-    if (showC6Col) headers.push('Cond 6');
-    headers.push('Cond 7', 'Cond 8', 'Length (m)', 'Cost', 'Diameters', 'Max Span (m)', 'Asset IDs');
-    var headHtml = '<thead><tr>' + headers.map(function(h, i){
-      var rightAlign = (h === 'Pipes' || h === 'Cond 6' || h === 'Cond 7' || h === 'Cond 8' || h === 'Length (m)' || h === 'Cost' || h === 'Max Span (m)');
-      return '<th' + (rightAlign ? ' class="r"' : '') + '>' + esc(h) + '</th>';
+    // Header label → sort key map
+    var headerCols = [
+      { label: 'Package',      key: 'package_id', align: '' },
+      { label: 'Suburb',       key: 'suburb',     align: '' },
+      { label: 'Pipes',        key: 'pipe_count', align: 'r' }
+    ];
+    if (showC6Col) headerCols.push({ label: 'Cond 6', key: 'condition_6_count', align: 'r' });
+    headerCols.push(
+      { label: 'Cond 7',       key: 'condition_7_count', align: 'r' },
+      { label: 'Cond 8',       key: 'condition_8_count', align: 'r' },
+      { label: 'Length (m)',   key: 'total_length_m',    align: 'r' },
+      { label: 'Cost',         key: 'total_cost',        align: 'r' },
+      { label: 'Diameters',    key: 'diameters_mm',      align: '' },
+      { label: 'Max Span (m)', key: 'max_span_m',        align: 'r' },
+      { label: 'Asset IDs',    key: 'asset_ids',         align: '' }
+    );
+    var headHtml = '<thead><tr>' + headerCols.map(function(c){
+      var alignAttr = c.align ? ' class="' + c.align + '"' : '';
+      return '<th' + alignAttr + ' style="position:sticky;top:0;z-index:5;background:#1A2B3C;cursor:pointer;user-select:none" onclick="sortReportPackagesByColumn(\\'' + c.key + '\\')" title="Click to sort by ' + esc(c.label) + '">' + esc(c.label) + _reportSortIndicator(c.key) + '</th>';
     }).join('') + '</tr></thead>';
-    var rowsHtml = packages.map(function(pkg) {
+    var sortedPkgs = _sortReportPkgs(packages);
+    var rowsHtml = sortedPkgs.map(function(pkg) {
       var isSelected = pkg.id === selectedReportPackageId;
       var diam = (pkg.diameters_mm || []).map(function(d){ return 'Ø' + d; }).join(', ');
       var suburb = (pkg.suburbs || []).filter(Boolean).join(', ');
