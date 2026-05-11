@@ -1610,7 +1610,7 @@ window.addEventListener('unhandledrejection', function(ev) {
     if (typeof String.prototype.replaceAll !== 'function') throw new Error('Missing String.replaceAll');
     if (typeof Array.prototype.at !== 'function') throw new Error('Missing Array.at');
     if (typeof structuredClone !== 'function') throw new Error('Missing structuredClone');
-    eval('var _x = { a: 1 }; _x?.a;'); // optional chaining
+    // Optional chaining is a parse-time syntax feature — if this script parsed and ran, `?.` already works.
   } catch (e) {
     document.body.innerHTML = '<div style="padding:40px;font-family:Segoe UI,system-ui,sans-serif;color:#7a4d00;background:#fff8dd;max-width:600px;margin:80px auto;border-radius:8px;border:1px solid #f2c94c"><h2>Browser too old</h2><p>This tool requires Chrome / Edge version 100 or newer. Detected issue: ' + (e && e.message || e) + '</p></div>';
     throw e;
