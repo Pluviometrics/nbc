@@ -7481,6 +7481,14 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   });
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
     const raw = item.raw || {};
+    // Per-pipe start/end coordinates so the standalone map can render polylines (parity with live tool)
+    let startPair = null, endPair = null;
+    try {
+      if (typeof resolveLineCoordinatePair === 'function' && raw && Object.keys(raw).length) {
+        startPair = resolveLineCoordinatePair(raw, true);
+        endPair = resolveLineCoordinatePair(raw, false);
+      }
+    } catch (e) { /* swallow — null endpoints just fall back to point markers */ }
     return {
       asset_id: item.assetId || '',
       package_id: pkg.package_id,
@@ -7496,6 +7504,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
       lon: Number.isFinite(item.lon) ? item.lon : null,
+      start_lat: startPair && Number.isFinite(startPair.lat) ? startPair.lat : null,
+      start_lon: startPair && Number.isFinite(startPair.lon) ? startPair.lon : null,
+      end_lat: endPair && Number.isFinite(endPair.lat) ? endPair.lat : null,
+      end_lon: endPair && Number.isFinite(endPair.lon) ? endPair.lon : null,
       x_mid: Number.isFinite(item.xMid) ? item.xMid : null,
       y_mid: Number.isFinite(item.yMid) ? item.yMid : null,
       is_c6_addon: !!item.is_c6_addon,
@@ -7516,6 +7528,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     };
   }));
   const generatedAt = new Date().toISOString();
+  // Capture stream-summary counts + file metadata so the standalone cards/tiles match the live tool.
+  const previewSnapshot = (typeof lastReliningPackagingPreview === 'object' && lastReliningPackagingPreview) ? lastReliningPackagingPreview : null;
+  const c6Active = options && options.reliningMode === 'Condition 6, 7 and 8';
+  const c6Attached = c6Active
+    ? (packages || []).reduce(function(s, p){ return s + (Number(p.c6_addon_count) || 0); }, 0)
+    : 0;
+  const uncostedReasonCount = previewSnapshot
+    ? new Set((previewSnapshot.uncosted || []).map(function(i){ return i.costReason; }).filter(Boolean)).size
+    : 0;
   const reportData = {
     generated_at: generatedAt,
     options: options,
@@ -7523,7 +7544,19 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       package_count: reportPackages.length,
       pipe_count: reportPipes.length,
       total_length_m: Number(summary?.total_length_m || 0),
-      total_cost: Number(summary?.total_cost || 0)
+      total_cost: Number(summary?.total_cost || 0),
+      // Stream-summary counts (for live-tool-parity cards)
+      eligible_count: previewSnapshot && Array.isArray(previewSnapshot.eligible) ? previewSnapshot.eligible.length : null,
+      costed_pipe_count: previewSnapshot && Array.isArray(previewSnapshot.costed) ? previewSnapshot.costed.length : null,
+      uncosted_pipe_count: previewSnapshot && Array.isArray(previewSnapshot.uncosted) ? previewSnapshot.uncosted.length : null,
+      with_coords_count: previewSnapshot && Array.isArray(previewSnapshot.withCoords) ? previewSnapshot.withCoords.length : null,
+      uncosted_reasons_count: uncostedReasonCount,
+      c6_attached_count: c6Attached,
+      c6_pool_count: previewSnapshot && Array.isArray(previewSnapshot.c6Pool) ? previewSnapshot.c6Pool.length : 0,
+      // File metadata (for live-tool-parity KPI tiles)
+      assets_file_name: typeof reliningAssetsFileName === 'string' && reliningAssetsFileName ? reliningAssetsFileName : 'Embedded',
+      rates_file_name: typeof reliningRatesFileName === 'string' && reliningRatesFileName ? reliningRatesFileName : 'Embedded',
+      assets_loaded_count: (typeof reliningAssetsRows !== 'undefined' && Array.isArray(reliningAssetsRows)) ? reliningAssetsRows.length : null
     },
     packages: reportPackages,
     pipes: reportPipes,
@@ -7830,6 +7863,14 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return RELINING_PACKAGE_COLORS[Math.abs(i) % RELINING_PACKAGE_COLORS.length];
   }
 
+  // Pipe weight scaled by diameter — matches live tool's reliningPipeWeight
+  function reportPipeWeight(d) {
+    var v = Number(d);
+    if (!v || isNaN(v) || v <= 0) return 2;
+    return Math.max(2, Math.min(12, v / 50));
+  }
+
+  // POLYLINE MAP — ported from renderReliningPackagesMap (lines ~10174-10366 in live tool)
   function renderReportPackagesMap(opts) {
     opts = opts || {};
     ensureReportMap();
@@ -7837,8 +7878,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     reportMapLayer.clearLayers();
     if (!packages.length) return;
     var hasSelection = !!selectedReportPackageId;
-    var showC6El = document.getElementById('reportShowC6AddOns');
-    var showC6 = showC6El ? showC6El.checked !== false : true;
+    var c6AddOnEl = document.getElementById('reportShowC6AddOns');
+    var showC6 = !c6AddOnEl || c6AddOnEl.checked !== false;
     var ordered = hasSelection
       ? packages.filter(function(p){return p.id !== selectedReportPackageId;}).concat(packages.filter(function(p){return p.id === selectedReportPackageId;}))
       : packages;
@@ -7847,10 +7888,41 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var isSelected = hasSelection && pkg.id === selectedReportPackageId;
       var baseColor = getReportPackageColor(pkg, baseIdx);
       var pkgPipes = pipes.filter(function(p){return p.package_id === pkg.id;});
+
+      // Per-package nearest-neighbour join line through pipe centres (black dashed + white halo)
+      var centres = pkgPipes.map(function(p) {
+        if (Number.isFinite(p.start_lat) && Number.isFinite(p.start_lon) && Number.isFinite(p.end_lat) && Number.isFinite(p.end_lon)) {
+          return { lat: (p.start_lat + p.end_lat) / 2, lon: (p.start_lon + p.end_lon) / 2 };
+        }
+        if (Number.isFinite(p.lat) && Number.isFinite(p.lon)) return { lat: p.lat, lon: p.lon };
+        return null;
+      }).filter(Boolean);
+      if (centres.length >= 2) {
+        var ord = [centres[0]];
+        var rem = centres.slice(1);
+        while (rem.length) {
+          var last = ord[ord.length - 1];
+          var bestIdx = 0, bestDistSq = Infinity;
+          for (var i = 0; i < rem.length; i++) {
+            var dLat = rem[i].lat - last.lat;
+            var dLon = rem[i].lon - last.lon;
+            var distSq = dLat * dLat + dLon * dLon;
+            if (distSq < bestDistSq) { bestDistSq = distSq; bestIdx = i; }
+          }
+          ord.push(rem.splice(bestIdx, 1)[0]);
+        }
+        var nnLatLngs = ord.map(function(pt){ return [pt.lat, pt.lon]; });
+        var haloOpacity = isSelected ? 0.7 : (hasSelection ? 0.18 : 0.55);
+        var topOpacity = isSelected ? 0.95 : (hasSelection ? 0.25 : 0.75);
+        var haloWeight = isSelected ? 6 : 5;
+        var topWeight = isSelected ? 3 : 2.5;
+        L.polyline(nnLatLngs, { color: '#FFFFFF', weight: haloWeight, opacity: haloOpacity, dashArray: '12 9', interactive: false }).addTo(reportMapLayer);
+        L.polyline(nnLatLngs, { color: '#000000', weight: topWeight, opacity: topOpacity, dashArray: '12 9', interactive: false }).addTo(reportMapLayer);
+      }
+
       pkgPipes.forEach(function(item) {
         if (item.is_c6_addon && !showC6) return;
-        var lineColor = baseColor;
-        var lineOpacity;
+        var lineColor = baseColor, lineOpacity;
         if (hasSelection) {
           if (isSelected) {
             if (item.is_c6_addon) { lineColor = RELINING_C6_SELECT_COLOR; lineOpacity = RELINING_C6_SELECT_OPACITY; }
@@ -7859,13 +7931,26 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         } else {
           lineOpacity = item.is_c6_addon ? 0.7 : 0.92;
         }
-        if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+        var weight = reportPipeWeight(item.diameter_mm);
+        var hasLine = Number.isFinite(item.start_lat) && Number.isFinite(item.start_lon)
+          && Number.isFinite(item.end_lat) && Number.isFinite(item.end_lon)
+          && !(item.start_lat === item.end_lat && item.start_lon === item.end_lon);
+        if (hasLine) {
+          var line = L.polyline([[item.start_lat, item.start_lon], [item.end_lat, item.end_lon]], {
+            color: lineColor,
+            weight: isSelected ? weight + 2 : weight,
+            opacity: lineOpacity,
+            dashArray: item.is_c6_addon ? '6 5' : undefined
+          }).bindPopup(buildReportPipePopup(item, pkg)).addTo(reportMapLayer);
+          if (isSelected && line.bringToFront) line.bringToFront();
+        } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+          var fillOpacity = hasSelection ? lineOpacity : (isSelected ? 1 : 0.78);
           L.circleMarker([item.lat, item.lon], {
             radius: isSelected ? 9 : 5,
             color: isSelected ? '#111827' : '#fff',
             weight: isSelected ? 3 : 1.5,
             fillColor: lineColor,
-            fillOpacity: lineOpacity,
+            fillOpacity: fillOpacity,
             opacity: hasSelection && !isSelected ? lineOpacity : 1
           }).bindPopup(buildReportPipePopup(item, pkg)).addTo(reportMapLayer);
         }
@@ -7898,14 +7983,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     selectedReportPackageId = null;
     renderReportPackagesMap({ fit: true });
     renderReportPackagesTable();
-    renderReportPackageCards();
   }
 
   function selectReportPackage(id) {
     selectedReportPackageId = id;
     renderReportPackagesMap({ fit: false });
     renderReportPackagesTable();
-    renderReportPackageCards();
   }
 
   function updateReportC6ToggleVisibility() {
@@ -7950,16 +8033,22 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
   document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
 
-  // META STRIP
+  // META STRIP — matches live tool's renderPackagingMeta (5 KPI tiles)
   function renderReportMetaStrip() {
+    var s = data.summary || {};
+    var totalCost = packages.reduce(function(acc, p){ return acc + (Number(p.total_cost) || 0); }, 0);
+    var totalCostStr = totalCost
+      ? totalCost.toLocaleString('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 })
+      : 'Not generated';
     var meta = [
-      { label: 'Total Packages', value: fmtNum(packages.length, 0) },
-      { label: 'Total Pipes', value: fmtNum(pipes.length, 0) },
-      { label: 'Total Length', value: fmtNum(packages.reduce(function(s,p){return s+(p.total_length_m||0);}, 0), 1) + ' m' },
-      { label: 'Estimated Cost', value: fmtCurrency(packages.reduce(function(s,p){return s+(p.total_cost||0);}, 0)) || '$0' }
+      { label: 'Assets File', value: s.assets_file_name || 'Embedded' },
+      { label: 'Rates File', value: s.rates_file_name || 'Embedded' },
+      { label: 'Assets Loaded', value: s.assets_loaded_count != null ? Number(s.assets_loaded_count).toLocaleString() : '-' },
+      { label: 'Total Cost', value: totalCostStr },
+      { label: 'Total Packages', value: packages.length ? Number(packages.length).toLocaleString() : 'Not generated' }
     ];
-    document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
-      return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+    document.getElementById('metaStrip').innerHTML = meta.map(function(it) {
+      return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(it.label) + '</div><div class="pkg-meta-val">' + esc(it.value) + '</div></div>';
     }).join('');
   }
   window.renderReportMetaStrip = renderReportMetaStrip;
@@ -8083,76 +8172,84 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return bullets;
   }
 
-  // PACKAGE CARDS
+  // PACKAGE CARDS — STREAM SUMMARY (matches live tool's renderPackagingCards)
   function renderReportPackageCards() {
-    var cardsHtml = packages.map(function(pkg) {
-      var color = colorFor(pkg.id);
-      var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
-      var notes = [];
-      if (pkg.distance_warning) notes.push(pkg.distance_warning);
-      if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') notes.push('coords: ' + pkg.coordinate_sources);
-      var anchor = '#' + pkgAnchor(pkg.id);
-      var isSelected = pkg.id === selectedReportPackageId;
-      return '<div class="pkg-card pkg-card-link' + (isSelected ? ' selected' : '') + '" data-package-id="' + esc(pkg.id) + '">' +
-        '<div class="pkg-card-head">' +
-          '<span class="pipe-color" style="background:' + color + '"></span>' +
-          '<div class="pkg-card-title">' + esc(pkg.id) + '</div>' +
-        '</div>' +
-        '<div class="pkg-card-val">' + fmtNum(pkg.pipe_count, 0) + '<span class="pkg-card-val-unit"> pipes</span></div>' +
-        '<div class="pkg-card-sub">' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
-        '<dl class="pkg-card-dl">' +
-          '<dt>Length</dt><dd>' + esc(fmtNum(pkg.total_length_m, 1)) + ' m</dd>' +
-          '<dt>Cost</dt><dd>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</dd>' +
-          '<dt>Diameters</dt><dd>' + esc(diam || '—') + '</dd>' +
-          '<dt>Max span</dt><dd>' + (pkg.max_span_m ? esc((pkg.max_span_m / 1000).toFixed(2)) + ' km' : '—') + '</dd>' +
-        '</dl>' +
-        (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
-        '<div class="pkg-card-actions">' +
-          (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
-          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button>' +
-          '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
-        '</div>' +
+    var s = data.summary || {};
+    var cards = [];
+    if (s.eligible_count != null) cards.push(['Candidates After Filters', s.eligible_count, (options.reliningMode || '') + ' selected']);
+    if (s.costed_pipe_count != null) cards.push(['Costed Pipes', s.costed_pipe_count, 'Matched to relining rates by diameter and length band']);
+    if (s.uncosted_pipe_count != null) {
+      var rc = Number(s.uncosted_reasons_count) || 0;
+      cards.push(['Uncosted Pipes', s.uncosted_pipe_count, rc ? rc + ' costing issue type' + (rc === 1 ? '' : 's') : 'No costing gaps']);
+    }
+    if (s.with_coords_count != null) cards.push(['With Location', s.with_coords_count, 'Can be shown on the package map']);
+    if (Number(s.c6_attached_count) > 0) {
+      var poolCount = Number(s.c6_pool_count) || 0;
+      cards.push(['Condition 6 Add-Ons', s.c6_attached_count, 'Of ' + poolCount.toLocaleString() + ' C6 pipes in dataset · attached via shared pit + matching diameter']);
+    }
+    var html = cards.map(function(c) {
+      return '<div class="pkg-card">' +
+        '<div class="pkg-card-title">' + esc(c[0]) + '</div>' +
+        '<div class="pkg-card-val">' + Number(c[1] || 0).toLocaleString() + '</div>' +
+        '<div class="pkg-card-sub">' + esc(c[2]) + '</div>' +
         '</div>';
     }).join('');
-    document.getElementById('packageCards').innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
+    document.getElementById('packageCards').innerHTML = html || '<div class="pkg-empty">No stream summary available.</div>';
   }
-  // PACKAGES TABLE
+  // PACKAGES TABLE — mirrors live tool's renderGeneratedPackages
   function renderReportPackagesTable() {
     var packagesTbl = document.getElementById('packagesTable');
-    packagesTbl.innerHTML =
-      '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="r">Pipes</th>' +
-      '<th class="r">Length (m)</th><th class="r">Max span (km)</th><th class="r">Cost</th><th>Notes</th><th>Map</th></tr></thead>' +
-      '<tbody>' + (packages.length ? packages.map(function(pkg) {
-        var notes = [];
-        if (pkg.distance_warning) notes.push(pkg.distance_warning);
-        if (pkg.coordinate_sources && pkg.coordinate_sources !== 'csv') notes.push('coords: ' + pkg.coordinate_sources);
-        var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
-        var maxSpanKm = pkg.max_span_m ? (pkg.max_span_m / 1000).toFixed(2) : '';
-        var anchor = '#' + pkgAnchor(pkg.id);
-        var isSelected = pkg.id === selectedReportPackageId;
-        return '<tr class="package-row' + (isSelected ? ' selected' : '') + '" data-package-id="' + esc(pkg.id) + '">' +
-          '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
-          '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
-          '<td>' + esc(diam) + '</td>' +
-          '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
-          '<td class="r">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
-          '<td class="r">' + esc(maxSpanKm) + '</td>' +
-          '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
-          '<td>' + esc(notes.join('; ')) + '</td>' +
-          '<td>' + (pkg.dedicated_map_url ? '<a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · ' : '') + '<button class="pkg-row-link" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit;text-decoration:underline" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
-          '</tr>';
-      }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
+    if (!packages.length) {
+      packagesTbl.innerHTML = '<thead><tr><th>Package</th></tr></thead><tbody><tr><td class="pkg-empty-cell">No packages were generated.</td></tr></tbody>';
+      return;
+    }
+    var showC6Col = packages.some(function(p){ return Number(p.condition_6_count) > 0; });
+    // Build column header list
+    var headers = ['Package', 'Suburb', 'Pipes'];
+    if (showC6Col) headers.push('Cond 6');
+    headers.push('Cond 7', 'Cond 8', 'Length (m)', 'Cost', 'Diameters', 'Max Span (m)', 'Asset IDs');
+    var headHtml = '<thead><tr>' + headers.map(function(h, i){
+      var rightAlign = (h === 'Pipes' || h === 'Cond 6' || h === 'Cond 7' || h === 'Cond 8' || h === 'Length (m)' || h === 'Cost' || h === 'Max Span (m)');
+      return '<th' + (rightAlign ? ' class="r"' : '') + '>' + esc(h) + '</th>';
+    }).join('') + '</tr></thead>';
+    var rowsHtml = packages.map(function(pkg) {
+      var isSelected = pkg.id === selectedReportPackageId;
+      var diam = (pkg.diameters_mm || []).map(function(d){ return 'Ø' + d; }).join(', ');
+      var suburb = (pkg.suburbs || []).filter(Boolean).join(', ');
+      var assetIds = (pkg.asset_ids || []).map(function(a){
+        return linkAssetId(typeof a === 'object' && a ? a.assetId : a);
+      }).join(', ');
+      var pkgIdCell = '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span>'
+        + '<a href="#reportPackagesMap" class="pkg-row-link" data-report-package-id="' + esc(pkg.id) + '" title="Show ' + esc(pkg.id) + ' on the map" style="font-weight:800">' + esc(pkg.id) + '</a></td>';
+      var cells = [
+        pkgIdCell,
+        '<td>' + esc(suburb) + '</td>',
+        '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>'
+      ];
+      if (showC6Col) cells.push('<td class="r">' + Number(pkg.condition_6_count || 0) + '</td>');
+      cells.push('<td class="r">' + Number(pkg.condition_7_count || 0) + '</td>');
+      cells.push('<td class="r">' + Number(pkg.condition_8_count || 0) + '</td>');
+      cells.push('<td class="r">' + Number(pkg.total_length_m || 0).toFixed(1) + '</td>');
+      cells.push('<td class="r">' + esc(fmtCurrency(pkg.total_cost) || '') + '</td>');
+      cells.push('<td>' + esc(diam) + '</td>');
+      cells.push('<td class="r">' + Number(pkg.max_span_m || 0).toFixed(0) + '</td>');
+      cells.push('<td>' + assetIds + '</td>');
+      return '<tr class="package-row' + (isSelected ? ' selected' : '') + '" data-package-id="' + esc(pkg.id) + '">' + cells.join('') + '</tr>';
+    }).join('');
+    packagesTbl.innerHTML = headHtml + '<tbody>' + rowsHtml + '</tbody>';
   }
-  // PACKAGE MAP CLICK WIRING
-  document.getElementById('packageCards').addEventListener('click', function(e) {
-    if (e.target.closest && e.target.closest('a')) return;
-    var card = e.target.closest && e.target.closest('[data-package-id]');
-    if (!card) return;
-    selectReportPackage(card.dataset.packageId);
-  });
+  // PACKAGE MAP CLICK WIRING — package_id link in the table selects+focuses the package on the map
   document.getElementById('packagesTable').addEventListener('click', function(e) {
-    var link = e.target.closest && e.target.closest('a');
-    if (link) return;
+    var link = e.target.closest && e.target.closest('[data-report-package-id]');
+    if (link) {
+      e.preventDefault();
+      selectReportPackage(link.getAttribute('data-report-package-id'));
+      // Scroll the map into view to mirror live-tool focus behaviour
+      var mapEl = document.getElementById('reportPackagesMap');
+      if (mapEl && mapEl.scrollIntoView) mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (e.target.closest && e.target.closest('a')) return;
     var row = e.target.closest && e.target.closest('tr.package-row');
     if (!row) return;
     selectReportPackage(row.dataset.packageId);
@@ -8648,10 +8745,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '</div>',
     '<div id="report-subpage-main" class="subpage active">',
     '<div class="pkg-panel"><div class="lbl">Run Summary</div><div class="pkg-meta" id="metaStrip"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Stream Summary</div><div class="pkg-card-grid" id="packageCards"></div></div>',
+    '<div class="pkg-panel"><div class="lbl">Generated Packages</div><div class="pkg-table-wrap"><table id="packagesTable"></table></div></div>',
     '<div class="pkg-panel"><div class="lbl">Packaging Rules Used</div><div class="pkg-meta" id="optionsStrip"></div></div>',
     '<div class="pkg-panel"><div class="lbl">Packaging Reasoning</div><div class="pkg-assumptions" id="overallReasoning"></div></div>',
-    '<div class="pkg-panel"><div class="lbl">Package Highlights</div><div class="pkg-card-grid" id="packageCards"></div></div>',
-    '<div class="pkg-panel"><div class="lbl">Generated Packages — Detail</div><div class="pkg-table-wrap"><table id="packagesTable"></table></div></div>',
     '<div class="pkg-panel" style="margin-top:14px">',
     '<div class="lbl" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#1A2B3C;margin-bottom:10px">Package Map</div>',
     '<div style="position:relative">',
