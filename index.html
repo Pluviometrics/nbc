@@ -7560,6 +7560,25 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     },
     packages: reportPackages,
     pipes: reportPipes,
+    // Full C6 pool (every condition-6 pipe in dataset, not just attached add-ons)
+    // Powers the "Show all other C6" toggle in the standalone map.
+    c6_pool: previewSnapshot && Array.isArray(previewSnapshot.c6Pool)
+      ? previewSnapshot.c6Pool.map(function(item) {
+          var raw = item.raw || {};
+          var startPair = (typeof resolveLineCoordinatePair === 'function') ? resolveLineCoordinatePair(raw, true) : null;
+          var endPair = (typeof resolveLineCoordinatePair === 'function') ? resolveLineCoordinatePair(raw, false) : null;
+          return {
+            asset_id: item.assetId || '',
+            diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
+            lat: Number.isFinite(item.lat) ? item.lat : null,
+            lon: Number.isFinite(item.lon) ? item.lon : null,
+            start_lat: startPair && Number.isFinite(startPair.lat) ? startPair.lat : null,
+            start_lon: startPair && Number.isFinite(startPair.lon) ? startPair.lon : null,
+            end_lat: endPair && Number.isFinite(endPair.lat) ? endPair.lat : null,
+            end_lon: endPair && Number.isFinite(endPair.lon) ? endPair.lon : null
+          };
+        })
+      : [],
     provenance: {
       source: 'NBC Relining Tool',
       generated_at: generatedAt,
@@ -7845,6 +7864,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var reportMap = null;
   var reportMapLayer = null;
   var selectedReportPackageId = null;
+  var reportSelectedOverlayCard = null;
+  var reportSelectedLeaderSvg = null;
 
   function ensureReportMap() {
     if (reportMap) { setTimeout(function(){ reportMap.invalidateSize(); }, 50); return; }
@@ -7854,7 +7875,93 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     sixAerial.addTo(reportMap);
     L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(reportMap);
     reportMapLayer = L.layerGroup().addTo(reportMap);
+    reportMap.on('move zoom resize', updateReportSelectedOverlay);
     window._reportMap = reportMap;
+  }
+
+  // FLOATING OVERLAY CARD + LEADER SVG — ported from live tool (lines ~10165-10230)
+  function ensureReportSelectedOverlay() {
+    var mapEl = document.getElementById('reportPackagesMap');
+    if (!mapEl) return false;
+    if (!reportSelectedLeaderSvg) {
+      reportSelectedLeaderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      reportSelectedLeaderSvg.classList.add('cctv-selected-leader');
+      reportSelectedLeaderSvg.innerHTML = '<line></line><circle r="6"></circle>';
+      mapEl.appendChild(reportSelectedLeaderSvg);
+    }
+    if (!reportSelectedOverlayCard) {
+      reportSelectedOverlayCard = document.createElement('div');
+      reportSelectedOverlayCard.className = 'cctv-selected-map-card';
+      mapEl.appendChild(reportSelectedOverlayCard);
+    }
+    return true;
+  }
+
+  function getReportSelectedPackageObj() {
+    if (!selectedReportPackageId) return null;
+    return packages.find(function(p){ return p.id === selectedReportPackageId; }) || null;
+  }
+
+  function getReportPackageAnchorLatLng(pkg) {
+    if (!pkg) return null;
+    if (Array.isArray(pkg.centroid) && Number.isFinite(pkg.centroid[0]) && Number.isFinite(pkg.centroid[1])) {
+      return L.latLng(pkg.centroid[0], pkg.centroid[1]);
+    }
+    var pkgPipes = pipes.filter(function(p){ return p.package_id === pkg.id && Number.isFinite(p.lat) && Number.isFinite(p.lon); });
+    if (!pkgPipes.length) return null;
+    var lat = 0, lon = 0;
+    pkgPipes.forEach(function(p){ lat += p.lat; lon += p.lon; });
+    return L.latLng(lat / pkgPipes.length, lon / pkgPipes.length);
+  }
+
+  function renderReportSelectedOverlay() {
+    if (!ensureReportSelectedOverlay()) return;
+    var pkg = getReportSelectedPackageObj();
+    if (!pkg) {
+      reportSelectedOverlayCard.style.display = 'none';
+      reportSelectedLeaderSvg.style.display = 'none';
+      return;
+    }
+    var c6Count = Number.isFinite(Number(pkg.c6_addon_count)) ? Number(pkg.c6_addon_count) : 0;
+    var pkgPipes = pipes.filter(function(p){ return p.package_id === pkg.id; });
+    var assetIdsAll = (pkg.asset_ids && pkg.asset_ids.length) ? pkg.asset_ids : pkgPipes.map(function(p){ return p.asset_id; }).filter(Boolean);
+    var assetSummary = assetIdsAll.slice(0, 8).map(function(id){ return esc(id); }).join(', ');
+    if (assetIdsAll.length > 8) assetSummary += ' +' + (assetIdsAll.length - 8) + ' more';
+    var suburbs = (pkg.suburbs && pkg.suburbs.length) ? pkg.suburbs.join(', ') : '';
+    reportSelectedOverlayCard.innerHTML =
+      '<div class="title">' + esc(pkg.id) + '</div>' +
+      '<div class="meta">' +
+        (suburbs ? '<div><strong>Suburbs:</strong> ' + esc(suburbs) + '</div>' : '') +
+        '<div><strong>Pipes:</strong> ' + (pkg.pipe_count || 0) + ' · <strong>Spread:</strong> ' + Number(pkg.max_span_m || 0).toFixed(0) + ' m</div>' +
+        '<div><strong>Length:</strong> ' + Number(pkg.total_length_m || 0).toFixed(1) + ' m · <strong>Cost:</strong> ' + (fmtCurrency(pkg.total_cost) || '—') + '</div>' +
+        '<div><strong>C6 Add-Ons:</strong> ' + c6Count + '</div>' +
+        (assetSummary ? '<div style="margin-top:4px;font-size:10.5px"><strong>Assets:</strong> ' + assetSummary + '</div>' : '') +
+      '</div>';
+    reportSelectedOverlayCard.style.display = 'block';
+    reportSelectedLeaderSvg.style.display = 'block';
+    updateReportSelectedOverlay();
+  }
+
+  function updateReportSelectedOverlay() {
+    if (!reportMap || !reportSelectedOverlayCard || !reportSelectedLeaderSvg || reportSelectedOverlayCard.style.display === 'none') return;
+    var anchor = getReportPackageAnchorLatLng(getReportSelectedPackageObj());
+    if (!anchor) { reportSelectedLeaderSvg.style.display = 'none'; return; }
+    var point = reportMap.latLngToContainerPoint(anchor);
+    var cardRect = reportSelectedOverlayCard.getBoundingClientRect();
+    var mapRect = reportMap.getContainer().getBoundingClientRect();
+    var startX = point.x < (cardRect.left - mapRect.left)
+      ? cardRect.left - mapRect.left
+      : cardRect.left - mapRect.left + cardRect.width / 2;
+    var startY = cardRect.top - mapRect.top + cardRect.height;
+    var line = reportSelectedLeaderSvg.querySelector('line');
+    var circle = reportSelectedLeaderSvg.querySelector('circle');
+    line.setAttribute('x1', String(startX));
+    line.setAttribute('y1', String(startY));
+    line.setAttribute('x2', String(point.x));
+    line.setAttribute('y2', String(point.y));
+    circle.setAttribute('cx', String(point.x));
+    circle.setAttribute('cy', String(point.y));
+    reportSelectedLeaderSvg.style.display = 'block';
   }
 
   function getReportPackageColor(pkg, index) {
@@ -7870,16 +7977,33 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return Math.max(2, Math.min(12, v / 50));
   }
 
-  // POLYLINE MAP — ported from renderReliningPackagesMap (lines ~10174-10366 in live tool)
+  // POLYLINE MAP — ported from renderReliningPackagesMap (lines ~10271-10463 in live tool)
   function renderReportPackagesMap(opts) {
     opts = opts || {};
     ensureReportMap();
-    if (!reportMap || !reportMapLayer) return;
+    updateReportC6ToggleVisibility();
+    var subtitle = document.getElementById('reportMapSubtitle');
+    var selectedBanner = document.getElementById('reportSelectedPackageBanner');
+    if (!reportMap || !reportMapLayer) {
+      if (subtitle) subtitle.textContent = 'Map is not available in this browser.';
+      return;
+    }
     reportMapLayer.clearLayers();
-    if (!packages.length) return;
+    if (!packages.length) {
+      if (subtitle) subtitle.textContent = 'No packages loaded.';
+      if (selectedBanner) selectedBanner.style.display = 'none';
+      renderReportSelectedOverlay();
+      return;
+    }
     var hasSelection = !!selectedReportPackageId;
+    var selectedPackage = hasSelection ? packages.find(function(p){ return p.id === selectedReportPackageId; }) : null;
     var c6AddOnEl = document.getElementById('reportShowC6AddOns');
     var showC6 = !c6AddOnEl || c6AddOnEl.checked !== false;
+    var c6OtherEl = document.getElementById('reportShowOtherC6');
+    var showOtherC6 = !!(c6OtherEl && c6OtherEl.checked === true);
+    var lineDrawn = 0;
+    var pointFallback = 0;
+    var otherC6Drawn = 0;
     var ordered = hasSelection
       ? packages.filter(function(p){return p.id !== selectedReportPackageId;}).concat(packages.filter(function(p){return p.id === selectedReportPackageId;}))
       : packages;
@@ -7941,22 +8065,89 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
             weight: isSelected ? weight + 2 : weight,
             opacity: lineOpacity,
             dashArray: item.is_c6_addon ? '6 5' : undefined
-          }).bindPopup(buildReportPipePopup(item, pkg)).addTo(reportMapLayer);
+          }).on('click', (function(itemRef, pkgRef) {
+            return function(e) {
+              L.popup({ closeButton: true, autoPan: false })
+                .setLatLng(e.latlng)
+                .setContent(buildReportPipePopup(itemRef, pkgRef))
+                .openOn(reportMap);
+              setTimeout(function(){ selectReportPackage(pkgRef.id); }, 0);
+            };
+          })(item, pkg)).addTo(reportMapLayer);
           if (isSelected && line.bringToFront) line.bringToFront();
+          lineDrawn++;
         } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+          // Yellow halo behind selected fallback markers (matches live tool radius:18 / FFD166 fill)
+          if (isSelected) {
+            L.circleMarker([item.lat, item.lon], {
+              radius: 18, color: '#111827', weight: 4, fillColor: '#FFD166', fillOpacity: 0.42
+            }).addTo(reportMapLayer);
+          }
           var fillOpacity = hasSelection ? lineOpacity : (isSelected ? 1 : 0.78);
           L.circleMarker([item.lat, item.lon], {
-            radius: isSelected ? 9 : 5,
+            radius: isSelected ? 11 : 5,
             color: isSelected ? '#111827' : '#fff',
             weight: isSelected ? 3 : 1.5,
             fillColor: lineColor,
             fillOpacity: fillOpacity,
             opacity: hasSelection && !isSelected ? lineOpacity : 1
-          }).bindPopup(buildReportPipePopup(item, pkg)).addTo(reportMapLayer);
+          }).on('click', (function(itemRef, pkgRef) {
+            return function(e) {
+              L.popup({ closeButton: true, autoPan: false })
+                .setLatLng(e.latlng)
+                .setContent(buildReportPipePopup(itemRef, pkgRef))
+                .openOn(reportMap);
+              setTimeout(function(){ selectReportPackage(pkgRef.id); }, 0);
+            };
+          })(item, pkg)).addTo(reportMapLayer);
+          pointFallback++;
         }
       });
     });
-    if (!hasSelection && opts.fit !== false) fitReportMap();
+
+    // "Show all other C6" — render unattached C6 pool in grey with dashed lines / faint markers
+    if (showOtherC6 && Array.isArray(data.c6_pool)) {
+      var packagedC6Ids = {};
+      packages.forEach(function(p) {
+        pipes.filter(function(x){ return x.package_id === p.id && x.is_c6_addon; }).forEach(function(a){ packagedC6Ids[a.asset_id] = 1; });
+      });
+      data.c6_pool.forEach(function(item) {
+        if (packagedC6Ids[item.asset_id]) return;
+        var hasLine = Number.isFinite(item.start_lat) && Number.isFinite(item.start_lon)
+          && Number.isFinite(item.end_lat) && Number.isFinite(item.end_lon)
+          && !(item.start_lat === item.end_lat && item.start_lon === item.end_lon);
+        var weight = reportPipeWeight(item.diameter_mm);
+        if (hasLine) {
+          L.polyline([[item.start_lat, item.start_lon], [item.end_lat, item.end_lon]], {
+            color: '#9ca3af', weight: weight, opacity: 0.5, dashArray: '4 4', interactive: false
+          }).addTo(reportMapLayer);
+          otherC6Drawn++;
+        } else if (Number.isFinite(item.lat) && Number.isFinite(item.lon)) {
+          L.circleMarker([item.lat, item.lon], {
+            radius: 4, color: '#9ca3af', weight: 1, fillColor: '#9ca3af', fillOpacity: 0.45, opacity: 0.55, interactive: false
+          }).addTo(reportMapLayer);
+          otherC6Drawn++;
+        }
+      });
+    }
+
+    // Subtitle + selected banner updates (parity with live tool lines 10455-10458)
+    if (selectedBanner) {
+      if (selectedPackage) {
+        selectedBanner.style.display = 'inline-flex';
+        selectedBanner.textContent = 'Selected: ' + selectedPackage.id + ' · ' + selectedPackage.pipe_count + ' pipes · ' + Number(selectedPackage.max_span_m || 0).toFixed(0) + ' m span';
+      } else {
+        selectedBanner.style.display = 'none';
+      }
+    }
+    if (subtitle) {
+      var fallbackNote = pointFallback ? ' (' + pointFallback.toLocaleString() + ' drawn as fallback markers — missing endpoints).' : '';
+      var otherC6Note = otherC6Drawn ? ' Plus ' + otherC6Drawn.toLocaleString() + ' unattached C6 in grey.' : '';
+      subtitle.textContent = packages.length.toLocaleString() + ' package' + (packages.length === 1 ? '' : 's') + ' mapped with ' + lineDrawn.toLocaleString() + ' pipe line' + (lineDrawn === 1 ? '' : 's') + fallbackNote + (selectedReportPackageId ? ' ' + selectedReportPackageId + ' is highlighted.' : '') + otherC6Note;
+    }
+
+    renderReportSelectedOverlay();
+    if (!selectedPackage && opts.fit !== false) fitReportMap();
   }
 
   function buildReportPipePopup(item, pkg) {
@@ -7977,6 +8168,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var layers = reportMapLayer.getLayers();
     if (!layers.length) return;
     reportMap.fitBounds(L.featureGroup(layers).getBounds().pad(0.15));
+    updateReportSelectedOverlay();
+    setTimeout(function(){ reportMap.invalidateSize(); }, 50);
   }
 
   function clearReportSelection() {
@@ -7991,13 +8184,28 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     renderReportPackagesTable();
   }
 
+  function refreshReportMap() {
+    renderReportPackagesMap({ fit: true });
+  }
+
   function updateReportC6ToggleVisibility() {
-    var hasC6 = packages.some(function(p){ return Number(p.c6_addon_count) > 0; });
-    var el = document.getElementById('reportC6AddOnsToggle');
-    if (el) el.style.display = hasC6 ? 'inline-flex' : 'none';
+    // Show "package C6 add-ons" toggle if any package has at least one C6 add-on
+    var hasC6Addon = packages.some(function(p){ return Number(p.c6_addon_count) > 0; });
+    var addOnEl = document.getElementById('reportC6AddOnsToggle');
+    if (addOnEl) addOnEl.style.display = hasC6Addon ? 'inline-flex' : 'none';
+    // Show "all other C6" toggle if c6_pool has pipes that aren't attached as add-ons
+    var pool = Array.isArray(data.c6_pool) ? data.c6_pool : [];
+    var packagedC6Ids = {};
+    packages.forEach(function(p) {
+      pipes.filter(function(x){ return x.package_id === p.id && x.is_c6_addon; }).forEach(function(a){ packagedC6Ids[a.asset_id] = 1; });
+    });
+    var hasOtherC6 = pool.some(function(c){ return !packagedC6Ids[c.asset_id]; });
+    var otherEl = document.getElementById('reportC6OtherToggle');
+    if (otherEl) otherEl.style.display = hasOtherC6 ? 'inline-flex' : 'none';
   }
 
   window.fitReportMap = fitReportMap;
+  window.refreshReportMap = refreshReportMap;
   window.clearReportSelection = clearReportSelection;
   window.renderReportPackagesMap = renderReportPackagesMap;
   window.selectReportPackage = selectReportPackage;
@@ -8680,10 +8888,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.pkg-row-link:hover { text-decoration:underline; }',
     '.pkg-empty { font-size:12px; color:var(--text-l); padding:16px; background:#fff; border:1px dashed var(--border); border-radius:var(--r); }',
     '.pkg-empty-cell { padding:20px; text-align:center; color:var(--text-l); font-style:italic; }',
-    '.cctv-map-wrap { height:720px; background:#fff; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; display:flex; flex-direction:column; }',
+    '.cctv-map-wrap { height:720px; background:#fff; border:1px solid var(--border); border-radius:var(--r); overflow:hidden; display:flex; flex-direction:column; position:relative; }',
     '.cctv-map-toolbar { padding:12px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:12px; background:#F8FAFB; }',
     '.cctv-map-title { font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--text-l); }',
     '.cctv-map-sub { font-size:11px; color:var(--text-l); margin-top:3px; }',
+    '.cctv-selected-banner { margin-top:5px; display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; background:#111827; color:#FFD166; border:1px solid #FFD166; font-size:10px; font-weight:900; letter-spacing:.035em; box-shadow:0 5px 12px rgba(17,24,39,.18); }',
+    '.cctv-selected-map-card { position:absolute; top:12px; right:12px; z-index:650; max-width:min(300px,calc(100% - 78px)); background:rgba(255,255,255,.96); border:2px solid #111827; border-radius:12px; box-shadow:0 12px 28px rgba(17,24,39,.22); padding:10px 12px; color:var(--text); font-size:11px; line-height:1.45; pointer-events:auto; }',
+    '.cctv-selected-map-card .title { font-weight:900; color:#111827; margin-bottom:4px; letter-spacing:.03em; }',
+    '.cctv-selected-map-card .meta { color:var(--text-l); }',
+    '.cctv-selected-map-card .meta div { margin:2px 0; }',
+    '.cctv-selected-leader { position:absolute; inset:0; z-index:640; pointer-events:none; overflow:visible; }',
+    '.cctv-selected-leader line { stroke:#111827; stroke-width:4; stroke-linecap:round; }',
+    '.cctv-selected-leader circle { fill:#FFD166; stroke:#111827; stroke-width:3; }',
     '.ca-actions { display:flex; gap:10px; flex-wrap:wrap; }',
     '.export-btn { padding:7px 14px; background:var(--teal); color:#fff; border:none; border-radius:var(--r); font-size:12px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }',
     '.export-btn:hover:not(:disabled) { background:var(--teal-d); }',
@@ -8750,14 +8966,23 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<div class="pkg-panel"><div class="lbl">Packaging Rules Used</div><div class="pkg-meta" id="optionsStrip"></div></div>',
     '<div class="pkg-panel"><div class="lbl">Packaging Reasoning</div><div class="pkg-assumptions" id="overallReasoning"></div></div>',
     '<div class="pkg-panel" style="margin-top:14px">',
-    '<div class="lbl" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#1A2B3C;margin-bottom:10px">Package Map</div>',
-    '<div style="position:relative">',
-    '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin-bottom:8px">',
+    '<div class="lbl">Package Map</div>',
+    '<div class="cctv-map-wrap">',
+    '<div class="cctv-map-toolbar">',
+    '<div>',
+    '<div class="cctv-map-title">Relining Package Map</div>',
+    '<div class="cctv-map-sub" id="reportMapSubtitle">No packages loaded.</div>',
+    '<div class="cctv-selected-banner" id="reportSelectedPackageBanner" style="display:none"></div>',
+    '</div>',
+    '<div class="ca-actions">',
     '<button class="export-btn" type="button" onclick="fitReportMap()">Fit Packages</button>',
+    '<button class="export-btn" type="button" onclick="refreshReportMap()">Refresh Map</button>',
     '<button class="export-btn" type="button" onclick="clearReportSelection()">Clear Selection</button>',
     '<label class="export-btn" id="reportC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowC6AddOns" checked onchange="renderReportPackagesMap({fit:false})" style="margin:0"> Show package C6 add-ons</label>',
+    '<label class="export-btn" id="reportC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowOtherC6" onchange="renderReportPackagesMap({fit:false})" style="margin:0"> Show all other C6</label>',
     '</div>',
-    '<div id="reportPackagesMap" style="height:520px;border:1px solid #e5e7eb;border-radius:8px"></div>',
+    '</div>',
+    '<div id="reportPackagesMap" style="flex:1;min-height:0;background:#e3edf7"></div>',
     '</div>',
     '</div>',
     '<div class="pkg-panel"><div class="lbl">Per-Package Written Reports</div><div id="packageReports"></div></div>',
