@@ -8,17 +8,20 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
+<meta name="build-sha" content="__BUILD_SHA__">
+<meta name="build-time" content="__BUILD_TIME__">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0/dist/chartjs-plugin-zoom.umd.min.js"></script>
+<!-- Vendor libraries — local copies under vendor/. SRI not needed for same-origin. -->
+<link rel="stylesheet" href="vendor/leaflet-1.9.4.min.css"/>
+<script src="vendor/leaflet-1.9.4.min.js"></script>
+<script src="vendor/jszip-3.10.1.min.js"></script>
+<script src="vendor/xlsx-0.20.2.full.min.js"></script>
+<script src="vendor/exceljs-4.4.0.min.js"></script>
+<script src="vendor/chart-4.4.1.umd.min.js"></script>
+<script src="vendor/hammer-2.0.8.min.js"></script>
+<script src="vendor/chartjs-plugin-zoom-2.2.0.umd.min.js"></script>
 <script>if(window.ChartZoom)Chart.register(window.ChartZoom);</script>
 <script src="./nsw_lga_boundaries.js"></script>
 <script src="./bom_northern_beaches_all_gauges.js"></script>
@@ -79,11 +82,19 @@
 </div>
 
 <script>
-// Password - change this to whatever you want
+// Auth: passphrase compared against stored SHA-256 hash. Not crypto-strong
+// (no salt, no iterations, public hash) but no cleartext-in-source.
+// Hash below corresponds to the passphrase 'NBC2024'.
 const APP_USERNAME = 'stormwater';
-const APP_PASSWORD = 'NBC2024';
+const APP_PASSPHRASE_SHA256 = '0ed46057690b5c6c19d5d00d7c7b08621680c41261da564660bc247a574b198e';
 const SESSION_KEY  = 'nbc_rain_auth';
 let pendingProtectedPage = null;
+
+async function checkPassphrase(input) {
+  const enc = new TextEncoder().encode(String(input || ''));
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('') === APP_PASSPHRASE_SHA256;
+}
 
 function isAuthenticated() {
   return sessionStorage.getItem(SESSION_KEY) === '1';
@@ -114,10 +125,12 @@ function closeGate() {
   pendingProtectedPage = null;
 }
 
-function checkPW() {
+async function checkPW() {
   const userVal = document.getElementById('user-input').value.trim();
   const val = document.getElementById('pw-input').value;
-  if (userVal === APP_USERNAME && val === APP_PASSWORD) {
+  let pwOk = false;
+  try { pwOk = await checkPassphrase(val); } catch (_) { pwOk = false; }
+  if (userVal === APP_USERNAME && pwOk) {
     sessionStorage.setItem(SESSION_KEY, '1');
     document.getElementById('gate').style.display = 'none';
     const nextPage = pendingProtectedPage;
@@ -887,6 +900,12 @@ window.addEventListener('keydown', (event) => {
         <input type="file" accept=".json,.zip" style="display:none" onchange="loadReliningLocksFile(this.files[0]);this.value=''">
       </label>
       <button class="export-btn" onclick="clearAllReliningLocks()" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Wipe every saved lock, assignment and manual edit in this browser. Use on startup to clear residual state.">Clear All Locks</button>
+      <button class="export-btn" onclick="exportNbcStateToFile()" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Download all NBC tool state (locks, assignments, edits) as a JSON snapshot for backup or transfer.">Export State</button>
+      <label class="export-btn" style="cursor:pointer;margin:0;background:rgba(255,255,255,.1)" title="Restore NBC tool state from a previously exported JSON snapshot. Confirms before overwriting.">
+        Import State
+        <input type="file" accept=".json" style="display:none" onchange="importNbcStateFromFile(this.files[0]);this.value=''">
+      </label>
+      <span id="buildInfoText" style="font-size:9px;color:#5A6B7A;letter-spacing:.04em;margin-left:8px">Build __BUILD_SHA__</span>
     </div>
   </div>
   <div style="flex:1;min-height:0;overflow:auto">
@@ -1558,8 +1577,127 @@ window.addEventListener('keydown', (event) => {
   </div>
 </div>
 
-<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script>
+// ── Global error handler ─────────────────────────────────────────────
+// Surfaces uncaught errors and unhandled promise rejections in a non-blocking
+// toast so users can copy-paste the message + build SHA when reporting bugs.
+window.addEventListener('error', function(ev) {
+  console.error('[GlobalError]', ev.error || ev.message);
+  // Defer toast — DOM may not be ready yet
+  setTimeout(function() {
+    var el = document.getElementById('globalErrorToast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'globalErrorToast';
+      el.style.cssText = 'position:fixed;bottom:20px;right:20px;max-width:480px;padding:12px 16px;background:#fff;border:2px solid #b91c1c;border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.2);font-size:12px;color:#1A2B3C;z-index:99999';
+      if (document.body) document.body.appendChild(el); else return;
+    }
+    var shaMeta = document.querySelector('meta[name="build-sha"]');
+    var sha = (shaMeta && shaMeta.content) || '?';
+    el.innerHTML = '<strong>Error:</strong> ' + ((ev.error && ev.error.message) || ev.message || 'unknown') + '<br><small>Build ' + sha + ' — copy this and the console error and report.</small><br><button onclick="this.parentNode.remove()" style="margin-top:6px;padding:4px 10px;font-size:11px;cursor:pointer">Dismiss</button>';
+  }, 100);
+});
+
+window.addEventListener('unhandledrejection', function(ev) {
+  console.error('[UnhandledRejection]', ev.reason);
+  window.dispatchEvent(new ErrorEvent('error', { error: ev.reason, message: 'Unhandled async rejection: ' + (ev.reason && ev.reason.message || ev.reason) }));
+});
+
+// ── Browser compat probe ─────────────────────────────────────────────
+// Hard-fails with a friendly message on browsers older than ~Chrome/Edge 100.
+(function compatCheck() {
+  try {
+    if (typeof String.prototype.replaceAll !== 'function') throw new Error('Missing String.replaceAll');
+    if (typeof Array.prototype.at !== 'function') throw new Error('Missing Array.at');
+    if (typeof structuredClone !== 'function') throw new Error('Missing structuredClone');
+    eval('var _x = { a: 1 }; _x?.a;'); // optional chaining
+  } catch (e) {
+    document.body.innerHTML = '<div style="padding:40px;font-family:Segoe UI,system-ui,sans-serif;color:#7a4d00;background:#fff8dd;max-width:600px;margin:80px auto;border-radius:8px;border:1px solid #f2c94c"><h2>Browser too old</h2><p>This tool requires Chrome / Edge version 100 or newer. Detected issue: ' + (e && e.message || e) + '</p></div>';
+    throw e;
+  }
+})();
+
+// ── localStorage schemaVersion wrapper ───────────────────────────────
+// Available for future code; existing usages are NOT retrofitted in this pass.
+const STORAGE_SCHEMA_VERSION = 2;
+function lsGet(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.__v === STORAGE_SCHEMA_VERSION) return parsed.data;
+    // schema mismatch — discard
+    console.warn('[lsGet] schema mismatch for', key, '— discarding stale data');
+    return fallback;
+  } catch (e) { return fallback; }
+}
+function lsSet(key, data) {
+  try {
+    localStorage.setItem(key, JSON.stringify({ __v: STORAGE_SCHEMA_VERSION, data: data }));
+  } catch (e) {
+    console.warn('[lsSet] failed for', key, ':', e.message);
+    if (e.name === 'QuotaExceededError') {
+      // Trigger cleanup then retry once
+      if (typeof pruneOldReportMoves === 'function') pruneOldReportMoves();
+      try { localStorage.setItem(key, JSON.stringify({ __v: STORAGE_SCHEMA_VERSION, data: data })); } catch (_) {}
+    }
+  }
+}
+function lsRemove(key) { try { localStorage.removeItem(key); } catch (e) {} }
+
+// ── Cap nbc-report-moves:* keys to 20 most recent ────────────────────
+function pruneOldReportMoves() {
+  try {
+    const entries = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k || !k.startsWith('nbc-report-moves:')) continue;
+      let ts = 0;
+      try {
+        const raw = localStorage.getItem(k);
+        const parsed = raw ? JSON.parse(raw) : null;
+        // Key suffix is the generated_at ISO string; fall back to parsing it.
+        const isoFromKey = k.slice('nbc-report-moves:'.length);
+        const isoFromValue = parsed && (parsed.generated_at || (parsed.data && parsed.data.generated_at));
+        const iso = isoFromValue || isoFromKey;
+        ts = Date.parse(iso) || 0;
+      } catch (_) { ts = 0; }
+      entries.push({ key: k, ts: ts });
+    }
+    entries.sort((a, b) => b.ts - a.ts); // newest first
+    for (let i = 20; i < entries.length; i++) {
+      try { localStorage.removeItem(entries[i].key); } catch (_) {}
+    }
+  } catch (e) {
+    console.warn('[pruneOldReportMoves] failed:', e && e.message);
+  }
+}
+// Run once at boot — keeps the cap enforced even if older sessions exceeded it.
+try { pruneOldReportMoves(); } catch (_) {}
+
+// ── Render API warming-up helper ─────────────────────────────────────
+// Wraps the first request of a session with a one-time toast since the
+// Render free-tier cold-starts ~30s.
+let _rainfallApiWarmed = false;
+async function withWarmupToast(fn) {
+  if (_rainfallApiWarmed) return fn();
+  let toast;
+  try {
+    toast = document.createElement('div');
+    toast.id = 'rainfallWarmupToast';
+    toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);max-width:520px;padding:12px 18px;background:#FEF3C7;border:1px solid #F59E0B;color:#78350F;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.18);font-size:12px;font-family:Segoe UI,system-ui,sans-serif;z-index:99998';
+    toast.textContent = 'Warming up rainfall analyser… first request takes ~30 seconds.';
+    if (document.body) document.body.appendChild(toast);
+  } catch (_) {}
+  try {
+    const result = await fn();
+    _rainfallApiWarmed = true;
+    return result;
+  } finally {
+    try { if (toast && toast.parentNode) toast.parentNode.removeChild(toast); } catch (_) {}
+  }
+}
+
 // â"€â"€ Config â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const API = 'https://nsw-rainfall-analyser-api.onrender.com';
 
@@ -4356,9 +4494,12 @@ async function exportAllXlsx() {
 
 // â"€â"€ Helpers â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 async function api(path) {
-  const r = await fetch(API + path);
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-  return r.json();
+  // First call shows a warming-up toast (Render free-tier cold-starts ~30s).
+  return withWarmupToast(async () => {
+    const r = await fetch(API + path);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    return r.json();
+  });
 }
 
 
@@ -6290,6 +6431,63 @@ function clearAllReliningLocks() {
     if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
   }
 }
+
+// ── Export / Import NBC tool state (localStorage snapshot) ───────────
+// Collects all keys starting with `nbc-` or `RELINING_` (case-insensitive
+// match on `nbc`/`relining` prefix) plus the legacy `nbcReliningManualMoves_v1`
+// and `nbcReliningDebug` keys, packages as JSON, and downloads. Import does
+// the reverse with a confirmation prompt.
+function _collectNbcStateKeys() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith('nbc-') || k.startsWith('nbc_') || k.startsWith('RELINING_') || k.startsWith('nbcRelining') || k === 'packagerOperator') {
+      keys.push(k);
+    }
+  }
+  return keys;
+}
+function exportNbcStateToFile() {
+  const keys = _collectNbcStateKeys();
+  if (!keys.length) { alert('No NBC tool state in this browser to export.'); return; }
+  const snapshot = { schema: 1, exportedAt: new Date().toISOString(), entries: {} };
+  keys.forEach(k => { try { snapshot.entries[k] = localStorage.getItem(k); } catch (_) {} });
+  const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'nbc-state-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (_) {} }, 200);
+}
+function importNbcStateFromFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function() {
+    let snapshot;
+    try { snapshot = JSON.parse(reader.result); }
+    catch (e) { alert('Could not parse JSON: ' + (e && e.message || e)); return; }
+    if (!snapshot || !snapshot.entries || typeof snapshot.entries !== 'object') {
+      alert('Not a valid NBC state snapshot (missing entries).');
+      return;
+    }
+    const keys = Object.keys(snapshot.entries);
+    if (!keys.length) { alert('Snapshot contained no entries.'); return; }
+    if (!confirm('Import ' + keys.length + ' state entr' + (keys.length === 1 ? 'y' : 'ies') + ' from snapshot? Existing values for the same keys will be overwritten.')) return;
+    let restored = 0, failed = 0;
+    keys.forEach(k => {
+      try { localStorage.setItem(k, String(snapshot.entries[k])); restored++; }
+      catch (e) { failed++; console.warn('[importNbcState] failed to restore', k, e && e.message); }
+    });
+    alert('Restored ' + restored + ' entr' + (restored === 1 ? 'y' : 'ies') + (failed ? ' (' + failed + ' failed — see console)' : '') + '. Reload the page to apply.');
+  };
+  reader.onerror = function() { alert('Could not read file: ' + (reader.error && reader.error.message || reader.error)); };
+  reader.readAsText(file);
+}
+window.exportNbcStateToFile = exportNbcStateToFile;
+window.importNbcStateFromFile = importNbcStateFromFile;
 
 function resetAllReliningManualMoves() {
   const moves = Object.keys(reliningManualMoves?.assignments || {}).length;
@@ -9043,6 +9241,21 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     leaderPane.style.pointerEvents = 'none';
     var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Spatial Services, NSW Department of Customer Service', maxZoom: 21 });
     var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 });
+    var _aerialReportTileError = false;
+    sixAerial.on('tileerror', function() {
+      if (_aerialReportTileError) return;
+      _aerialReportTileError = true;
+      try {
+        var mapEl = document.getElementById('reportPackagesMap');
+        if (!mapEl) return;
+        var cs = window.getComputedStyle(mapEl);
+        if (cs.position === 'static') mapEl.style.position = 'relative';
+        var banner = document.createElement('div');
+        banner.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:520px;padding:8px 14px;background:#FEF3C7;border:1px solid #F59E0B;color:#78350F;border-radius:6px;font-size:12px;font-family:Segoe UI,system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:1000;pointer-events:auto';
+        banner.innerHTML = 'Aerial tiles unavailable (NSW SIX Maps may be down or blocked). Switch to Streets basemap via the Layers control. <button onclick="this.parentNode.remove()" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer">Dismiss</button>';
+        mapEl.appendChild(banner);
+      } catch (e) {}
+    });
     sixAerial.addTo(reportMap);
     L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(reportMap);
     reportMapLayer = L.layerGroup().addTo(reportMap);
@@ -10254,8 +10467,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return '<!DOCTYPE html><html><head>'
       + '<meta charset="utf-8"/>'
       + '<title>' + esc(pkg.id) + ' — Package Map</title>'
-      + '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>'
-      + '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"><\/script>'
+      + '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous"/>'
+      + '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"><\/script>'
       + '<style>html,body{margin:0;padding:0;height:100%;font-family:Segoe UI,system-ui,sans-serif}#map{height:100vh}.banner{position:absolute;top:10px;left:10px;z-index:1000;background:#fff;padding:8px 12px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.2);font-size:12px}</style>'
       + '</head><body>'
       + '<div class="banner"><strong>' + esc(pkg.id) + '</strong> · ' + items.length + ' pipes · ' + Number(pkg.total_length_m||0).toFixed(1) + ' m</div>'
@@ -10905,8 +11118,8 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<title>NBC CCTV Work Order Package Report</title>',
-    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">',
-    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\\/script>',
+    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">',
+    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"><\\/script>',
     '<style>',
     'body{margin:0;font-family:Segoe UI,system-ui,sans-serif;color:#1A2B3C;background:#F4F0E8}',
     'header{background:#071B2A;color:#fff;padding:18px 28px}',
@@ -11441,7 +11654,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
     '<title>Pipe Relining Map</title>',
-    '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous">',
+    '<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha384-c6Rcwz4e4CITMbu/NBmnNS8yN2sC3cUElMEMfP3vqqKFp7GOYaaBBCqmaWBjmkjb" crossorigin="anonymous">',
     '<style>',
     '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }',
     ':root { --teal:#00847F; --teal-l:#00A89D; --teal-d:#005F5B; --navy:#1A2B3C; --navy-l:#243447; --panel:#F7F9FA; --border:#DDE3E8; --text:#1A2B3C; --text-l:#5A6B7A; --r:8px; }',
@@ -11532,7 +11745,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     '</main>',
     '<footer class="report-footer">NBC Stormwater Tools — Pipe Relining Package Map — read-only.</footer>',
     '<script id="pkg-data" type="application/json">' + json + '<\/script>',
-    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous"><\/script>',
+    '<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha384-NElt3Op+9NBMCYaef5HxeJmU4Xeard/Lku8ek6hoPTvYkQPh3zLIrJP7KiRocsxO" crossorigin="anonymous"><\/script>',
     '<script>' + runtimeJs + '<\/script>',
     '</body>',
     '</html>'
@@ -12236,6 +12449,7 @@ function ensureReliningPackagesMap() {
     subdomains: 'abcd',
     maxZoom: 19
   });
+  attachAerialTileFallbackBanner(sixAerial, mapEl, 'reliningAerialTileWarn');
   sixAerial.addTo(reliningPackagesMap);
   L.control.layers(
     { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
@@ -12243,6 +12457,31 @@ function ensureReliningPackagesMap() {
     { position: 'topright', collapsed: true }
   ).addTo(reliningPackagesMap);
   reliningPackagesLayer = L.layerGroup().addTo(reliningPackagesMap);
+}
+
+// One-time aerial tile error banner. Placed inside the map container so it
+// floats over the map without disturbing surrounding layout. The flag map
+// keeps each map's banner independent so a CCTV failure doesn't hide a
+// relining banner (or vice versa).
+const _aerialTileErrorFlags = {};
+function attachAerialTileFallbackBanner(tileLayer, mapEl, flagKey) {
+  if (!tileLayer || !mapEl || !flagKey) return;
+  tileLayer.on('tileerror', function() {
+    if (_aerialTileErrorFlags[flagKey]) return;
+    _aerialTileErrorFlags[flagKey] = true;
+    try {
+      // Make sure the map container is a positioning context so absolute child
+      // positioning works. Leaflet sets position:relative on its containers,
+      // but be safe.
+      const cs = window.getComputedStyle(mapEl);
+      if (cs.position === 'static') mapEl.style.position = 'relative';
+      const banner = document.createElement('div');
+      banner.id = flagKey + 'Banner';
+      banner.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);max-width:520px;padding:8px 14px;background:#FEF3C7;border:1px solid #F59E0B;color:#78350F;border-radius:6px;font-size:12px;font-family:Segoe UI,system-ui,sans-serif;box-shadow:0 4px 12px rgba(0,0,0,.15);z-index:1000;pointer-events:auto';
+      banner.innerHTML = 'Aerial tiles unavailable (NSW SIX Maps may be down or blocked). Switch to Streets basemap via the Layers control. <button onclick="this.parentNode.remove()" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer">Dismiss</button>';
+      mapEl.appendChild(banner);
+    } catch (e) { console.warn('[aerialTileFallback] banner failed:', e && e.message); }
+  });
 }
 
 function getReliningPackageColor(pkg, index = 0) {
@@ -14283,6 +14522,7 @@ function ensureCctvPackagesMap() {
     subdomains: 'abcd',
     maxZoom: 19
   });
+  attachAerialTileFallbackBanner(sixAerial, mapEl, 'cctvAerialTileWarn');
   sixAerial.addTo(cctvPackagesMap);
   L.control.layers(
     { 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets },
