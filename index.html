@@ -1575,6 +1575,29 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// CSV cell quoting + Excel/Sheets formula-injection guard.
+// RFC 4180 quoting (commas, quotes, newlines) plus apostrophe prefix on
+// leading =/+/-/@ so spreadsheets do not execute the cell as a formula.
+function csvCellSafe(v) {
+  let s = v == null ? '' : String(v);
+  if (s.length && (s.charAt(0) === '=' || s.charAt(0) === '+' || s.charAt(0) === '-' || s.charAt(0) === '@')) {
+    s = "'" + s;
+  }
+  if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0 || s.indexOf('\r') >= 0) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// NaN-safe formatter for pkg.max_span_m display. Returns '0' when value is
+// non-finite. Default precision 0 matches existing m display; pass digits=1
+// for one-decimal output.
+function fmtMaxSpan(pkg, digits) {
+  const v = Number(pkg && pkg.max_span_m);
+  const d = Number.isFinite(digits) ? digits : 0;
+  return Number.isFinite(v) ? v.toFixed(d) : (d > 0 ? '0.' + '0'.repeat(d) : '0');
+}
+
 function encodeInlineArg(value) {
   return encodeURIComponent(String(value ?? ''));
 }
@@ -3827,7 +3850,7 @@ function exportCSV() {
 
   if (allSiteResults?.length) {
     // All sites export
-    csv = `NSW Rainfall Analyser â€" All Sites Export\nGenerated: ${ts}\n\n`;
+    csv = `NSW Rainfall Analyser â€" All Sites Export\nGenerated: ${csvCellSafe(ts)}\n\n`;
     csv += 'Rank,Station,Peak Depth (mm),Total Depth (mm),AEP%,Return Period,Peak Start,Peak End\n';
     const sorted = [...allSiteResults]
       .filter(r => r.rolling_max)
@@ -3835,17 +3858,26 @@ function exportCSV() {
     sorted.forEach((r, i) => {
       const rm = r.rolling_max;
       const aep = r.aep?.aep || '>63.2%';
-      csv += `${i+1},${r.station_name},${rm?.max_depth_mm||0},${rm?.total_depth_mm||0},${aep},${aepToARI(r.aep || aep)},${rm?.peak_start||''},${rm?.peak_end||''}\n`;
+      csv += [
+        csvCellSafe(i+1),
+        csvCellSafe(r.station_name),
+        csvCellSafe(rm?.max_depth_mm||0),
+        csvCellSafe(rm?.total_depth_mm||0),
+        csvCellSafe(aep),
+        csvCellSafe(aepToARI(r.aep || aep)),
+        csvCellSafe(rm?.peak_start||''),
+        csvCellSafe(rm?.peak_end||'')
+      ].join(',') + '\n';
     });
   } else if (lastResults?.readings) {
     // Single station export
-    csv = `NSW Rainfall Analyser â€" ${lastResults.station_name}\nGenerated: ${ts}\n\n`;
-    csv += `AEP:,${lastResults.aep?.aep||''}\nReturn Period:,${aepToARI(lastResults.aep || lastResults.aep?.aep || '')}\n`;
-    csv += `Peak Depth (mm):,${lastResults.rolling_max?.max_depth_mm||''}\n`;
-    csv += `Total Depth (mm):,${lastResults.rolling_max?.total_depth_mm||''}\n\n`;
+    csv = `NSW Rainfall Analyser â€" ${csvCellSafe(lastResults.station_name)}\nGenerated: ${csvCellSafe(ts)}\n\n`;
+    csv += `AEP:,${csvCellSafe(lastResults.aep?.aep||'')}\nReturn Period:,${csvCellSafe(aepToARI(lastResults.aep || lastResults.aep?.aep || ''))}\n`;
+    csv += `Peak Depth (mm):,${csvCellSafe(lastResults.rolling_max?.max_depth_mm||'')}\n`;
+    csv += `Total Depth (mm):,${csvCellSafe(lastResults.rolling_max?.total_depth_mm||'')}\n\n`;
     csv += 'Timestamp,Depth (mm)\n';
     lastResults.readings.forEach(r => {
-      csv += `${r.timestamp},${r.value}\n`;
+      csv += csvCellSafe(r.timestamp) + ',' + csvCellSafe(r.value) + '\n';
     });
   }
 
@@ -4583,7 +4615,15 @@ function getReliningPackagingOptions() {
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
-  const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
+  // proximityM may come from a free-text dropdown; reject NaN/zero/negative
+  // values so downstream code can rely on (proximityM === null || >0).
+  let proximityM;
+  if (groupingMethod === 'suburb') {
+    proximityM = null;
+  } else {
+    const parsed = parseInt(groupingMethod, 10);
+    proximityM = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
   const topupMode = (method === 'count' || method === 'location')
     ? 'No top up'
     : (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up');
@@ -5031,7 +5071,16 @@ function assignReliningClusters(items, proximityM) {
   const remaining = new Set(coordinateItems);
   const clusters = [];
 
+  // Defensive guard: if a cluster pass ever fails to shrink `remaining`
+  // (corrupt seed identity, broken Set semantics, etc.) bail out instead
+  // of looping forever and locking the page.
+  let lastRemainingSize = -1;
   while (remaining.size) {
+    if (remaining.size === lastRemainingSize) {
+      console.warn('[assignReliningClusters] no progress; aborting to avoid infinite loop. remaining:', remaining.size);
+      break;
+    }
+    lastRemainingSize = remaining.size;
     const candidates = [...remaining];
     const density = new Map(candidates.map(item => [
       item.assetId,
@@ -5334,7 +5383,11 @@ function buildReliningPackageObject(packageId, items, options = {}, existing = {
     max_span_m: Number(maxSpanM.toFixed(0)),
     max_distance_from_center_m: Number(maxCenterDistanceM.toFixed(0)),
     package_radius_m: options.proximityM || null,
-    distance_warning: maxCenterDistanceM > (options.proximityM || 2000) ? 'Check package spread or coordinate quality' : '',
+    // Only fire the spread warning when proximityM is a finite positive number.
+    // Suburb grouping (proximityM === null) intentionally has no radius bound.
+    distance_warning: (Number.isFinite(options.proximityM) && options.proximityM > 0)
+      ? (maxCenterDistanceM > options.proximityM ? 'Check package spread or coordinate quality' : '')
+      : '',
     coordinate_sources: packageCoordinateSourceSummary(items),
     asset_ids: items.map(item => item.assetId),
     criticality_score: items.reduce((sum, item) => sum + (Number(item.criticalityScore) || 0), 0),
@@ -5368,6 +5421,10 @@ function enforceReliningPackageRadius(packages, options = {}) {
   if (!Number.isFinite(radiusM) || radiusM <= 0) return packages;
   return (packages || []).map(pkg => {
     // Locked packages are sealed: do not trim pipes regardless of radius.
+    // Belt-and-braces — locked packages are also carved out before the engine
+    // runs (see _collectLockedPackageSnapshots in generateReliningPackages),
+    // so they shouldn't reach this loop at all. This guard ensures a locked
+    // shell still survives intact if it ever does.
     if (isReliningPackageLocked(pkg.anchor_id)) return pkg;
     let assets = (pkg.assets || []).slice();
     let rejected = Number(pkg.rejected_far_candidate_count) || 0;
@@ -5649,6 +5706,9 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
       }
     }
   });
+  // Manual-include pass intentionally bypasses the proximity check applied to
+  // auto-attach. "Manual" = explicit operator override; if the user picked a far
+  // C6 they meant to. The auto-attach pass above enforces options.proximityM.
   // Manual include pass: force-attach to chosen package regardless of diameter rule.
   // Reject manual-include into a locked package — locked = inviolate.
   Object.entries(includedMap).forEach(([assetId, anchorId]) => {
@@ -5986,7 +6046,9 @@ function lockReliningPipe(uid, anchorId) {
   _ensureLocks();
   const u = String(uid);
   reliningManualMoves.locks.pipes[u] = true;
-  if (!reliningManualMoves.assignments[u]) reliningManualMoves.assignments[u] = String(anchorId);
+  // Always overwrite — a stale assignment from a previous package would otherwise
+  // bind this pipe to the wrong target on a fresh lock.
+  reliningManualMoves.assignments[u] = String(anchorId);
 }
 
 function unlockReliningPipe(uid) {
@@ -6103,6 +6165,30 @@ async function loadReliningLocksFile(file) {
         translatedPkgLocks[target] = reliningManualMoves.locks.packages[key];
       });
       reliningManualMoves.locks.packages = translatedPkgLocks;
+      // Drop dangling targets — a loaded locks file may reference packages that
+      // no longer exist in the current generation. Without this, stale targets
+      // accumulate and silently break later applyReliningManualMoves passes.
+      const validAnchors = new Set();
+      const validPkgIds = new Set();
+      lastPackagingGeneration.packages.forEach(p => {
+        if (p && p.anchor_id) validAnchors.add(String(p.anchor_id));
+        if (p && p.package_id) validPkgIds.add(String(p.package_id));
+      });
+      const knownPkg = (target) => {
+        const t = String(target);
+        return validAnchors.has(t) || validPkgIds.has(t);
+      };
+      Object.keys(reliningManualMoves.assignments || {}).forEach(uid => {
+        const target = reliningManualMoves.assignments[uid];
+        if (!knownPkg(target)) delete reliningManualMoves.assignments[uid];
+      });
+      Object.keys(reliningManualMoves.locks.packages || {}).forEach(key => {
+        if (!knownPkg(key)) delete reliningManualMoves.locks.packages[key];
+      });
+      Object.keys(reliningManualMoves.c6Included || {}).forEach(uid => {
+        const target = reliningManualMoves.c6Included[uid];
+        if (!knownPkg(target)) delete reliningManualMoves.c6Included[uid];
+      });
     }
     persistReliningManualMoves();
     if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
@@ -6737,7 +6823,7 @@ function renderGeneratedPackages(data) {
     row.total_length_m = Number(pkg.total_length_m || 0).toFixed(1);
     row.total_cost = formatCurrency(pkg.total_cost);
     row.diameters_mm = (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', ');
-    row.max_span_m = Number(pkg.max_span_m || 0).toFixed(0);
+    row.max_span_m = fmtMaxSpan(pkg, 0);
     row.asset_ids = pkg.assets || [];
     return row;
   });
@@ -7152,7 +7238,7 @@ function exportFutureWorksCsv() {
     FUTURE_WORKS_COLUMNS.map(col => col.label),
     ...futureWorksRows.map(row => FUTURE_WORKS_COLUMNS.map(col => row[col.key] ?? ''))
   ];
-  const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = rows.map(r => r.map(csvCellSafe).join(',')).join('\n');
   origPriDownload(`future_works_backlog_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
@@ -7388,6 +7474,8 @@ function _recostLockedPackages(snapshots, options) {
       const finalCost = Number.isFinite(pipeCost) ? pipeCost : (Number.isFinite(asset.pipeCost) ? asset.pipeCost : null);
       const finalRate = Number.isFinite(rateInfo.rate) ? rateInfo.rate : (Number.isFinite(asset.ratePerM) ? asset.ratePerM : null);
       const orphaned = !raw || Object.keys(raw).length === 0;
+      // Rate lookup failed but we kept the previous pipeCost — flag for surfacing.
+      const rateStale = !Number.isFinite(rateInfo.rate) && Number.isFinite(asset.pipeCost);
       return {
         ...asset,
         package_id: pkg.package_id,
@@ -7398,7 +7486,8 @@ function _recostLockedPackages(snapshots, options) {
         rateDescriptor: rateInfo.descriptor || asset.rateDescriptor || '',
         rateMatchCount: Number.isFinite(rateInfo.matchCount) ? rateInfo.matchCount : (asset.rateMatchCount || 0),
         costStatus: Number.isFinite(finalCost) ? 'Costed' : 'Uncosted',
-        _orphaned: orphaned ? true : (asset._orphaned || false)
+        _orphaned: orphaned ? true : (asset._orphaned || false),
+        _rate_stale: rateStale ? true : (asset._rate_stale || false)
       };
     });
     // buildReliningPackageObject rebuilds totals/diameters/etc. from items,
@@ -7462,8 +7551,20 @@ async function generateReliningPackages() {
     packages = enforceReliningPackageRadius(packages, options);
     // --- Merge locked packages back: re-cost against current rates,
     // preserve anchor_id / package_id / asset list / priority fields. ---
+    let rateStaleCount = 0;
     if (lockedSnapshots.length) {
       const recosted = _recostLockedPackages(lockedSnapshots, options);
+      // Surface count of locked-package assets that fell back to stale rates.
+      recosted.forEach(pkg => {
+        const pkgStale = (pkg.assets || []).filter(a => a && a._rate_stale === true).length;
+        if (pkgStale > 0) {
+          pkg.rate_stale_count = pkgStale;
+          rateStaleCount += pkgStale;
+        }
+      });
+      if (rateStaleCount > 0) {
+        console.warn('[Relining] ' + rateStaleCount + ' locked-package asset(s) used stale rates (current rates table missed them).');
+      }
       packages = packages.concat(recosted);
     }
     setLoadTxt('Prioritising and renumbering packages...');
@@ -7492,6 +7593,7 @@ async function generateReliningPackages() {
       uncosted_pipe_count: preview.uncosted.length,
       total_length_m: Number(totalLength.toFixed(1)),
       total_cost: Number(totalCost.toFixed(2)),
+      rate_stale_count: rateStaleCount,
       packages,
       uncosted_assets: preview.uncosted
     };
@@ -7641,7 +7743,7 @@ function exportReliningPackagesCsv() {
       ]);
     });
   });
-  const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = rows.map(row => row.map(csvCellSafe).join(',')).join('\n');
   origPriDownload(`relining_packages_esri_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
@@ -13708,7 +13810,7 @@ function exportCctvPackagesCsv() {
     });
   });
 
-  const csv = rows.map(row => row.map(value => `"${String(value ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = rows.map(row => row.map(csvCellSafe).join(',')).join('\n');
   origPriDownload(`cctv_packages_esri_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
@@ -14532,7 +14634,7 @@ function exportCostingCsv() {
       row.qty, adjRate != null ? adjRate.toFixed(2) : '', lineTotal.toFixed(2), row.comment || ''
     ]);
   });
-  const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const csv = rows.map(r => r.map(csvCellSafe).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -16370,7 +16472,7 @@ function origPriExportCsv() {
     ['estimatedCost', data.estimatedCost],
     ...Object.entries(data.fields)
   ];
-  const csv = rows.map(([k,v]) => `"${String(k).replace(/"/g,'""')}","${String(v ?? '').replace(/"/g,'""')}"`).join('\n');
+  const csv = rows.map(([k,v]) => csvCellSafe(k) + ',' + csvCellSafe(v)).join('\n');
   origPriDownload(`original_prioritisation_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv;charset=utf-8');
 }
 
@@ -16464,7 +16566,19 @@ function renderPriList() {
 function priExportCSV() {
   let csv = 'Rank,Project,Asset Type,Location,Priority,Score,Impact,Asset Health,VFM,Deliverability,Date\n';
   priList.forEach((r,i) => {
-    csv += `${i+1},"${r.name}","${r.asset}","${r.location || ''}",${r.priority},${r.final.toFixed(1)},${r.impact.toFixed(1)},${r.health.toFixed(1)},${r.vfm.toFixed(1)},${r.deliv.toFixed(1)},${r.saved}\n`;
+    csv += [
+      csvCellSafe(i+1),
+      csvCellSafe(r.name),
+      csvCellSafe(r.asset),
+      csvCellSafe(r.location || ''),
+      csvCellSafe(r.priority),
+      csvCellSafe(r.final.toFixed(1)),
+      csvCellSafe(r.impact.toFixed(1)),
+      csvCellSafe(r.health.toFixed(1)),
+      csvCellSafe(r.vfm.toFixed(1)),
+      csvCellSafe(r.deliv.toFixed(1)),
+      csvCellSafe(r.saved)
+    ].join(',') + '\n';
   });
   const a = document.createElement('a');
   a.href = 'data:text/csv,' + encodeURIComponent(csv);
