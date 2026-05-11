@@ -1052,8 +1052,13 @@ window.addEventListener('keydown', (event) => {
             <button class="export-btn" onclick="fitReliningPackagesMap()">Fit Packages</button>
             <button class="export-btn" onclick="refreshReliningPackagesMap()">Refresh Map</button>
             <button class="export-btn" onclick="clearReliningPackageSelection()">Clear Selection</button>
-            <label class="export-btn" id="reliningC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowC6AddOns" checked onchange="renderReliningPackagesMap({fit:false})" style="margin:0"> Show package C6 add-ons</label>
-            <label class="export-btn" id="reliningC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowOtherC6" onchange="renderReliningPackagesMap({fit:false})" style="margin:0"> Show all other C6</label>
+            <details class="ca-layers-menu" style="position:relative">
+              <summary class="export-btn" style="cursor:pointer;list-style:none">Layers ▾</summary>
+              <div style="position:absolute;top:100%;right:0;background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);z-index:1500;min-width:240px;font-size:11px;display:flex;flex-direction:column;gap:6px;margin-top:4px">
+                <label id="reliningC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowC6AddOns" checked onchange="renderReliningPackagesMap({fit:false})"> Show package C6 add-ons</label>
+                <label id="reliningC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reliningShowOtherC6" onchange="renderReliningPackagesMap({fit:false})"> Show non-package C6 pipes</label>
+              </div>
+            </details>
           </div>
         </div>
         <div id="reliningPackagesMap"></div>
@@ -5787,6 +5792,50 @@ function persistReliningManualMoves() {
   }
 }
 
+const RELINING_HISTORY_MAX = 10;
+function pushReliningMoveHistory(label) {
+  if (!reliningManualMoves) return;
+  if (!Array.isArray(reliningManualMoves.history)) reliningManualMoves.history = [];
+  // Snapshot the mutable state. Anchor origins are derivable, skip them.
+  const snap = {
+    label: String(label || 'Edit'),
+    ts: Date.now(),
+    assignments: { ...(reliningManualMoves.assignments || {}) },
+    locks: {
+      pipes:    { ...((reliningManualMoves.locks && reliningManualMoves.locks.pipes) || {}) },
+      packages: { ...((reliningManualMoves.locks && reliningManualMoves.locks.packages) || {}) }
+    },
+    moveOrigins: { ...(reliningManualMoves.moveOrigins || {}) },
+    c6Excluded:  { ...(reliningManualMoves.c6Excluded || {}) },
+    c6Included:  { ...(reliningManualMoves.c6Included || {}) }
+  };
+  reliningManualMoves.history.push(snap);
+  while (reliningManualMoves.history.length > RELINING_HISTORY_MAX) {
+    reliningManualMoves.history.shift();
+  }
+}
+
+function undoLastReliningMove() {
+  if (!reliningManualMoves || !Array.isArray(reliningManualMoves.history) || !reliningManualMoves.history.length) {
+    alert('No moves to undo.');
+    return;
+  }
+  const snap = reliningManualMoves.history.pop();
+  reliningManualMoves.assignments = snap.assignments;
+  reliningManualMoves.locks = snap.locks;
+  reliningManualMoves.moveOrigins = snap.moveOrigins;
+  reliningManualMoves.c6Excluded = snap.c6Excluded;
+  reliningManualMoves.c6Included = snap.c6Included;
+  persistReliningManualMoves();
+  if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
+    generateReliningPackages();
+  } else if (lastPackagingGeneration) {
+    if (typeof renderGeneratedPackages === 'function') renderGeneratedPackages(lastPackagingGeneration);
+    if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
+  }
+}
+window.undoLastReliningMove = undoLastReliningMove;
+
 function translateLocksForExport(moves, packages) {
   if (!moves) return {};
   var anchorToPkgId = {};
@@ -5923,6 +5972,7 @@ function moveReliningAssetToPackage(assetUid, targetAnchorId) {
     alert('Target package not found.');
     return;
   }
+  pushReliningMoveHistory('Move pipe');
   reliningManualMoves.assignments[uid] = targetAnchorId;
   if (!reliningManualMoves.anchorOrigins[targetAnchorId]) {
     reliningManualMoves.anchorOrigins[targetAnchorId] = {
@@ -5946,6 +5996,7 @@ function createNewReliningPackageForAsset(assetUid) {
   if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {} };
   const uid = String(assetUid);
   if (!findReliningAssetCurrentAnchor(uid)) { alert('Asset not found in current packaging.'); return; }
+  pushReliningMoveHistory('Create package');
   const newAnchor = generateReliningAnchorId();
   reliningManualMoves.anchorOrigins[newAnchor] = {
     kind: 'new',
@@ -5965,6 +6016,7 @@ function clearReliningManualMove(assetUid) {
   if (!reliningManualMoves) return;
   const uid = String(assetUid);
   if (!(uid in (reliningManualMoves.assignments || {}))) return;
+  pushReliningMoveHistory('Clear move');
   delete reliningManualMoves.assignments[uid];
   if (reliningManualMoves.moveOrigins) delete reliningManualMoves.moveOrigins[uid];
   if (reliningManualMoves.locks?.pipes) delete reliningManualMoves.locks.pipes[uid];
@@ -5983,6 +6035,7 @@ function excludeReliningC6AddOn(assetId) {
   _ensureC6OverrideMaps();
   const id = String(assetId);
   if (!id) return;
+  pushReliningMoveHistory('Remove C6 add-on');
   reliningManualMoves.c6Excluded[id] = true;
   delete reliningManualMoves.c6Included[id];
   persistReliningManualMoves();
@@ -5994,6 +6047,7 @@ function includeReliningC6Pipe(assetId, anchorId) {
   const id = String(assetId);
   const anchor = String(anchorId);
   if (!id || !anchor) return;
+  pushReliningMoveHistory('Add C6 pipe');
   reliningManualMoves.c6Included[id] = anchor;
   delete reliningManualMoves.c6Excluded[id];
   persistReliningManualMoves();
@@ -6091,6 +6145,7 @@ function unlockReliningPackage(anchorId, assets) {
 }
 
 function toggleReliningPipeLock(uid, anchorId) {
+  pushReliningMoveHistory('Toggle pipe lock');
   if (isReliningPipeLocked(uid)) { unlockReliningPipe(uid); persistReliningManualMoves(); }
   else { lockReliningPipe(uid, anchorId); persistReliningManualMoves(); }
   renderEditPackagesPanel();
@@ -6100,6 +6155,7 @@ function toggleReliningPipeLock(uid, anchorId) {
 function toggleReliningPackageLock(anchorId) {
   const pkg = (lastPackagingGeneration?.packages || []).find(p => p.anchor_id === anchorId);
   const assets = pkg?.assets || [];
+  pushReliningMoveHistory('Toggle package lock');
   if (getReliningPackageLockState(pkg || { anchor_id: anchorId }) === 'all') {
     unlockReliningPackage(anchorId, assets);
   } else {
@@ -6120,6 +6176,7 @@ function getReliningGlobalLockState() {
 
 function toggleReliningAllPackagesLock() {
   const packages = lastPackagingGeneration?.packages || [];
+  pushReliningMoveHistory('Toggle all packages lock');
   if (getReliningGlobalLockState() === 'all') {
     packages.forEach(pkg => unlockReliningPackage(pkg.anchor_id, pkg.assets || []));
   } else {
@@ -6383,6 +6440,7 @@ function renderEditPackagesPanel() {
         </div>
       </div>
       <div style="display:flex;gap:8px">
+        <button class="export-btn" type="button" onclick="undoLastReliningMove()" title="Undo the last manual edit (max ${RELINING_HISTORY_MAX})">↶ Undo (${(reliningManualMoves?.history?.length || 0)})</button>
         <button class="export-btn" type="button" onclick="resetAllReliningManualMoves()">Reset All Manual Edits</button>
       </div>
     </div>
@@ -9262,7 +9320,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (!reportMap || !reportMapLayer) return;
     var layers = reportMapLayer.getLayers();
     if (!layers.length) return;
-    reportMap.fitBounds(L.featureGroup(layers).getBounds().pad(0.15));
+    var layerCount = layers.length;
+    var padding = layerCount <= 2 ? 0.4 : 0.15;
+    reportMap.fitBounds(L.featureGroup(layers).getBounds().pad(padding), { maxZoom: 19 });
     updateReportSelectedOverlay();
     setTimeout(function(){ reportMap.invalidateSize(); }, 50);
   }
@@ -9550,8 +9610,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
   function renderReportPackagesTable() {
     var packagesTbl = document.getElementById('packagesTable');
+    var captionHtml = '<caption style="caption-side:top;font-size:11px;color:#5A6B7A;text-align:left;padding:6px 0;">Generated relining packages — click a row to highlight on the map</caption>';
     if (!packages.length) {
-      packagesTbl.innerHTML = '<thead><tr><th>Package</th></tr></thead><tbody><tr><td class="pkg-empty-cell">No packages were generated.</td></tr></tbody>';
+      packagesTbl.innerHTML = captionHtml + '<thead><tr><th>Package</th></tr></thead><tbody><tr><td class="pkg-empty-cell">No packages were generated.</td></tr></tbody>';
       return;
     }
     var showC6Col = packages.some(function(p){ return Number(p.condition_6_count) > 0; });
@@ -9614,7 +9675,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       cells.push('<td>' + assetIds + '</td>');
       return '<tr class="package-row' + (isSelected ? ' selected' : '') + '" data-package-id="' + esc(pkg.id) + '">' + cells.join('') + '</tr>';
     }).join('');
-    packagesTbl.innerHTML = headHtml + '<tbody>' + rowsHtml + '</tbody>';
+    packagesTbl.innerHTML = captionHtml + headHtml + '<tbody>' + rowsHtml + '</tbody>';
   }
   // PACKAGE MAP CLICK WIRING — package_id link in the table selects+focuses the package on the map
   document.getElementById('packagesTable').addEventListener('click', function(e) {
@@ -9716,8 +9777,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     document.getElementById('pipeCount').textContent = filtered.length;
     var tbl = document.getElementById('pipesTable');
-    if (!filtered.length) { tbl.innerHTML = '<tbody><tr><td class="pkg-empty-cell" colspan="10">No pipes match the current filters.</td></tr></tbody>'; return; }
-    tbl.innerHTML = '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
+    var pipesCaptionHtml = '<caption style="caption-side:top;font-size:11px;color:#5A6B7A;text-align:left;padding:6px 0;">All pipes across packages</caption>';
+    if (!filtered.length) { tbl.innerHTML = pipesCaptionHtml + '<tbody><tr><td class="pkg-empty-cell" colspan="10">No pipes match the current filters.</td></tr></tbody>'; return; }
+    tbl.innerHTML = pipesCaptionHtml + '<thead><tr><th>Asset</th><th>Package</th><th>Suburb</th><th class="r">Diameter</th>' +
       '<th>Material</th><th>Condition</th><th class="r">Length (m)</th><th class="r">Cost</th>' +
       '<th>Upstream</th><th>Downstream</th></tr></thead><tbody>' +
       filtered.map(function(p) {
@@ -10291,10 +10353,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<head>',
     '<meta charset="UTF-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+    '<meta name="description" content="NBC Pipe Relining Package Report — read-only edit-and-save interface">',
     '<title>NBC Pipe Relining Package Report</title>',
     '<style>',
     '*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }',
     ':root { --teal:#00847F; --teal-l:#00A89D; --teal-d:#005F5B; --navy:#1A2B3C; --navy-l:#243447; --panel:#F7F9FA; --border:#DDE3E8; --text:#1A2B3C; --text-l:#5A6B7A; --r:8px; }',
+    'button:focus-visible, .export-btn:focus-visible, .run-btn:focus-visible, a:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }',
     'html, body { margin: 0; padding: 0; }',
     "body { font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, Roboto, sans-serif; background: var(--panel); color: var(--text); font-size: 13px; line-height: 1.5; }",
     '.report-app-header { background: var(--navy); color:#fff; height:52px; padding:0 16px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 2px 8px rgba(0,0,0,.3); }',
@@ -10474,8 +10538,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '<button class="export-btn" type="button" onclick="fitReportMap()">Fit Packages</button>',
     '<button class="export-btn" type="button" onclick="refreshReportMap()">Refresh Map</button>',
     '<button class="export-btn" type="button" onclick="clearReportSelection()">Clear Selection</button>',
-    '<label class="export-btn" id="reportC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowC6AddOns" checked onchange="renderReportPackagesMap({fit:false})" style="margin:0"> Show package C6 add-ons</label>',
-    '<label class="export-btn" id="reportC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowOtherC6" onchange="renderReportPackagesMap({fit:false})" style="margin:0"> Show all other C6</label>',
+    '<details class="ca-layers-menu" style="position:relative">',
+    '<summary class="export-btn" style="cursor:pointer;list-style:none">Layers ▾</summary>',
+    '<div style="position:absolute;top:100%;right:0;background:white;border:1px solid var(--border);border-radius:var(--r);padding:8px;box-shadow:0 4px 14px rgba(0,0,0,.12);z-index:1500;min-width:240px;font-size:11px;display:flex;flex-direction:column;gap:6px;margin-top:4px">',
+    '<label id="reportC6AddOnsToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowC6AddOns" checked onchange="renderReportPackagesMap({fit:false})"> Show package C6 add-ons</label>',
+    '<label id="reportC6OtherToggle" style="display:none;cursor:pointer;align-items:center;gap:6px"><input type="checkbox" id="reportShowOtherC6" onchange="renderReportPackagesMap({fit:false})"> Show non-package C6 pipes</label>',
+    '</div>',
+    '</details>',
     '</div>',
     '</div>',
     '<div id="reportPackagesMap" style="flex:1;min-height:0;background:#e3edf7"></div>',
@@ -11187,8 +11256,10 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     }
 
     if (pts.length) {
-      bounds = L.latLngBounds(pts).pad(0.15);
-      map.fitBounds(bounds);
+      var pkgPipeCount = pipes.length;
+      var fitPadding = pkgPipeCount <= 2 ? 0.4 : 0.15;
+      bounds = L.latLngBounds(pts).pad(fitPadding);
+      map.fitBounds(bounds, { maxZoom: 19 });
     } else {
       map.setView([-33.75, 151.27], 11);
       var n = document.createElement('div');
@@ -11264,7 +11335,7 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
   });
 
   document.getElementById('fitBtn').addEventListener('click', function(){
-    if (map && bounds) map.fitBounds(bounds);
+    if (map && bounds) map.fitBounds(bounds, { maxZoom: 19 });
     Array.prototype.forEach.call(document.querySelectorAll('#pipesTable tr.selected'), function(el) { el.classList.remove('selected'); });
     selectedAsset = null;
   });
@@ -12530,7 +12601,9 @@ function fitReliningPackagesMap() {
   const layers = reliningPackagesLayer.getLayers();
   if (!layers.length) return;
   const group = L.featureGroup(layers);
-  reliningPackagesMap.fitBounds(group.getBounds().pad(0.15));
+  const layerCount = layers.length;
+  const padding = layerCount <= 2 ? 0.4 : 0.15;
+  reliningPackagesMap.fitBounds(group.getBounds().pad(padding), { maxZoom: 19 });
   updateReliningSelectedMapOverlay();
   setTimeout(() => reliningPackagesMap.invalidateSize(), 50);
 }
