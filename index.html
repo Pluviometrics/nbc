@@ -6008,8 +6008,10 @@ function lockReliningPackage(anchorId, assets) {
       last_package_id: pkg?.package_id || ''
     };
   }
-  // Force-assign all pipes to this anchor (not conditional — lock means absolute)
+  // Force-assign Cond 7/8 pipes to this anchor — but skip C6 add-ons
+  // (C6 add-ons are loosely attached and lock independently).
   (assets || []).forEach(a => {
+    if (a && a.is_c6_addon) return;
     const u = String(a.assetId || '');
     if (!u) return;
     reliningManualMoves.locks.pipes[u] = true;
@@ -6021,7 +6023,7 @@ function lockReliningPackage(anchorId, assets) {
 function unlockReliningPackage(anchorId, assets) {
   if (!reliningManualMoves?.locks) return;
   delete reliningManualMoves.locks.packages[String(anchorId)];
-  (assets || []).forEach(a => unlockReliningPipe(String(a.assetId || '')));
+  (assets || []).forEach(a => { if (a && !a.is_c6_addon) unlockReliningPipe(String(a.assetId || '')); });
   persistReliningManualMoves();
 }
 
@@ -6323,7 +6325,7 @@ function renderEditPackagesPanel() {
             : `<button class="export-btn" type="button" data-relining-c6-remove data-asset-uid="${escapeHtml(uid)}" style="padding:4px 10px;font-size:11px;background:#fee2e2;border-color:#fecaca;color:#991b1b" title="Remove this C6 add-on from the package">× Remove</button>`)
         : `<select data-relining-edit-target data-asset-uid="${escapeHtml(uid)}" data-current-anchor="${escapeHtml(pkg.anchor_id || '')}">${reliningEditTargetOptionsHtml(pkg.anchor_id)}</select>`;
       const clearCellHtml = isC6 ? '' : (isMoveOrigin ? `<button class="export-btn" type="button" data-relining-edit-clear data-asset-uid="${escapeHtml(uid)}" style="padding:4px 8px;font-size:10px">Clear</button>` : '');
-      const lockCellHtml = isC6 ? '' : `<button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button>`;
+      const lockCellHtml = `<button class="pkg-lock-btn ${lockCls}" type="button" data-relining-lock-pipe data-asset-uid="${escapeHtml(uid)}" data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(lockTitle)}">${lockIcon}</button>`;
       return `
         <div class="edit-pkg-asset-row" data-asset-uid="${escapeHtml(uid)}">
           <div>${assetLinkHtml}${tagHtml}</div>
@@ -8448,7 +8450,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     } else {
       packages.forEach(function(pkg) {
         reportManualMoves.locks.packages[pkg.id] = true;
-        pipes.filter(function(p){ return p.package_id === pkg.id; }).forEach(function(a){
+        // Skip C6 add-ons — they lock independently from the package.
+        pipes.filter(function(p){ return p.package_id === pkg.id && !p.is_c6_addon; }).forEach(function(a){
           reportManualMoves.locks.pipes[a.asset_id] = true;
         });
       });
@@ -8467,7 +8470,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     ensureReportLocks();
     var pkg = packages.find(function(p){ return p.id === pkgId; });
     if (!pkg) return;
-    var assets = pipes.filter(function(p){ return p.package_id === pkgId; });
+    // Lock cascade applies to Cond 7/8 only — C6 add-ons stay independent.
+    var assets = pipes.filter(function(p){ return p.package_id === pkgId && !p.is_c6_addon; });
     if (getReportPackageLockState(pkg) === 'all') {
       delete reportManualMoves.locks.packages[pkgId];
       assets.forEach(function(a){ delete reportManualMoves.locks.pipes[a.asset_id]; });
@@ -8696,7 +8700,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           moveCellHtml = '<select data-report-edit-target data-asset-uid="' + esc(uid) + '" data-current-pkg="' + esc(pkg.id || '') + '">' + reportEditTargetOptionsHtml(pkg.id) + '</select>';
         }
         var clearCellHtml = isC6 ? '' : (isMoveOrigin ? '<button class="export-btn" type="button" data-report-edit-clear data-asset-uid="' + esc(uid) + '" style="padding:4px 8px;font-size:10px">Clear</button>' : '');
-        var lockCellHtml = isC6 ? '' : '<button class="pkg-lock-btn ' + lockCls + '" type="button" data-report-lock-pipe data-asset-uid="' + esc(uid) + '" data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(lockTitle) + '">' + lockIcon + '</button>';
+        var lockCellHtml = '<button class="pkg-lock-btn ' + lockCls + '" type="button" data-report-lock-pipe data-asset-uid="' + esc(uid) + '" data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(lockTitle) + '">' + lockIcon + '</button>';
         return '<div class="edit-pkg-asset-row" data-asset-uid="' + esc(uid) + '">'
           + '<div>' + assetLinkHtml + tagHtml + '</div>'
           + '<div>' + esc(asset.suburb || '') + '</div>'
