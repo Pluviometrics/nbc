@@ -10821,6 +10821,11 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
   function fmtNum(n, dp) { if (n == null || !isFinite(n)) return ''; return Number(n).toLocaleString('en-AU', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
   function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+  function buildCiAAssetUrl(id) {
+    var v = String(id == null ? '' : id).trim();
+    if (!v || !/^\d+$/.test(v)) return '';
+    return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
+  }
 
   var titleSuffix = pkg.map_title_suffix || 'Pipe Relining Map';
   document.getElementById('mapTitle').textContent = pkg.id + ' — ' + titleSuffix;
