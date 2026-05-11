@@ -7683,6 +7683,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   window.fitReportMap = fitReportMap;
   window.clearReportSelection = clearReportSelection;
   window.renderReportPackagesMap = renderReportPackagesMap;
+  window.selectReportPackage = selectReportPackage;
 
   window.switchReportSubtab = function(name) {
     document.querySelectorAll('.subtab').forEach(function(b) { b.classList.toggle('active', b.dataset.subtab === name); });
