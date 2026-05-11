@@ -6009,10 +6009,8 @@ function lockReliningPackage(anchorId, assets) {
       last_package_id: pkg?.package_id || ''
     };
   }
-  // Force-assign Cond 7/8 pipes to this anchor — but skip C6 add-ons
-  // (C6 add-ons are loosely attached and lock independently).
+  // Force-assign all pipes (including C6 add-ons) to this anchor — lock means absolute.
   (assets || []).forEach(a => {
-    if (a && a.is_c6_addon) return;
     const u = String(a.assetId || '');
     if (!u) return;
     reliningManualMoves.locks.pipes[u] = true;
@@ -6024,7 +6022,7 @@ function lockReliningPackage(anchorId, assets) {
 function unlockReliningPackage(anchorId, assets) {
   if (!reliningManualMoves?.locks) return;
   delete reliningManualMoves.locks.packages[String(anchorId)];
-  (assets || []).forEach(a => { if (a && !a.is_c6_addon) unlockReliningPipe(String(a.assetId || '')); });
+  (assets || []).forEach(a => unlockReliningPipe(String(a.assetId || '')));
   persistReliningManualMoves();
 }
 
@@ -8464,8 +8462,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     } else {
       packages.forEach(function(pkg) {
         reportManualMoves.locks.packages[pkg.id] = true;
-        // Skip C6 add-ons — they lock independently from the package.
-        pipes.filter(function(p){ return p.package_id === pkg.id && !p.is_c6_addon; }).forEach(function(a){
+        pipes.filter(function(p){ return p.package_id === pkg.id; }).forEach(function(a){
           reportManualMoves.locks.pipes[a.asset_id] = true;
         });
       });
@@ -8484,8 +8481,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     ensureReportLocks();
     var pkg = packages.find(function(p){ return p.id === pkgId; });
     if (!pkg) return;
-    // Lock cascade applies to Cond 7/8 only — C6 add-ons stay independent.
-    var assets = pipes.filter(function(p){ return p.package_id === pkgId && !p.is_c6_addon; });
+    var assets = pipes.filter(function(p){ return p.package_id === pkgId; });
     if (getReportPackageLockState(pkg) === 'all') {
       delete reportManualMoves.locks.packages[pkgId];
       assets.forEach(function(a){ delete reportManualMoves.locks.pipes[a.asset_id]; });
