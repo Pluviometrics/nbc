@@ -6344,6 +6344,310 @@ function toggleReliningAllPackagesLock() {
   renderGeneratedPackages(lastPackagingGeneration);
 }
 
+// ── CCTV manual-edit mirror of the Relining plumbing above ───────────
+// CCTV packages have no anchor_id (no Condition-6 add-on concept either),
+// so assignments/locks are keyed by package_id. Phase A is plumbing only;
+// the Edit Packages UI hooks in Phase B will fill the typeof-guarded
+// reapply/render calls below.
+const CCTV_MANUAL_MOVES_KEY = 'nbcCctvManualMoves_v1';
+let cctvManualMoves = loadCctvManualMoves();
+
+function loadCctvManualMoves() {
+  const empty = { assignments: {}, packageOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+  try {
+    const raw = localStorage.getItem(CCTV_MANUAL_MOVES_KEY);
+    if (!raw) return empty;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return empty;
+    return {
+      assignments: parsed.assignments && typeof parsed.assignments === 'object' ? parsed.assignments : {},
+      packageOrigins: parsed.packageOrigins && typeof parsed.packageOrigins === 'object' ? parsed.packageOrigins : {},
+      locks: {
+        pipes: parsed.locks?.pipes && typeof parsed.locks.pipes === 'object' ? parsed.locks.pipes : {},
+        packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
+      },
+      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
+    };
+  } catch (err) {
+    console.warn('[CCTV manual edit] load failed', err);
+    return empty;
+  }
+}
+
+function persistCctvManualMoves() {
+  try {
+    localStorage.setItem(CCTV_MANUAL_MOVES_KEY, JSON.stringify(cctvManualMoves));
+  } catch (err) {
+    console.warn('[CCTV manual edit] persist failed', err);
+  }
+}
+
+const CCTV_HISTORY_MAX = 10;
+function pushCctvMoveHistory(label) {
+  if (!cctvManualMoves) return;
+  if (!Array.isArray(cctvManualMoves.history)) cctvManualMoves.history = [];
+  const snap = {
+    label: String(label || 'Edit'),
+    ts: Date.now(),
+    assignments: { ...(cctvManualMoves.assignments || {}) },
+    packageOrigins: { ...(cctvManualMoves.packageOrigins || {}) },
+    locks: {
+      pipes:    { ...((cctvManualMoves.locks && cctvManualMoves.locks.pipes) || {}) },
+      packages: { ...((cctvManualMoves.locks && cctvManualMoves.locks.packages) || {}) }
+    },
+    moveOrigins: { ...(cctvManualMoves.moveOrigins || {}) }
+  };
+  cctvManualMoves.history.push(snap);
+  while (cctvManualMoves.history.length > CCTV_HISTORY_MAX) {
+    cctvManualMoves.history.shift();
+  }
+}
+
+function undoLastCctvMove() {
+  if (!cctvManualMoves || !Array.isArray(cctvManualMoves.history) || !cctvManualMoves.history.length) {
+    alert('No moves to undo.');
+    return;
+  }
+  const snap = cctvManualMoves.history.pop();
+  cctvManualMoves.assignments = snap.assignments;
+  cctvManualMoves.packageOrigins = snap.packageOrigins || {};
+  cctvManualMoves.locks = snap.locks;
+  cctvManualMoves.moveOrigins = snap.moveOrigins;
+  persistCctvManualMoves();
+  if (typeof generateCctvPackages === 'function' && cctvPackagingAssetsData && cctvPackagingRatesData) {
+    generateCctvPackages();
+  } else if (lastCctvPackagingGeneration) {
+    if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration.packages || []);
+    if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  }
+}
+window.undoLastCctvMove = undoLastCctvMove;
+
+function manualCctvAssignmentCount() {
+  return Object.keys(cctvManualMoves?.assignments || {}).length;
+}
+
+function findCctvAssetCurrentPackage(assetUid) {
+  if (!lastCctvPackagingGeneration) return null;
+  const uid = String(assetUid);
+  for (const pkg of lastCctvPackagingGeneration.packages || []) {
+    for (const asset of pkg.assets || []) {
+      if (String(asset.assetId) === uid) return pkg.package_id;
+    }
+  }
+  return null;
+}
+
+function moveCctvAssetToPackage(assetUid, targetPackageId) {
+  if (!lastCctvPackagingGeneration) return;
+  if (!cctvManualMoves) cctvManualMoves = { assignments: {}, packageOrigins: {} };
+  const uid = String(assetUid);
+  const sourcePackage = findCctvAssetCurrentPackage(uid);
+  if (!sourcePackage) { alert('Asset not found in current packaging.'); return; }
+  if (sourcePackage === targetPackageId) return;
+  const targetPkg = (lastCctvPackagingGeneration.packages || []).find(p => p.package_id === targetPackageId);
+  if (!targetPkg && !cctvManualMoves.packageOrigins[targetPackageId]) {
+    alert('Target package not found.');
+    return;
+  }
+  pushCctvMoveHistory('Move pipe');
+  cctvManualMoves.assignments[uid] = targetPackageId;
+  if (!cctvManualMoves.packageOrigins[targetPackageId]) {
+    cctvManualMoves.packageOrigins[targetPackageId] = {
+      kind: 'existing',
+      created_at: new Date().toISOString(),
+      last_package_id: targetPkg?.package_id || ''
+    };
+  } else if (targetPkg) {
+    cctvManualMoves.packageOrigins[targetPackageId].last_package_id = targetPkg.package_id;
+  }
+  if (!cctvManualMoves.locks) cctvManualMoves.locks = { pipes: {}, packages: {} };
+  if (!cctvManualMoves.moveOrigins) cctvManualMoves.moveOrigins = {};
+  cctvManualMoves.locks.pipes[uid] = true;
+  cctvManualMoves.moveOrigins[uid] = true;
+  persistCctvManualMoves();
+  if (typeof reapplyCctvManualEditsToCurrentGeneration === 'function') reapplyCctvManualEditsToCurrentGeneration();
+}
+
+function generateCctvPackageId() {
+  return 'cctv_pkg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
+function createNewCctvPackageForAsset(assetUid) {
+  if (!lastCctvPackagingGeneration) return;
+  if (!cctvManualMoves) cctvManualMoves = { assignments: {}, packageOrigins: {} };
+  const uid = String(assetUid);
+  if (!findCctvAssetCurrentPackage(uid)) { alert('Asset not found in current packaging.'); return; }
+  pushCctvMoveHistory('Create package');
+  const newPkgId = generateCctvPackageId();
+  cctvManualMoves.packageOrigins[newPkgId] = {
+    kind: 'new',
+    created_at: new Date().toISOString(),
+    last_package_id: ''
+  };
+  cctvManualMoves.assignments[uid] = newPkgId;
+  if (!cctvManualMoves.locks) cctvManualMoves.locks = { pipes: {}, packages: {} };
+  if (!cctvManualMoves.moveOrigins) cctvManualMoves.moveOrigins = {};
+  cctvManualMoves.locks.pipes[uid] = true;
+  cctvManualMoves.moveOrigins[uid] = true;
+  persistCctvManualMoves();
+  if (typeof reapplyCctvManualEditsToCurrentGeneration === 'function') reapplyCctvManualEditsToCurrentGeneration();
+}
+
+function clearCctvManualMove(assetUid) {
+  if (!cctvManualMoves) return;
+  const uid = String(assetUid);
+  if (!(uid in (cctvManualMoves.assignments || {}))) return;
+  pushCctvMoveHistory('Clear move');
+  delete cctvManualMoves.assignments[uid];
+  if (cctvManualMoves.moveOrigins) delete cctvManualMoves.moveOrigins[uid];
+  if (cctvManualMoves.locks?.pipes) delete cctvManualMoves.locks.pipes[uid];
+  persistCctvManualMoves();
+  if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
+}
+
+function _ensureCctvLocks() {
+  if (!cctvManualMoves) cctvManualMoves = { assignments: {}, packageOrigins: {}, locks: { pipes: {}, packages: {} } };
+  if (!cctvManualMoves.locks) cctvManualMoves.locks = { pipes: {}, packages: {} };
+}
+
+function isCctvPipeLocked(uid) {
+  return !!(cctvManualMoves?.locks?.pipes?.[String(uid)]);
+}
+
+function isCctvPackageLocked(packageId) {
+  return !!(cctvManualMoves?.locks?.packages?.[String(packageId)]);
+}
+
+function getCctvPackageLockState(pkg) {
+  const assets = pkg?.assets || [];
+  if (!assets.length) return isCctvPackageLocked(pkg?.package_id) ? 'all' : 'none';
+  const lockedCount = assets.filter(a => isCctvPipeLocked(String(a.assetId || ''))).length;
+  if (lockedCount === assets.length) return 'all';
+  if (lockedCount === 0) return 'none';
+  return 'partial';
+}
+
+function lockCctvPipe(uid, packageId) {
+  _ensureCctvLocks();
+  const u = String(uid);
+  cctvManualMoves.locks.pipes[u] = true;
+  // See lockReliningPipe: avoid bloating assignments with a no-op self-assignment
+  // when the lock target equals the pipe's natural package.
+  const target = String(packageId);
+  const naturalPackage = findCctvAssetCurrentPackage(u);
+  if (naturalPackage === target) {
+    delete cctvManualMoves.assignments[u];
+  } else {
+    cctvManualMoves.assignments[u] = target;
+  }
+}
+
+function unlockCctvPipe(uid) {
+  if (!cctvManualMoves?.locks) return;
+  const u = String(uid);
+  delete cctvManualMoves.locks.pipes[u];
+  delete cctvManualMoves.assignments[u];
+  if (cctvManualMoves.moveOrigins) delete cctvManualMoves.moveOrigins[u];
+}
+
+function lockCctvPackage(packageId, assets) {
+  _ensureCctvLocks();
+  const id = String(packageId);
+  cctvManualMoves.locks.packages[id] = true;
+  if (!cctvManualMoves.packageOrigins[id]) {
+    const pkg = (lastCctvPackagingGeneration?.packages || []).find(p => p.package_id === packageId);
+    cctvManualMoves.packageOrigins[id] = {
+      kind: 'existing',
+      created_at: new Date().toISOString(),
+      last_package_id: pkg?.package_id || ''
+    };
+  }
+  (assets || []).forEach(a => {
+    const u = String(a.assetId || '');
+    if (!u) return;
+    cctvManualMoves.locks.pipes[u] = true;
+    cctvManualMoves.assignments[u] = id;
+  });
+  persistCctvManualMoves();
+}
+
+function unlockCctvPackage(packageId, assets) {
+  if (!cctvManualMoves?.locks) return;
+  delete cctvManualMoves.locks.packages[String(packageId)];
+  (assets || []).forEach(a => unlockCctvPipe(String(a.assetId || '')));
+  persistCctvManualMoves();
+}
+
+function toggleCctvPipeLock(uid, packageId) {
+  pushCctvMoveHistory('Toggle pipe lock');
+  if (isCctvPipeLocked(uid)) { unlockCctvPipe(uid); persistCctvManualMoves(); }
+  else { lockCctvPipe(uid, packageId); persistCctvManualMoves(); }
+  if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
+}
+
+function toggleCctvPackageLock(packageId) {
+  const pkg = (lastCctvPackagingGeneration?.packages || []).find(p => p.package_id === packageId);
+  const assets = pkg?.assets || [];
+  pushCctvMoveHistory('Toggle package lock');
+  if (getCctvPackageLockState(pkg || { package_id: packageId }) === 'all') {
+    unlockCctvPackage(packageId, assets);
+  } else {
+    lockCctvPackage(packageId, assets);
+  }
+  if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
+}
+
+function getCctvGlobalLockState() {
+  const allAssets = (lastCctvPackagingGeneration?.packages || []).flatMap(p => p.assets || []);
+  if (!allAssets.length) return 'none';
+  const lockedCount = allAssets.filter(a => isCctvPipeLocked(String(a.assetId || ''))).length;
+  if (lockedCount === allAssets.length) return 'all';
+  if (lockedCount === 0) return 'none';
+  return 'partial';
+}
+
+function toggleCctvAllPackagesLock() {
+  const packages = lastCctvPackagingGeneration?.packages || [];
+  pushCctvMoveHistory('Toggle all packages lock');
+  if (getCctvGlobalLockState() === 'all') {
+    packages.forEach(pkg => unlockCctvPackage(pkg.package_id, pkg.assets || []));
+  } else {
+    packages.forEach(pkg => lockCctvPackage(pkg.package_id, pkg.assets || []));
+  }
+  if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  if (typeof renderGeneratedCctvPackages === 'function') renderGeneratedCctvPackages(lastCctvPackagingGeneration?.packages || []);
+}
+
+function resetAllCctvManualMoves() {
+  const moves = Object.keys(cctvManualMoves?.assignments || {}).length;
+  const lockedPkgs = Object.keys(cctvManualMoves?.locks?.packages || {}).length;
+  const lockedPipes = Object.keys(cctvManualMoves?.locks?.pipes || {}).length;
+  const summary = [];
+  if (moves) summary.push(moves + ' move' + (moves === 1 ? '' : 's'));
+  if (lockedPkgs) summary.push(lockedPkgs + ' locked package' + (lockedPkgs === 1 ? '' : 's'));
+  if (lockedPipes) summary.push(lockedPipes + ' locked pipe' + (lockedPipes === 1 ? '' : 's'));
+  const msg = summary.length
+    ? 'Clear ' + summary.join(', ') + '? This cannot be undone.'
+    : 'Nothing to clear.';
+  if (!summary.length) { alert(msg); return; }
+  if (!confirm(msg)) return;
+  cctvManualMoves = { assignments: {}, packageOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
+  persistCctvManualMoves();
+  if (typeof generateCctvPackages === 'function' && cctvPackagingAssetsData && cctvPackagingRatesData) {
+    generateCctvPackages();
+  } else {
+    if (lastCctvPackagingGeneration && typeof renderGeneratedCctvPackages === 'function') {
+      renderGeneratedCctvPackages(lastCctvPackagingGeneration.packages || []);
+      if (typeof renderCctvPackagesMap === 'function') renderCctvPackagesMap();
+    }
+    if (typeof renderCctvEditPackagesPanel === 'function') renderCctvEditPackagesPanel();
+  }
+}
+
 async function loadReliningLocksFile(file) {
   if (!file) return;
   try {
