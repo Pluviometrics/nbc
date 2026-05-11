@@ -7442,6 +7442,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     const safeId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
     return {
       id: pkg.package_id,
+      original_package_id: pkg.original_package_id || pkg.package_id,
       suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
       diameters_mm: pkg.diameters_mm || pkg.diameters || [],
       pipe_count: assets.length,
@@ -7450,11 +7451,21 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       max_span_m: Number(pkg.max_span_m || 0),
       distance_warning: pkg.distance_warning || '',
       coordinate_sources: pkg.coordinate_sources || '',
+      condition_6_count: pkg.condition_6_count || 0,
       condition_7_count: pkg.condition_7_count || 0,
       condition_8_count: pkg.condition_8_count || 0,
+      c6_addon_count: pkg.c6_addon_count || 0,
       asset_ids: (pkg.asset_ids && pkg.asset_ids.length ? pkg.asset_ids : assets.map(a => a.assetId)).filter(Boolean),
       centroid,
       max_from_centroid_m: Math.round(max_from_centroid_m),
+      package_priority_score: Number(pkg.package_priority_score) || 0,
+      package_total_pipe_priority: Number(pkg.package_total_pipe_priority) || 0,
+      package_high_crit_count: Number(pkg.package_high_crit_count) || 0,
+      package_large_diam_count: Number(pkg.package_large_diam_count) || 0,
+      package_xlarge_diam_count: Number(pkg.package_xlarge_diam_count) || 0,
+      package_worst_condition: Number(pkg.package_worst_condition) || 0,
+      package_total_length: Number(pkg.package_total_length) || 0,
+      package_pipe_count: Number(pkg.package_pipe_count) || assets.length,
       conditionMix,
       diameterMix,
       materialMix,
@@ -7472,11 +7483,29 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
       length_m: Number(item.lengthM) || 0,
       pipe_cost: Number(item.pipeCost) || 0,
+      rate_per_m: Number(item.ratePerM) || 0,
       address: String(raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || '').trim(),
       upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
       downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
-      lon: Number.isFinite(item.lon) ? item.lon : null
+      lon: Number.isFinite(item.lon) ? item.lon : null,
+      x_mid: Number.isFinite(item.xMid) ? item.xMid : null,
+      y_mid: Number.isFinite(item.yMid) ? item.yMid : null,
+      is_c6_addon: !!item.is_c6_addon,
+      criticality_1dp: Number(item.criticality_1dp) || 0,
+      condition_score: Number(item.condition_score) || 0,
+      pipe_priority_score: Number(item.pipe_priority_score) || 0,
+      raw: {
+        SW_Condition: raw['SW_Condition'] ?? '',
+        Observed_Condition: raw['Observed_Condition'] ?? raw['Observed Condition'] ?? '',
+        SW_Material: raw['SW_Material'] ?? '',
+        Formatted_Address: raw['Formatted_Address'] ?? '',
+        Pipe_Start_Address: raw['Pipe_Start_Address'] ?? '',
+        Street_Address: raw['Street_Address'] ?? '',
+        Address: raw['Address'] ?? '',
+        SW_Upstream_Node: raw['SW_Upstream Node'] ?? raw['SW_Upstream_Node'] ?? '',
+        SW_Downstream_Node: raw['SW_Downstream Node'] ?? raw['SW_Downstream_Node'] ?? ''
+      }
     };
   }));
   const reportData = {
@@ -7489,7 +7518,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       total_cost: Number(summary?.total_cost || 0)
     },
     packages: reportPackages,
-    pipes: reportPipes
+    pipes: reportPipes,
+    provenance: {
+      source: 'NBC Relining Tool',
+      generated_at: new Date().toISOString(),
+      package_count: reportPackages.length,
+      pipe_count: reportPipes.length
+    }
   };
   const json = JSON.stringify(reportData).replace(/<\/script/gi, '<\\/script');
 
