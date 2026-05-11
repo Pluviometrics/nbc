@@ -5608,6 +5608,18 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
       if (set) set.forEach(idx => candidates.add(idx));
     });
     for (const pkgIdx of candidates) {
+      const radiusM = Number(options.proximityM);
+      if (Number.isFinite(radiusM) && radiusM > 0) {
+        const pkg = packages[pkgIdx];
+        const items = (pkg.assets || []).filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon));
+        if (items.length && Number.isFinite(c6.lat) && Number.isFinite(c6.lon)) {
+          const cLat = items.reduce((s, i) => s + i.lat, 0) / items.length;
+          const cLon = items.reduce((s, i) => s + i.lon, 0) / items.length;
+          if (haversineDistanceM({ lat: cLat, lon: cLon }, { lat: c6.lat, lon: c6.lon }) > radiusM) {
+            continue;
+          }
+        }
+      }
       if (pkgDiameters[pkgIdx].has(dia)) {
         const sharesPit = (a) =>
           (c6.usPit && (a.usPit === c6.usPit || a.dsPit === c6.usPit)) ||
@@ -8075,10 +8087,31 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (a.dsPit) pkgPits[a.dsPit] = true;
     });
     if (!Object.keys(pkgPits).length) return [];
+    // Compute package centroid from its pipes' lat/lon for proximity filtering
+    var pkgPipes = pipes.filter(function(p){ return p.package_id === pkg.id && typeof p.lat === 'number' && typeof p.lon === 'number'; });
+    var centroid = null;
+    if (pkgPipes.length) {
+      centroid = {
+        lat: pkgPipes.reduce(function(s, p){ return s + p.lat; }, 0) / pkgPipes.length,
+        lon: pkgPipes.reduce(function(s, p){ return s + p.lon; }, 0) / pkgPipes.length
+      };
+    }
+    var proximityM = Number(options.proximityM);
+    var useProximity = Number.isFinite(proximityM) && proximityM > 0 && centroid !== null;
+    function haversineM(a, b) {
+      var toRad = function(d){ return d * Math.PI / 180; };
+      var dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+      var h = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      return 6371000 * 2 * Math.asin(Math.sqrt(h));
+    }
     return c6Pool.filter(function(c) {
       if (packagedC6[String(c.asset_id)]) return false;
       if (excluded[String(c.asset_id)]) return false;
-      return (c.usPit && pkgPits[c.usPit]) || (c.dsPit && pkgPits[c.dsPit]);
+      if (!((c.usPit && pkgPits[c.usPit]) || (c.dsPit && pkgPits[c.dsPit]))) return false;
+      if (useProximity && typeof c.lat === 'number' && typeof c.lon === 'number') {
+        if (haversineM(centroid, { lat: c.lat, lon: c.lon }) > proximityM) return false;
+      }
+      return true;
     });
   }
 
