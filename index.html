@@ -8109,7 +8109,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         (notes.length ? '<div class="pkg-card-warn">' + esc(notes.join('; ')) + '</div>' : '') +
         '<div class="pkg-card-actions">' +
           (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
-          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
+          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button>' +
           '<a class="pkg-card-link-btn" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a>' +
         '</div>' +
         '</div>';
@@ -8139,7 +8139,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<td class="r">' + esc(maxSpanKm) + '</td>' +
           '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
           '<td>' + esc(notes.join('; ')) + '</td>' +
-          '<td>' + (pkg.dedicated_map_url ? '<a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · ' : '') + '<button class="pkg-row-link" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit;text-decoration:underline" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
+          '<td>' + (pkg.dedicated_map_url ? '<a class="pkg-row-link" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Map ↗</a> · ' : '') + '<button class="pkg-row-link" style="background:none;border:none;cursor:pointer;padding:0;font:inherit;color:inherit;text-decoration:underline" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button> · <a class="pkg-row-link" href="' + anchor + '" data-package-id="' + esc(pkg.id) + '" data-link-kind="report">Report ↓</a></td>' +
           '</tr>';
       }).join('') : '<tr><td colspan="9" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
   }
@@ -8172,7 +8172,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
           '<span class="pipe-color" style="background:' + color + '"></span>' +
           '<h3>' + esc(pkg.id) + '</h3>' +
           (pkg.dedicated_map_url ? '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener" data-package-id="' + esc(pkg.id) + '" data-link-kind="dedicated">Open map ↗</a>' : '') +
-          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\'' + esc(pkg.id).replace(/'/g, '\\\'') + '\')">Highlight ↓</button>' +
+          '<button class="pkg-card-link-btn" onclick="selectReportPackage(\\'' + esc(pkg.id).replace(/'/g, '\\\\\\'') + '\\')">Highlight ↓</button>' +
         '</header>' +
         '<div class="pkg-report-meta">' +
           '<div><span class="lbl-mini">Suburbs</span>' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
