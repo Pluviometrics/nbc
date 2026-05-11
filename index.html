@@ -4853,7 +4853,7 @@ function renderReliningSizeGroup(groupIndex) {
   values.forEach(value => {
     const pill = document.createElement('span');
     pill.style.cssText = 'display:inline-flex;align-items:center;gap:5px;padding:4px 7px;border:1px solid var(--border);border-radius:999px;background:var(--panel);color:var(--text)';
-    pill.innerHTML = `${escapeHtml(value)} mm <button type="button" aria-label="Remove ${escapeHtml(value)} mm" onclick="removeReliningSizeFromGroup(${groupIndex}, ${Number(value)})" style="border:0;background:transparent;color:var(--text-l);font-weight:800;cursor:pointer;padding:0 1px">x</button>`;
+    pill.innerHTML = `Ø${escapeHtml(value)}mm <button type="button" aria-label="Remove Ø${escapeHtml(value)}mm" onclick="removeReliningSizeFromGroup(${groupIndex}, ${Number(value)})" style="border:0;background:transparent;color:var(--text-l);font-weight:800;cursor:pointer;padding:0 1px">x</button>`;
     container.appendChild(pill);
   });
 }
@@ -4864,8 +4864,10 @@ function renderAllReliningSizeGroups() {
 
 function addReliningSizeToGroup(groupIndex) {
   const select = document.getElementById(`size-group-${groupIndex + 1}-select`);
-  const value = Number(select?.value);
-  if (!Number.isFinite(value)) return;
+  const raw = select?.value;
+  if (raw === '' || raw == null) return;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return;
   if (!reliningSizeGroups[groupIndex].includes(value)) {
     reliningSizeGroups[groupIndex].push(value);
     reliningSizeGroups[groupIndex].sort((a, b) => a - b);
@@ -4893,7 +4895,7 @@ function populateReliningDiameterSelects(rows) {
     const el = document.getElementById(`size-group-${i}-select`);
     if (!el) return;
     const previousValue = el.value;
-    el.innerHTML = diams.map(d => `<option value="${d}">${d} mm</option>`).join('');
+    el.innerHTML = '<option value="" selected></option>' + diams.map(d => `<option value="${d}">Ø${d}mm</option>`).join('');
     if (previousValue && diams.includes(Number(previousValue))) el.value = previousValue;
   });
   renderAllReliningSizeGroups();
