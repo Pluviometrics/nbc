@@ -9592,16 +9592,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
   // --- ZIP EXPORT HELPERS ---------------------------------------------------
   var ZIP_HEADERS = [
-    'package_id','Asset','SWP_Pipe Diameter_mm','Spatial Length_m',
+    'package_id','Asset','CiA','SWP_Pipe Diameter_mm','Spatial Length_m',
     'SW_Condition','Observed_Condition','SW_Upstream Node','SW_Downstream Node',
     'rate_per_m','pipe_cost','Address','Asset Suburb',
     'Max Distance Between Pipes (km)','Google_Street_View'
   ];
-  function csvCell(v) {
-    var s = String(v == null ? '' : v);
-    return /[,"\\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
-  }
-  function csvRow(arr) { return arr.map(csvCell).join(','); }
+  var ZIP_CIA_COL = ZIP_HEADERS.indexOf('CiA');
+  var ZIP_SV_COL = ZIP_HEADERS.indexOf('Google_Street_View');
   function fmtCurrencyCents(v) {
     if (!Number.isFinite(v)) return '';
     return '$' + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -9613,17 +9610,47 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function maxSpanText(pkg) {
     return Number.isFinite(pkg.max_span_m) ? (pkg.max_span_m / 1000).toFixed(1) + ' km' : '0.0 km';
   }
-  function buildPackageCsv(pkg) {
+  function buildPackageXlsxBuffer(rows, assetIds, addresses) {
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    for (var i = 0; i < assetIds.length; i++) {
+      var rowIdx = i + 1;
+      var ciaUrl = buildCiAAssetUrl(assetIds[i]);
+      if (ciaUrl) {
+        var ciaAddr = XLSX.utils.encode_cell({ r: rowIdx, c: ZIP_CIA_COL });
+        var ciaCell = ws[ciaAddr];
+        if (!ciaCell) { ciaCell = { t: 's', v: '' }; ws[ciaAddr] = ciaCell; }
+        ciaCell.v = 'Open in CiA';
+        ciaCell.t = 's';
+        ciaCell.l = { Target: ciaUrl, Tooltip: 'Open ' + assetIds[i] + ' in TechnologyOne CiA' };
+      }
+      var svUrl = addresses[i] ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addresses[i]) : '';
+      if (svUrl) {
+        var svAddr = XLSX.utils.encode_cell({ r: rowIdx, c: ZIP_SV_COL });
+        var svCell = ws[svAddr];
+        if (!svCell) { svCell = { t: 's', v: '' }; ws[svAddr] = svCell; }
+        svCell.v = 'Open in Street View';
+        svCell.t = 's';
+        svCell.l = { Target: svUrl, Tooltip: 'Open address in Google Street View' };
+      }
+    }
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Package');
+    return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  }
+  function buildPackageXlsx(pkg) {
     var items = pipes.filter(function(p){ return p.package_id === pkg.id; });
-    var lines = [csvRow(ZIP_HEADERS)];
+    var aoa = [ZIP_HEADERS.slice()];
+    var assetIds = [];
+    var addresses = [];
     var totalLen = 0, totalCost = 0;
     items.forEach(function(item) {
       var len = Number(item.length_m) || 0;
       var cost = Number(item.pipe_cost) || 0;
       totalLen += len; totalCost += cost;
       var addr = (item.raw && (item.raw.Formatted_Address || item.raw.Address || item.raw.Pipe_Start_Address || item.raw.Street_Address)) || item.address || '';
-      lines.push(csvRow([
-        pkg.id, item.asset_id, item.diameter_mm || '', len ? len.toFixed(1) + ' m' : '',
+      aoa.push([
+        pkg.id, item.asset_id, '',
+        item.diameter_mm || '', len ? len.toFixed(1) + ' m' : '',
         (item.raw && item.raw.SW_Condition) || item.condition || '',
         (item.raw && item.raw.Observed_Condition) || '',
         (item.raw && item.raw.SW_Upstream_Node) || item.upstream || '',
@@ -9632,15 +9659,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         cost ? fmtCurrencyCents(cost) : '',
         addr, String(item.suburb || '').toUpperCase(),
         '', streetViewUrl(addr)
-      ]));
+      ]);
+      assetIds.push(item.asset_id);
+      addresses.push(addr);
     });
     var totalsRow = ZIP_HEADERS.map(function(){ return ''; });
     totalsRow[ZIP_HEADERS.indexOf('package_id')] = 'Totals';
     totalsRow[ZIP_HEADERS.indexOf('Spatial Length_m')] = totalLen.toFixed(2) + ' m';
     totalsRow[ZIP_HEADERS.indexOf('pipe_cost')] = fmtCurrencyCents(totalCost);
     totalsRow[ZIP_HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxSpanText(pkg);
-    lines.push(csvRow(totalsRow));
-    return { csv: lines.join('\\n'), totalLen: totalLen, totalCost: totalCost };
+    aoa.push(totalsRow);
+    var buf = buildPackageXlsxBuffer(aoa, assetIds, addresses);
+    return { xlsx: buf, totalLen: totalLen, totalCost: totalCost };
   }
   function buildReportPipeKml(pkg, color) {
     var items = pipes.filter(function(p){ return p.package_id === pkg.id && Number.isFinite(p.lat) && Number.isFinite(p.lon); });
@@ -9768,17 +9798,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   window.exportReportZip = async function() {
     if (!packages.length) { alert('No packages to export.'); return; }
     if (typeof JSZip === 'undefined') { alert('JSZip not loaded — refresh and try again.'); return; }
+    if (typeof XLSX === 'undefined') { alert('XLSX not loaded — refresh and try again.'); return; }
     try {
       var zip = new JSZip();
-      var csvNames = [];
+      var pkgFileNames = [];
       var summaryRows = [['Package ID','Suburb','Diameters (mm)','Max Distance Between Pipes (km)','Pipes','Cond 7','Cond 8','Length (m)','Cost ($)','Asset IDs']];
       var provLines = buildProvenanceLines();
       var summaryLines = ['PACKAGE SUMMARY','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']);
       packages.forEach(function(pkg, idx) {
-        var built = buildPackageCsv(pkg);
-        var filename = pkg.id + '_pipes.csv';
-        csvNames.push(filename);
-        zip.file(filename, '﻿' + built.csv);
+        var built = buildPackageXlsx(pkg);
+        var filename = pkg.id + '_pipes.xlsx';
+        pkgFileNames.push(filename);
+        zip.file(filename, built.xlsx);
         var items = pipes.filter(function(p){ return p.package_id === pkg.id; });
         var diametersStr = (pkg.diameters_mm || []).join(', ');
         var suburbsStr = (pkg.suburbs || []).join(', ');
@@ -9797,7 +9828,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         summaryRows.push([pkg.id, suburbsStr, diametersStr, maxDist, items.length, Number(pkg.condition_7_count||0), Number(pkg.condition_8_count||0), Math.round(built.totalLen*10)/10, Math.round(built.totalCost), items.map(function(i){return i.asset_id;}).join(', ')]);
       });
       zip.file('package_summary.txt', summaryLines.join('\\n'));
-      var sortedNames = csvNames.slice().sort();
+      var sortedNames = pkgFileNames.slice().sort();
       zip.file('file_list.txt', ['PACKAGE FILE LIST','============================================================',''].concat(provLines).concat(['------------------------------------------------------------', '']).concat(sortedNames).join('\\n'));
       zip.file('provenance.txt', provLines.join('\\n') + '\\n');
       var _ZIP_PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
@@ -9808,7 +9839,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         zip.file('package_maps/' + safeId + '_pipes.kml', buildReportPipeKml(pkg, color));
       });
       zip.file('package_report.html', buildFreshReport());
-      if (typeof XLSX !== 'undefined') {
+      {
         var wb1 = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb1, XLSX.utils.aoa_to_sheet(summaryRows), 'Package Summary');
         zip.file('package_summary.xlsx', XLSX.write(wb1, { type: 'array', bookType: 'xlsx' }));
@@ -10997,15 +11028,21 @@ async function downloadReliningPackagesZip() {
 
   const _provLines = buildProvenanceLines({ toolKind: 'Relining', packageCount: packages.length });
 
+  if (typeof XLSX === 'undefined') {
+    alert('XLSX library not loaded. Please refresh the page and try again.');
+    return;
+  }
+
   try {
     const HEADERS = [
-      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'package_id', 'Asset', 'CiA', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'rate_per_m', 'pipe_cost', 'Address', 'Asset Suburb',
       'Max Distance Between Pipes (km)', 'Google_Street_View'
     ];
-    const expectedHeader = HEADERS.join(',');
+    const CIA_COL_INDEX = HEADERS.indexOf('CiA');
+    const SV_COL_INDEX = HEADERS.indexOf('Google_Street_View');
 
     function fmtCurrency(v, cents = true) {
       if (!Number.isFinite(v)) return '';
@@ -11014,16 +11051,6 @@ async function downloadReliningPackagesZip() {
         maximumFractionDigits: cents ? 2 : 0
       });
     }
-
-    function csvCell(v) {
-      const s = String(v ?? '');
-      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
-
-    function csvRow(arr) { return arr.map(csvCell).join(','); }
 
     // Address fallback per spec, then Google Maps search URL — opens Google
     // Maps which can switch to Street View. No API key needed.
@@ -11063,15 +11090,48 @@ async function downloadReliningPackagesZip() {
     }
 
     function pkgFilename(pkg) {
-      return `${pkg.package_id}_pipes.csv`;
+      return `${pkg.package_id}_pipes.xlsx`;
     }
 
     function maxDistanceText(pkg) {
       return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
     }
 
+    // Build per-package xlsx ArrayBuffer with cell-level hyperlinks.
+    // rows[0] is the header row; remaining rows are data, last row is totals.
+    // assetIds is parallel to data rows (one entry per data row), addresses likewise.
+    function buildPackageXlsxBuffer(rows, assetIds, addresses) {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      // Data rows start at index 1 (header is row index 0). Totals row is the last
+      // row — skip it (no asset / no address). assetIds.length === data row count.
+      for (let i = 0; i < assetIds.length; i++) {
+        const rowIdx = i + 1; // 0-based row index in sheet
+        const ciaUrl = buildCiAAssetUrl(assetIds[i]);
+        if (ciaUrl) {
+          const ciaAddr = XLSX.utils.encode_cell({ r: rowIdx, c: CIA_COL_INDEX });
+          let ciaCell = ws[ciaAddr];
+          if (!ciaCell) { ciaCell = { t: 's', v: '' }; ws[ciaAddr] = ciaCell; }
+          ciaCell.v = 'Open in CiA';
+          ciaCell.t = 's';
+          ciaCell.l = { Target: ciaUrl, Tooltip: 'Open ' + assetIds[i] + ' in TechnologyOne CiA' };
+        }
+        const svUrl = addresses[i] ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addresses[i])}` : '';
+        if (svUrl) {
+          const svAddr = XLSX.utils.encode_cell({ r: rowIdx, c: SV_COL_INDEX });
+          let svCell = ws[svAddr];
+          if (!svCell) { svCell = { t: 's', v: '' }; ws[svAddr] = svCell; }
+          svCell.v = 'Open in Street View';
+          svCell.t = 's';
+          svCell.l = { Target: svUrl, Tooltip: 'Open address in Google Street View' };
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Package');
+      return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    }
+
     const zip = new JSZip();
-    const csvNames = [];
+    const pkgFileNames = [];
     const summaryLines = [
       'PACKAGE SUMMARY',
       '='.repeat(60),
@@ -11088,7 +11148,9 @@ async function downloadReliningPackagesZip() {
       const maxDist = maxDistanceText(pkg);
       const suburbs = packageSuburbs(pkg).join(', ');
 
-      const lines = [csvRow(HEADERS)];
+      const aoa = [HEADERS.slice()];
+      const assetIdsForRows = [];
+      const addressesForRows = [];
       let totalLengthM = 0;
       let totalCost = 0;
 
@@ -11106,9 +11168,10 @@ async function downloadReliningPackagesZip() {
         const rawAddr  = pipeStreetAddress(raw);
         const svUrl    = pipeStreetViewUrl(raw);
 
-        lines.push(csvRow([
+        aoa.push([
           pkg.package_id,
           item.assetId,
+          '', // CiA placeholder — hyperlinked post-build
           diam || '',
           lenM ? lenM.toFixed(1) + ' m' : '',
           raw['SW_Condition'] ?? item.conditionLabel ?? item.condition ?? '',
@@ -11119,34 +11182,32 @@ async function downloadReliningPackagesZip() {
           rawAddr,
           String(item.suburb || '').toUpperCase(),
           '',
-          svUrl
-        ]));
+          svUrl // plain text fallback, replaced with hyperlinked friendly text below
+        ]);
+        assetIdsForRows.push(item.assetId);
+        addressesForRows.push(rawAddr);
       });
 
-      // Totals row
+      // Totals row (no hyperlinks)
       const totalsRow = HEADERS.map(() => '');
       totalsRow[HEADERS.indexOf('package_id')]         = 'Totals';
       totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
       totalsRow[HEADERS.indexOf('pipe_cost')]          = fmtCurrency(totalCost);
       totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
-      lines.push(csvRow(totalsRow));
+      aoa.push(totalsRow);
 
-      const csvContent = lines.join('\n');
+      const xlsxBuffer = buildPackageXlsxBuffer(aoa, assetIdsForRows, addressesForRows);
       const baseFilename = pkgFilename(pkg);
-      if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
-        throw new Error(`ZIP validation failed: ${baseFilename} has the wrong header.`);
-      }
       let filename = baseFilename;
-      if (csvNames.includes(filename)) {
-        const stem = baseFilename.replace(/\.csv$/i, '');
+      if (pkgFileNames.includes(filename)) {
+        const stem = baseFilename.replace(/\.xlsx$/i, '');
         let suffix = 2;
-        while (csvNames.includes(`${stem}_${suffix}.csv`)) suffix++;
-        filename = `${stem}_${suffix}.csv`;
+        while (pkgFileNames.includes(`${stem}_${suffix}.xlsx`)) suffix++;
+        filename = `${stem}_${suffix}.xlsx`;
         console.warn(`[ZIP] Filename collision for "${baseFilename}" (pkg ${pkg.package_id}); writing as "${filename}" to keep both entries.`);
       }
-      csvNames.push(filename);
-      // Prepend UTF-8 BOM so Excel renders the file as UTF-8 (avoids mojibake on cp1252 systems)
-      zip.file(filename, '﻿' + csvContent);
+      pkgFileNames.push(filename);
+      zip.file(filename, xlsxBuffer);
 
       summaryLines.push(`Package:    ${pkg.package_id}`);
       summaryLines.push(`Suburb:     ${suburbs}`);
@@ -11173,8 +11234,8 @@ async function downloadReliningPackagesZip() {
       ]);
     });
 
-    if (!csvNames.length) {
-      throw new Error('ZIP validation failed: no package CSV files were generated.');
+    if (!pkgFileNames.length) {
+      throw new Error('ZIP validation failed: no package xlsx files were generated.');
     }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
@@ -11184,7 +11245,7 @@ async function downloadReliningPackagesZip() {
     }
 
     // file_list.txt
-    const sortedCsvNames = csvNames.slice().sort();
+    const sortedPkgFileNames = pkgFileNames.slice().sort();
     zip.file('file_list.txt', [
       'PACKAGE FILE LIST',
       '='.repeat(60),
@@ -11192,7 +11253,7 @@ async function downloadReliningPackagesZip() {
       ..._provLines,
       '-'.repeat(60),
       '',
-      ...sortedCsvNames
+      ...sortedPkgFileNames
     ].join('\n'));
 
     // provenance.txt — single canonical audit record (also embedded in summary + file_list headers)
@@ -11234,15 +11295,15 @@ async function downloadReliningPackagesZip() {
       }
     });
 
-    // xlsx files
-    if (typeof XLSX !== 'undefined') {
+    // package_summary.xlsx + file_list.xlsx (already xlsx — just rebuild against new names)
+    {
       const wbSummary = XLSX.utils.book_new();
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
       XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'Package Summary');
       zip.file('package_summary.xlsx', XLSX.write(wbSummary, { type: 'array', bookType: 'xlsx' }));
 
       const wbFileList = XLSX.utils.book_new();
-      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedCsvNames.map(n => [n])]);
+      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedPkgFileNames.map(n => [n])]);
       XLSX.utils.book_append_sheet(wbFileList, wsFileList, 'File List');
       zip.file('file_list.xlsx', XLSX.write(wbFileList, { type: 'array', bookType: 'xlsx' }));
     }
@@ -11250,27 +11311,31 @@ async function downloadReliningPackagesZip() {
     const blob = await zip.generateAsync({ type: 'blob' });
     const checkZip = await JSZip.loadAsync(blob);
     const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
-    const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
-    console.info(`[ZIP] Package CSVs assembled: ${csvNames.length}; CSVs in generated ZIP: ${zipCsvNames.length}.`);
-    if (!csvNames.length) console.warn('[ZIP] No package CSV files were assembled — ZIP will contain no RLN_*.csv entries.');
-    const zipCsvSet = new Set(zipCsvNames);
-    const csvNamesSet = new Set(csvNames);
-    const missingFromZip = csvNames.filter(name => !zipCsvSet.has(name));
-    const extraInZip = zipCsvNames.filter(name => !csvNamesSet.has(name));
+    const zipPkgNames = fileNames.filter(name => /(^|\/)RLN_[^/]+_pipes\.xlsx$/i.test(name) || /^[^/]+_pipes\.xlsx$/i.test(name));
+    console.info(`[ZIP] Package xlsx assembled: ${pkgFileNames.length}; xlsx in generated ZIP: ${zipPkgNames.length}.`);
+    if (!pkgFileNames.length) console.warn('[ZIP] No package xlsx files were assembled — ZIP will contain no RLN_*.xlsx entries.');
+    const zipPkgSet = new Set(zipPkgNames);
+    const pkgNamesSet = new Set(pkgFileNames);
+    const missingFromZip = pkgFileNames.filter(name => !zipPkgSet.has(name));
+    const extraInZip = zipPkgNames.filter(name => !pkgNamesSet.has(name));
     if (missingFromZip.length) console.warn('[ZIP] file_list.txt entries missing from generated ZIP:', missingFromZip);
-    if (extraInZip.length) console.warn('[ZIP] CSVs present in generated ZIP but absent from file_list.txt:', extraInZip);
-    if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
-    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package CSV file(s) listed in file_list.txt are missing from the generated ZIP.`);
+    if (extraInZip.length) console.warn('[ZIP] xlsx present in generated ZIP but absent from file_list.txt:', extraInZip);
+    if (!zipPkgNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package xlsx files.');
+    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package xlsx file(s) listed in file_list.txt are missing from the generated ZIP.`);
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
     // locks.json is optional — only present when user opted in
     const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
     if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
-    for (const name of zipCsvNames) {
-      const csvText = await checkZip.file(name).async('string');
-      const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
-      if (firstLine !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
+    // Verify every per-package xlsx by re-reading and checking the header row.
+    for (const name of zipPkgNames) {
+      const xlsxBytes = await checkZip.file(name).async('uint8array');
+      const wb = XLSX.read(xlsxBytes, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const headerRow = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || [];
+      const headerJoined = headerRow.map(v => String(v ?? '')).join(',');
+      if (headerJoined !== HEADERS.join(',')) throw new Error(`ZIP validation failed: ${name} has the wrong header (got "${headerJoined}").`);
     }
 
     const url = URL.createObjectURL(blob);
@@ -13105,17 +13170,23 @@ async function downloadCctvPackagesZip() {
     return;
   }
 
+  if (typeof XLSX === 'undefined') {
+    alert('XLSX library not loaded. Please refresh the page and try again.');
+    return;
+  }
+
   const _provLines = buildProvenanceLines({ toolKind: 'CCTV', packageCount: packages.length });
 
   try {
     const HEADERS = [
-      'package_id', 'Asset', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
+      'package_id', 'Asset', 'CiA', 'SWP_Pipe Diameter_mm', 'Spatial Length_m',
       'SW_Condition', 'Observed_Condition',
       'SW_Upstream Node', 'SW_Downstream Node',
       'cctv_rate_per_hour', 'package_total_cost', 'Address', 'Asset Suburb',
       'Max Distance Between Pipes (km)', 'Google_Street_View'
     ];
-    const expectedHeader = HEADERS.join(',');
+    const CIA_COL_INDEX = HEADERS.indexOf('CiA');
+    const SV_COL_INDEX = HEADERS.indexOf('Google_Street_View');
 
     function fmtCurrency(v, cents = true) {
       if (!Number.isFinite(v)) return '';
@@ -13124,16 +13195,6 @@ async function downloadCctvPackagesZip() {
         maximumFractionDigits: cents ? 2 : 0
       });
     }
-
-    function csvCell(v) {
-      const s = String(v ?? '');
-      if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-        return '"' + s.replace(/"/g, '""') + '"';
-      }
-      return s;
-    }
-
-    function csvRow(arr) { return arr.map(csvCell).join(','); }
 
     // Address fallback per spec, then Google Maps search URL — opens Google
     // Maps which can switch to Street View. No API key needed.
@@ -13163,15 +13224,43 @@ async function downloadCctvPackagesZip() {
     }
 
     function pkgFilename(pkg) {
-      return `${pkg.package_id}_pipes.csv`;
+      return `${pkg.package_id}_pipes.xlsx`;
     }
 
     function maxDistanceText(pkg) {
       return Number.isFinite(pkg.max_span_m) ? `${(pkg.max_span_m / 1000).toFixed(1)} km` : '0.0 km';
     }
 
+    function buildPackageXlsxBuffer(rows, assetIds, addresses) {
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      for (let i = 0; i < assetIds.length; i++) {
+        const rowIdx = i + 1;
+        const ciaUrl = buildCiAAssetUrl(assetIds[i]);
+        if (ciaUrl) {
+          const ciaAddr = XLSX.utils.encode_cell({ r: rowIdx, c: CIA_COL_INDEX });
+          let ciaCell = ws[ciaAddr];
+          if (!ciaCell) { ciaCell = { t: 's', v: '' }; ws[ciaAddr] = ciaCell; }
+          ciaCell.v = 'Open in CiA';
+          ciaCell.t = 's';
+          ciaCell.l = { Target: ciaUrl, Tooltip: 'Open ' + assetIds[i] + ' in TechnologyOne CiA' };
+        }
+        const svUrl = addresses[i] ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addresses[i])}` : '';
+        if (svUrl) {
+          const svAddr = XLSX.utils.encode_cell({ r: rowIdx, c: SV_COL_INDEX });
+          let svCell = ws[svAddr];
+          if (!svCell) { svCell = { t: 's', v: '' }; ws[svAddr] = svCell; }
+          svCell.v = 'Open in Street View';
+          svCell.t = 's';
+          svCell.l = { Target: svUrl, Tooltip: 'Open address in Google Street View' };
+        }
+      }
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Package');
+      return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+    }
+
     const zip = new JSZip();
-    const csvNames = [];
+    const pkgFileNames = [];
     const summaryLines = [
       'CCTV PACKAGE SUMMARY',
       '='.repeat(60),
@@ -13190,7 +13279,9 @@ async function downloadCctvPackagesZip() {
       const cctvRate = Number(pkg.cctv_rate || 0);
       const pkgTotalCost = Number(pkg.total_cost || 0);
 
-      const lines = [csvRow(HEADERS)];
+      const aoa = [HEADERS.slice()];
+      const assetIdsForRows = [];
+      const addressesForRows = [];
       let totalLengthM = 0;
 
       assets.forEach(item => {
@@ -13206,9 +13297,10 @@ async function downloadCctvPackagesZip() {
         const rawAddr  = pipeStreetAddress(raw);
         const svUrl    = pipeStreetViewUrl(raw);
 
-        lines.push(csvRow([
+        aoa.push([
           pkg.package_id,
           item.assetId,
+          '', // CiA placeholder
           diam || '',
           lenM ? lenM.toFixed(1) + ' m' : '',
           rawCondition,
@@ -13220,7 +13312,9 @@ async function downloadCctvPackagesZip() {
           String(item.suburb || '').toUpperCase(),
           '',
           svUrl
-        ]));
+        ]);
+        assetIdsForRows.push(item.assetId);
+        addressesForRows.push(rawAddr);
       });
 
       const totalsRow = HEADERS.map(() => '');
@@ -13228,22 +13322,19 @@ async function downloadCctvPackagesZip() {
       totalsRow[HEADERS.indexOf('Spatial Length_m')]   = totalLengthM.toFixed(2) + ' m';
       totalsRow[HEADERS.indexOf('package_total_cost')] = fmtCurrency(pkgTotalCost);
       totalsRow[HEADERS.indexOf('Max Distance Between Pipes (km)')] = maxDist;
-      lines.push(csvRow(totalsRow));
+      aoa.push(totalsRow);
 
-      const csvContent = lines.join('\n');
+      const xlsxBuffer = buildPackageXlsxBuffer(aoa, assetIdsForRows, addressesForRows);
       const baseFilename = pkgFilename(pkg);
-      if (csvContent.split(/\r?\n/)[0] !== expectedHeader) {
-        throw new Error(`ZIP validation failed: ${baseFilename} has the wrong header.`);
-      }
       let filename = baseFilename;
-      if (csvNames.includes(filename)) {
-        const stem = baseFilename.replace(/\.csv$/i, '');
+      if (pkgFileNames.includes(filename)) {
+        const stem = baseFilename.replace(/\.xlsx$/i, '');
         let suffix = 2;
-        while (csvNames.includes(`${stem}_${suffix}.csv`)) suffix++;
-        filename = `${stem}_${suffix}.csv`;
+        while (pkgFileNames.includes(`${stem}_${suffix}.xlsx`)) suffix++;
+        filename = `${stem}_${suffix}.xlsx`;
       }
-      csvNames.push(filename);
-      zip.file(filename, '﻿' + csvContent);
+      pkgFileNames.push(filename);
+      zip.file(filename, xlsxBuffer);
 
       summaryLines.push(`Package:    ${pkg.package_id}`);
       summaryLines.push(`Suburb:     ${suburbs}`);
@@ -13268,12 +13359,12 @@ async function downloadCctvPackagesZip() {
       ]);
     });
 
-    if (!csvNames.length) {
-      throw new Error('ZIP validation failed: no package CSV files were generated.');
+    if (!pkgFileNames.length) {
+      throw new Error('ZIP validation failed: no package xlsx files were generated.');
     }
     zip.file('package_summary.txt', summaryLines.join('\n'));
 
-    const sortedCsvNames = csvNames.slice().sort();
+    const sortedPkgFileNames = pkgFileNames.slice().sort();
     zip.file('file_list.txt', [
       'CCTV PACKAGE FILE LIST',
       '='.repeat(60),
@@ -13281,7 +13372,7 @@ async function downloadCctvPackagesZip() {
       ..._provLines,
       '-'.repeat(60),
       '',
-      ...sortedCsvNames
+      ...sortedPkgFileNames
     ].join('\n'));
 
     // provenance.txt — single canonical audit record (also embedded in summary + file_list headers)
@@ -13324,14 +13415,14 @@ async function downloadCctvPackagesZip() {
       }
     });
 
-    if (typeof XLSX !== 'undefined') {
+    {
       const wbSummary = XLSX.utils.book_new();
       const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
       XLSX.utils.book_append_sheet(wbSummary, wsSummary, 'CCTV Package Summary');
       zip.file('package_summary.xlsx', XLSX.write(wbSummary, { type: 'array', bookType: 'xlsx' }));
 
       const wbFileList = XLSX.utils.book_new();
-      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedCsvNames.map(n => [n])]);
+      const wsFileList = XLSX.utils.aoa_to_sheet([['Filename'], ...sortedPkgFileNames.map(n => [n])]);
       XLSX.utils.book_append_sheet(wbFileList, wsFileList, 'File List');
       zip.file('file_list.xlsx', XLSX.write(wbFileList, { type: 'array', bookType: 'xlsx' }));
     }
@@ -13339,26 +13430,29 @@ async function downloadCctvPackagesZip() {
     const blob = await zip.generateAsync({ type: 'blob' });
     const checkZip = await JSZip.loadAsync(blob);
     const fileNames = Object.keys(checkZip.files).filter(name => !checkZip.files[name].dir);
-    const zipCsvNames = fileNames.filter(name => name.toLowerCase().endsWith('.csv'));
-    console.info(`[CCTV ZIP] Package CSVs assembled: ${csvNames.length}; CSVs in generated ZIP: ${zipCsvNames.length}.`);
-    if (!csvNames.length) console.warn('[CCTV ZIP] No package CSV files were assembled — ZIP will contain no CCTV_*.csv entries.');
-    const zipCsvSet = new Set(zipCsvNames);
-    const csvNamesSet = new Set(csvNames);
-    const missingFromZip = csvNames.filter(name => !zipCsvSet.has(name));
-    const extraInZip = zipCsvNames.filter(name => !csvNamesSet.has(name));
+    const zipPkgNames = fileNames.filter(name => /^[^/]+_pipes\.xlsx$/i.test(name));
+    console.info(`[CCTV ZIP] Package xlsx assembled: ${pkgFileNames.length}; xlsx in generated ZIP: ${zipPkgNames.length}.`);
+    if (!pkgFileNames.length) console.warn('[CCTV ZIP] No package xlsx files were assembled — ZIP will contain no CCTV_*.xlsx entries.');
+    const zipPkgSet = new Set(zipPkgNames);
+    const pkgNamesSet = new Set(pkgFileNames);
+    const missingFromZip = pkgFileNames.filter(name => !zipPkgSet.has(name));
+    const extraInZip = zipPkgNames.filter(name => !pkgNamesSet.has(name));
     if (missingFromZip.length) console.warn('[CCTV ZIP] file_list.txt entries missing from generated ZIP:', missingFromZip);
-    if (extraInZip.length) console.warn('[CCTV ZIP] CSVs present in generated ZIP but absent from file_list.txt:', extraInZip);
-    if (!zipCsvNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package CSV files.');
-    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package CSV file(s) listed in file_list.txt are missing from the generated ZIP.`);
+    if (extraInZip.length) console.warn('[CCTV ZIP] xlsx present in generated ZIP but absent from file_list.txt:', extraInZip);
+    if (!zipPkgNames.length) throw new Error('ZIP validation failed: generated ZIP contains no package xlsx files.');
+    if (missingFromZip.length) throw new Error(`ZIP validation failed: ${missingFromZip.length} package xlsx file(s) listed in file_list.txt are missing from the generated ZIP.`);
     if (!fileNames.includes('package_summary.txt')) throw new Error('ZIP validation failed: package_summary.txt is missing.');
     if (!fileNames.includes('file_list.txt')) throw new Error('ZIP validation failed: file_list.txt is missing.');
     if (!fileNames.includes('package_report.html')) throw new Error('ZIP validation failed: package_report.html is missing.');
     const missingMaps = expectedMapNames.filter(n => !fileNames.includes(n));
     if (missingMaps.length) throw new Error(`ZIP validation failed: ${missingMaps.length} per-package map file(s) missing: ${missingMaps.slice(0, 5).join(', ')}${missingMaps.length > 5 ? '…' : ''}`);
-    for (const name of zipCsvNames) {
-      const csvText = await checkZip.file(name).async('string');
-      const firstLine = csvText.replace(/^﻿/, '').split(/\r?\n/)[0];
-      if (firstLine !== expectedHeader) throw new Error(`ZIP validation failed: ${name} has the wrong header.`);
+    for (const name of zipPkgNames) {
+      const xlsxBytes = await checkZip.file(name).async('uint8array');
+      const wb = XLSX.read(xlsxBytes, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const headerRow = XLSX.utils.sheet_to_json(ws, { header: 1, range: 0 })[0] || [];
+      const headerJoined = headerRow.map(v => String(v ?? '')).join(',');
+      if (headerJoined !== HEADERS.join(',')) throw new Error(`ZIP validation failed: ${name} has the wrong header (got "${headerJoined}").`);
     }
 
     const url = URL.createObjectURL(blob);
