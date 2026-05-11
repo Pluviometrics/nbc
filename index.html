@@ -9422,10 +9422,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var suburb = (pkg.suburbs || []).filter(Boolean).join(', ');
       var pipeByAssetId = {};
       pipes.forEach(function(p){ pipeByAssetId[String(p.asset_id)] = p; });
-      var assetIds = (pkg.asset_ids || []).map(function(a){
-        var uid = String(typeof a === 'object' && a ? a.assetId : a);
-        var pipe = pipeByAssetId[uid] || {};
-        var isC6 = !!pipe.is_c6_addon;
+      // Build full asset objects from this package's pipes so we can reorder C6 add-ons
+      // immediately after their anchor pipe (matches the Edit panel + live tool).
+      var pkgPipeObjs = pipes.filter(function(p){ return p.package_id === pkg.id; });
+      var orderedAssets = (typeof reportReorderAssetsByC6Anchor === 'function')
+        ? reportReorderAssetsByC6Anchor(pkgPipeObjs)
+        : pkgPipeObjs;
+      var assetIds = orderedAssets.map(function(item){
+        var uid = String(item.asset_id || '');
+        var isC6 = !!item.is_c6_addon;
         var isLocked = !isC6 && isReportPipeLocked(uid);
         var color = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
         var weight = isC6 ? ';font-weight:700' : '';
