@@ -7508,8 +7508,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       }
     };
   }));
+  const generatedAt = new Date().toISOString();
   const reportData = {
-    generated_at: new Date().toISOString(),
+    generated_at: generatedAt,
     options: options,
     summary: {
       package_count: reportPackages.length,
@@ -7521,7 +7522,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     pipes: reportPipes,
     provenance: {
       source: 'NBC Relining Tool',
-      generated_at: new Date().toISOString(),
+      generated_at: generatedAt,
       package_count: reportPackages.length,
       pipe_count: reportPipes.length
     }
