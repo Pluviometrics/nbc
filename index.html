@@ -8656,13 +8656,27 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function buildReportPipePopup(item, pkg) {
-    return '<div style="font-family:Segoe UI,system-ui,sans-serif;font-size:11px;min-width:180px">' +
-      '<div style="font-weight:800;color:#1A2B3C;margin-bottom:4px">' + esc(item.asset_id) + '</div>' +
-      '<div><strong>Package:</strong> ' + esc(pkg.id) + '</div>' +
-      '<div><strong>Diameter:</strong> Ø' + esc(item.diameter_mm || '') + 'mm</div>' +
-      '<div><strong>Length:</strong> ' + Number(item.length_m || 0).toFixed(1) + ' m</div>' +
-      '<div><strong>Cost:</strong> ' + fmtCurrency(item.pipe_cost) + '</div>' +
-      '<div><strong>Address:</strong> ' + esc(item.address) + '</div>' +
+    var assetId = String(item.asset_id || '');
+    var ciaUrl = buildCiAAssetUrl(assetId);
+    var assetLabel = esc(assetId || 'Pipe');
+    var assetMarkup = ciaUrl
+      ? '<a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">' + assetLabel + '</a>'
+      : assetLabel;
+    var titleHead = assetId ? 'ASSET ID - ' + assetMarkup : assetLabel;
+    var pkgId = String(pkg && pkg.id || '');
+    var address = String(item.address || (item.raw && (item.raw.Formatted_Address || item.raw.Address || item.raw.Pipe_Start_Address || item.raw.Street_Address)) || '').trim();
+    var streetViewUrl = address
+      ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address)
+      : '';
+    var sizeMm = Number(item.diameter_mm);
+    var lengthM = Number(item.length_m);
+    return '<div style="min-width:200px;font-size:12px;line-height:1.55;color:#1A2B3C;font-family:Segoe UI,system-ui,sans-serif">' +
+      '<div style="font-weight:800;color:#1A2B3C;margin-bottom:4px">' + titleHead + (pkgId ? ' - ' + esc(pkgId) : '') + '</div>' +
+      '<div><strong>Pipe size:</strong> ' + (Number.isFinite(sizeMm) && sizeMm > 0 ? Math.round(sizeMm) + ' mm' : '—') + '</div>' +
+      '<div><strong>Pipe length:</strong> ' + (Number.isFinite(lengthM) && lengthM > 0 ? lengthM.toFixed(1) + ' m' : '—') + '</div>' +
+      '<div><strong>Address:</strong> ' + (address ? esc(address) : '—') + '</div>' +
+      (ciaUrl ? '<div style="margin-top:6px"><a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open Asset in CiA ↗</a></div>' : '') +
+      (streetViewUrl ? '<div style="margin-top:6px"><a href="' + esc(streetViewUrl) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a></div>' : '') +
       (item.is_c6_addon ? '<div style="color:#F18F01;margin-top:4px"><strong>C6 add-on</strong></div>' : '') +
     '</div>';
   }
