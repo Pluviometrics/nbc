@@ -4582,7 +4582,7 @@ function getReliningPackagingOptions() {
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
   const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   const proximityM = groupingMethod === 'suburb' ? null : parseInt(groupingMethod, 10);
-  const topupMode = method === 'count'
+  const topupMode = (method === 'count' || method === 'location')
     ? 'No top up'
     : (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up');
   return {
@@ -5240,7 +5240,9 @@ function splitReliningItemsByValue(items, options) {
 }
 
 function splitReliningItemsByLocation(items, options) {
-  // Cluster by spatial proximity using the grouping-method distance
+  // Pure location packaging: cluster by spatial proximity, then within each
+  // cluster greedy-fill packages by max value only — diameters/size groups
+  // are ignored. Adjacent-fill and size-group two-pass logic do not apply.
   const clustered = assignReliningClusters(items, options.proximityM);
   const clusterMap = new Map();
   clustered.forEach(item => {
@@ -5248,18 +5250,30 @@ function splitReliningItemsByLocation(items, options) {
     if (!clusterMap.has(key)) clusterMap.set(key, []);
     clusterMap.get(key).push(item);
   });
-  // Within each cluster, split by value (respects max package value)
+  const maxValue = Number(options.maxPackageValue) > 0 ? Number(options.maxPackageValue) : Infinity;
   const result = [];
-  let globalPkgIndex = 0;
-  clusterMap.forEach(clusterItems => {
-    const subPackaged = splitReliningItemsByValue(clusterItems, options);
-    const subIdMap = new Map();
-    subPackaged.forEach(item => {
-      if (!subIdMap.has(item.package_id)) {
-        subIdMap.set(item.package_id, `RLN_${String(++globalPkgIndex).padStart(3, '0')}`);
-      }
-      result.push({ ...item, package_id: subIdMap.get(item.package_id) });
+  let pkgCounter = 0;
+  [...clusterMap.keys()].sort((a, b) => String(a).localeCompare(String(b))).forEach(key => {
+    const clusterItems = (clusterMap.get(key) || [])
+      .slice()
+      .sort((a, b) => (Number(b.pipeCost) || 0) - (Number(a.pipeCost) || 0));
+    let current = [];
+    let currentValue = 0;
+    const closePackage = () => {
+      if (!current.length) return;
+      pkgCounter += 1;
+      const pkgId = `RLN_${String(pkgCounter).padStart(3, '0')}`;
+      current.forEach(item => result.push({ ...item, package_id: pkgId }));
+      current = [];
+      currentValue = 0;
+    };
+    clusterItems.forEach(item => {
+      const pipeValue = Number(item.pipeCost) || 0;
+      if (current.length && currentValue + pipeValue > maxValue) closePackage();
+      current.push(item);
+      currentValue += pipeValue;
     });
+    closePackage();
   });
   return result;
 }
@@ -6473,12 +6487,23 @@ function togglePackagingInputs() {
   if (valueWrap) valueWrap.style.display = method === 'count' ? 'none' : '';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
   if (topupRow) {
-    const disabled = method === 'count';
+    const disabled = method === 'count' || method === 'location';
     topupRow.style.opacity = disabled ? '0.45' : '';
     topupRow.querySelectorAll('input[name="pkgTopupMode"]').forEach(input => {
       input.disabled = disabled;
+      if (disabled && input.value === 'No top up') input.checked = true;
+      else if (disabled) input.checked = false;
     });
-    topupRow.title = disabled ? 'Top-up applies to value and location packaging only.' : '';
+    if (!disabled) {
+      const checked = topupRow.querySelector('input[name="pkgTopupMode"]:checked');
+      if (!checked || checked.value === 'No top up') {
+        const fallback = topupRow.querySelector('input[name="pkgTopupMode"][value="Same condition first, lower condition if needed"]');
+        if (fallback) fallback.checked = true;
+      }
+    }
+    topupRow.title = method === 'location'
+      ? 'Top-up is forced off in Location first mode.'
+      : (method === 'count' ? 'Top-up does not apply to pipe-count packaging.' : '');
   }
   if (suburbSelect) {
     suburbSelect.disabled = false;
