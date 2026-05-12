@@ -11639,19 +11639,33 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   ].join('\n');
 }
 
-// CCTV-flavoured package_report.html — slim v1, parity with relining on the
-// high-value 80% (options strip, package cards, embedded map with CiAnywhere
-// asset deep-links, packages table). Per-package written reasoning narratives
-// and the filterable pipes table are deferred to a follow-up pass.
+// CCTV-flavoured package_report.html — full standalone editor that mirrors
+// buildReliningPackageReportHtml. Embeds editor runtime with CCTV-namespaced
+// helpers (lock toggles, move-to-package, undo, click-to-sort sticky headers,
+// localStorage persistence). Skips C6 (CCTV has no C6 concept). Same column
+// layout + sort indicators as the live tool's CCTV Edit Packages tab.
 function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) {
   packages = packages || [];
   options = options || {};
+  function haversineM(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+  const generatedAt = new Date().toISOString();
+  // Per-pipe CCTV cost mirrors live tool _cctvEstPipeCost (Phase B):
+  // hours = max(lengthM / metresPerHour, CCTV_MIN_HOURS_PER_PIPE), cost = hours * rate.
+  const CCTV_MIN_HOURS_PER_PIPE_VAL = 4;
+  const mphVal = Math.max(1, Number(options.metresPerHour) || 80);
+  const fallbackRate = Number(options.cctvRatePerHour) || 205;
 
   const reportPackages = packages.map(pkg => {
     const assets = pkg.assets || [];
-    const coords = assets
-      .filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon))
-      .map(a => [a.lat, a.lon]);
+    const coordAssets = assets.filter(a => Number.isFinite(a.lat) && Number.isFinite(a.lon));
+    const coords = coordAssets.map(a => [a.lat, a.lon]);
     let centroid = null;
     if (Number.isFinite(pkg.lat) && Number.isFinite(pkg.lon)) {
       centroid = [Number(pkg.lat), Number(pkg.lon)];
@@ -11660,6 +11674,13 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
         coords.reduce((s, c) => s + c[0], 0) / coords.length,
         coords.reduce((s, c) => s + c[1], 0) / coords.length
       ];
+    }
+    let max_from_centroid_m = 0;
+    if (centroid && coords.length) {
+      coords.forEach(c => {
+        const d = haversineM(centroid[0], centroid[1], c[0], c[1]);
+        if (d > max_from_centroid_m) max_from_centroid_m = d;
+      });
     }
     const conditionMix = {};
     const diameterMix = {};
@@ -11672,15 +11693,25 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     const safeId = String(pkg.package_id || '').replace(/[^A-Za-z0-9_-]/g, '_') || 'PACKAGE';
     return {
       id: pkg.package_id,
+      anchor_id: pkg.anchor_id || '',
+      original_package_id: pkg.original_package_id || pkg.package_id,
+      suburb: pkg.suburb || ((pkg.suburbs || [])[0] || ''),
       suburbs: pkg.suburbs || (pkg.suburb ? [pkg.suburb] : []),
+      diameters_mm: Object.keys(diameterMix).filter(k => k !== 'Unknown').map(Number).filter(Number.isFinite).sort((a, b) => a - b),
       pipe_count: assets.length,
       total_length_m: Number(pkg.total_length_m || 0),
       cctv_hours: Number(pkg.cctv_hours || 0),
-      cctv_rate: Number(pkg.cctv_rate || 0),
+      cctv_rate: Number(pkg.cctv_rate || 0) || fallbackRate,
       total_cost: Number(pkg.total_cost || 0),
       max_span_m: Number(pkg.max_span_m || 0),
-      asset_ids: assets.map(a => a.assetId).filter(Boolean),
+      tba_pipe_count: Number(pkg.tba_pipe_count || 0),
+      critical_pipe_count: Number(pkg.critical_pipe_count || 0),
+      criticality_score: Number(pkg.criticality_score || 0),
+      coordinate_sources: pkg.coordinate_sources || '',
+      distance_warning: pkg.distance_warning || '',
+      asset_ids: (pkg.asset_ids && pkg.asset_ids.length ? pkg.asset_ids : assets.map(a => a.assetId)).filter(Boolean),
       centroid,
+      max_from_centroid_m: Math.round(max_from_centroid_m),
       conditionMix,
       diameterMix,
       dedicated_map_url: `./package_maps/${safeId}_map.html`
@@ -11689,22 +11720,51 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
 
   const reportPipes = packages.flatMap(pkg => (pkg.assets || []).map(item => {
     const raw = item.raw || {};
+    let startPair = null, endPair = null;
+    try {
+      if (typeof resolveLineCoordinatePair === 'function' && raw && Object.keys(raw).length) {
+        startPair = resolveLineCoordinatePair(raw, true);
+        endPair = resolveLineCoordinatePair(raw, false);
+      }
+    } catch (e) { /* swallow */ }
+    const lengthM = Number(item.lengthM) || 0;
+    const pkgRate = Number(pkg.cctv_rate) || fallbackRate;
+    const estHours = Math.max(lengthM / mphVal, CCTV_MIN_HOURS_PER_PIPE_VAL);
+    const estCost = estHours * pkgRate;
     return {
       asset_id: item.assetId || '',
       package_id: pkg.package_id,
+      anchor_id: pkg.anchor_id || '',
       suburb: String(item.suburb || pkg.suburb || '').toUpperCase(),
       diameter_mm: Math.round(Number(item.diameterMm) || 0) || null,
       condition: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
-      length_m: Number(item.lengthM) || 0,
+      condition_label: item.conditionLabel || item.condition || raw['SW_Condition'] || '',
+      condition_score: Number(item.condition) || 0,
+      length_m: lengthM,
+      pipe_cost: Number(estCost.toFixed(2)),
+      tba_priority: item.isTbaCondition ? 'Yes' : '',
+      criticality_score: Number(item.criticalityScore) || 0,
+      criticality_label: item.criticalityLabel || '',
       address: String(raw['Formatted_Address'] || raw['Address'] || raw['Pipe_Start_Address'] || raw['Street_Address'] || '').trim(),
+      upstream: raw['SW_Upstream Node'] || raw['SW_Upstream_Node'] || raw['Upstream Node'] || '',
+      downstream: raw['SW_Downstream Node'] || raw['SW_Downstream_Node'] || raw['Downstream Node'] || '',
       lat: Number.isFinite(item.lat) ? item.lat : null,
-      lon: Number.isFinite(item.lon) ? item.lon : null
+      lon: Number.isFinite(item.lon) ? item.lon : null,
+      start_lat: startPair && Number.isFinite(startPair.lat) ? startPair.lat : null,
+      start_lon: startPair && Number.isFinite(startPair.lon) ? startPair.lon : null,
+      end_lat: endPair && Number.isFinite(endPair.lat) ? endPair.lat : null,
+      end_lon: endPair && Number.isFinite(endPair.lon) ? endPair.lon : null
     };
   }));
 
   const reportData = {
-    generated_at: new Date().toISOString(),
+    generated_at: generatedAt,
     options: options,
+    constants: {
+      cctv_min_hours_per_pipe: CCTV_MIN_HOURS_PER_PIPE_VAL,
+      metres_per_hour: mphVal,
+      fallback_rate: fallbackRate
+    },
     summary: {
       package_count: reportPackages.length,
       pipe_count: reportPipes.length,
@@ -11713,7 +11773,13 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
       total_cost: Number(summary?.total_cost || 0)
     },
     packages: reportPackages,
-    pipes: reportPipes
+    pipes: reportPipes,
+    provenance: {
+      source: 'NBC CCTV Tool',
+      generated_at: generatedAt,
+      package_count: reportPackages.length,
+      pipe_count: reportPipes.length
+    }
   };
   const json = JSON.stringify(reportData).replace(/<\/script/gi, '<\\/script');
 
@@ -11727,14 +11793,32 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     return;
   }
   var options = data.options || {};
+  var constants = data.constants || { cctv_min_hours_per_pipe: 4, metres_per_hour: 80, fallback_rate: 205 };
+  var CCTV_MIN_HOURS_PER_PIPE = Number(constants.cctv_min_hours_per_pipe) || 4;
+  var CCTV_MPH = Math.max(1, Number(constants.metres_per_hour) || 80);
+  var CCTV_FALLBACK_RATE = Number(constants.fallback_rate) || 205;
   var pipes = data.pipes || [];
   var packages = data.packages || [];
   var summary = data.summary || {};
   var PALETTE = ['#007C89','#C44536','#6A994E','#F18F01','#5B5F97','#2D9CDB','#8E5572','#3A7D44','#D95D39','#7B2CBF','#2A9D8F','#E76F51','#4D908E','#B56576','#577590','#BC6C25'];
-  var pkgIndex = {};
+  var SELECT_COLOR = '#1E63D9';
+  var DIM_COLOR = '#7B2CBF';
+  var SELECT_OPACITY = 1.0;
+  var DIM_OPACITY = 0.25;
+  let pkgIndex = {};
   packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
 
-  function colorFor(id) { var i = pkgIndex[id]; if (i == null) i = 0; return PALETTE[i % PALETTE.length]; }
+  // Snapshot original pipe-to-package assignments (before any manual moves)
+  const originalAssignments = {};
+  pipes.forEach(function(p) { originalAssignments[p.asset_id] = p.anchor_id || p.package_id; });
+  // Snapshot original packages by anchor_id for carry-forward fields (never mutated)
+  const ORIGINAL_PACKAGES_BY_ANCHOR = {};
+  data.packages.forEach(function(p) { if (p.anchor_id) ORIGINAL_PACKAGES_BY_ANCHOR[p.anchor_id] = p; });
+  // Snapshot package_id by anchor_id from initial generation
+  const INITIAL_PKG_ID_BY_ANCHOR = {};
+  data.packages.forEach(function(p) { if (p.anchor_id) INITIAL_PKG_ID_BY_ANCHOR[p.anchor_id] = p.id; });
+
+  function colorFor(id) { var i = pkgIndex[id]; if (i == null) i = 0; return PALETTE[Math.abs(i) % PALETTE.length]; }
   function fmtNum(n, dp) { if (n == null || !isFinite(n)) return ''; return Number(n).toLocaleString('en-AU', { minimumFractionDigits: dp || 0, maximumFractionDigits: dp || 0 }); }
   function fmtCurrency(n) { if (n == null || !isFinite(n) || Number(n) === 0) return ''; return '$' + Number(n).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 }); }
   function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -11754,139 +11838,803 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     return ids.map(function(id) { return linkAssetId(id); }).join(', ');
   }
 
-  document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
-  document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' CCTV package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
-
-  var meta = [
-    { label: 'Total Packages', value: fmtNum(summary.package_count, 0) || String(packages.length) },
-    { label: 'Total Pipes', value: fmtNum(summary.pipe_count, 0) || String(pipes.length) },
-    { label: 'Total Length', value: (fmtNum(summary.total_length_m, 1) || '0') + ' m' },
-    { label: 'Total CCTV Hours', value: fmtNum(summary.total_cctv_hours, 1) || '0' },
-    { label: 'Estimated Cost', value: fmtCurrency(summary.total_cost) || '$0' }
-  ];
-  document.getElementById('metaStrip').innerHTML = meta.map(function(s) {
-    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
-  }).join('');
-
-  var opt = [
-    { label: 'Condition Selection', value: (options.conditionGroups || []).join(', ') || '—' },
-    { label: 'Lookback Exclusion', value: options.lookbackYears != null ? options.lookbackYears + ' years' : '—' },
-    { label: 'Target Proximity', value: options.proximityM != null ? Number(options.proximityM).toLocaleString() + ' m' : '—' },
-    { label: 'Package Target', value: options.targetMode === 'count' ? 'Pipe count' : (options.targetMode === 'both' ? 'Length and count' : 'Total length') },
-    { label: 'Target Length / Count', value: options.targetMode === 'count' ? (options.pipesPerPackage + ' pipes') : (options.targetMode === 'both' ? (options.targetLengthM + ' m + ' + options.pipesPerPackage + ' pipes') : (options.targetLengthM + ' m')) },
-    { label: 'CCTV Production Rate', value: options.metresPerHour != null ? options.metresPerHour + ' m/hr' : '—' },
-    { label: 'CCTV Rate', value: options.cctvRatePerHour != null ? '$' + options.cctvRatePerHour + '/hr' : '—' },
-    { label: 'Criticality Influence', value: options.criticalityWeight != null ? String(options.criticalityWeight) : '—' },
-    { label: 'Consolidation', value: options.consolidateSmallPackages ? '<5 pipes consolidated within ' + (options.consolidateSmallDistanceM || 500) + ' m' : 'Off' }
-  ];
-  document.getElementById('optionsStrip').innerHTML = opt.map(function(s) {
-    return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
-  }).join('');
-
-  var ovBullets = [];
-  ovBullets.push('Pipes filtered to condition tiers: <strong>' + esc((options.conditionGroups || []).join(', ') || '—') + '</strong>.');
-  ovBullets.push('Assets surveyed within the last <strong>' + esc(String(options.lookbackYears || 4)) + ' years</strong> are excluded from CCTV scheduling.');
-  ovBullets.push('Packages built proximity-first within a <strong>' + esc(String(options.proximityM || 500)) + ' m</strong> radius.');
-  if (options.targetMode === 'count') {
-    ovBullets.push('Packages target <strong>~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
-  } else if (options.targetMode === 'both') {
-    ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m AND ~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
-  } else {
-    ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m</strong> of total pipe length.');
+  // ---------- Per-pipe estimated CCTV cost (mirrors live tool _cctvEstPipeCost) ----------
+  function _cctvEstPipeCost(asset, pkg) {
+    var lengthM = Number(asset && asset.length_m) || 0;
+    var rate = Number(pkg && pkg.cctv_rate) || CCTV_FALLBACK_RATE;
+    var hours = Math.max(lengthM / CCTV_MPH, CCTV_MIN_HOURS_PER_PIPE);
+    return hours * rate;
   }
-  ovBullets.push('CCTV survey hours computed at <strong>' + esc(String(options.metresPerHour || 80)) + ' m/hr</strong> production rate.');
-  ovBullets.push('Cost estimated at <strong>$' + esc(String(options.cctvRatePerHour || 205)) + '/hr</strong> applied to package hours.');
-  ovBullets.push('Criticality weighting (<strong>' + esc(String(options.criticalityWeight || 0.1)) + '</strong>) gently nudges priority order; primary ordering remains spatial.');
-  if (options.consolidateSmallPackages) {
-    ovBullets.push('Post-processing: small packages (<5 pipes) consolidated into the nearest larger package within ' + esc(String(options.consolidateSmallDistanceM || 500)) + ' m.');
+
+  // ---------- Manual moves: localStorage persistence (CCTV-namespaced) ----------
+  var REPORT_ID = 'cctv-' + (data.generated_at || 'unknown');
+  var CCTV_REPORT_MOVES_KEY = 'cctvReportManualMoves_' + REPORT_ID;
+  let cctvReportManualMoves = loadCctvReportMoves();
+
+  function emptyCctvMoves() {
+    return { assignments: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {} };
   }
-  ovBullets.push('Methodology note: CCTV outputs are inspection-priority triage, NOT a failure prediction or AEP classification.');
-  document.getElementById('overallReasoning').innerHTML = '<ul>' + ovBullets.map(function(b){ return '<li>' + b + '</li>'; }).join('') + '</ul>';
 
-  var cardsHtml = packages.map(function(pkg) {
-    var color = colorFor(pkg.id);
-    var diam = Object.keys(pkg.diameterMix || {}).map(function(d){ return d + 'mm'; }).join(', ');
-    return '<div class="pkg-card" data-package-id="' + esc(pkg.id) + '">' +
-      '<div class="pkg-card-head">' +
-        '<span class="pipe-color" style="background:' + color + '"></span>' +
-        '<div class="pkg-card-title">' + esc(pkg.id) + '</div>' +
-      '</div>' +
-      '<div class="pkg-card-val">' + fmtNum(pkg.pipe_count, 0) + '<span class="pkg-card-val-unit"> pipes</span></div>' +
-      '<div class="pkg-card-sub">' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
-      '<dl class="pkg-card-dl">' +
-        '<dt>Length</dt><dd>' + esc(fmtNum(pkg.total_length_m, 1)) + ' m</dd>' +
-        '<dt>CCTV hrs</dt><dd>' + esc(fmtNum(pkg.cctv_hours, 1)) + '</dd>' +
-        '<dt>Cost</dt><dd>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</dd>' +
-        '<dt>Diameters</dt><dd>' + esc(diam || '—') + '</dd>' +
-        '<dt>Max span</dt><dd>' + (pkg.max_span_m ? esc((pkg.max_span_m / 1000).toFixed(2)) + ' km' : '—') + '</dd>' +
-      '</dl>' +
-      '<div class="pkg-card-actions">' +
-        '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener">Open map ↗</a>' +
-      '</div>' +
-      '</div>';
-  }).join('');
-  document.getElementById('packageCards').innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
+  function loadCctvReportMoves() {
+    try {
+      var raw = localStorage.getItem(CCTV_REPORT_MOVES_KEY);
+      if (!raw) return emptyCctvMoves();
+      var parsed = JSON.parse(raw);
+      return {
+        assignments: parsed.assignments || {},
+        locks: { pipes: (parsed.locks && parsed.locks.pipes) || {}, packages: (parsed.locks && parsed.locks.packages) || {} },
+        moveOrigins: parsed.moveOrigins || {}
+      };
+    } catch (e) { return emptyCctvMoves(); }
+  }
 
-  var packagesTbl = document.getElementById('packagesTable');
-  packagesTbl.innerHTML =
-    '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="r">Pipes</th>' +
-    '<th class="r">Length (m)</th><th class="r">CCTV hrs</th><th class="r">Cost</th><th>Asset IDs (first 12)</th></tr></thead>' +
-    '<tbody>' + (packages.length ? packages.map(function(pkg) {
-      var diam = Object.keys(pkg.diameterMix || {}).map(function(d){ return d + 'mm'; }).join(', ');
-      var ids = (pkg.asset_ids || []).slice(0, 12);
-      var more = (pkg.asset_ids || []).length > 12 ? ' …' : '';
-      return '<tr class="package-row" data-package-id="' + esc(pkg.id) + '">' +
-        '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
-        '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
-        '<td>' + esc(diam) + '</td>' +
-        '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
-        '<td class="r">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
-        '<td class="r">' + fmtNum(pkg.cctv_hours, 1) + '</td>' +
-        '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
-        '<td style="font-size:11px;color:#5A6B7A">' + linkAssetIdList(ids) + more + '</td>' +
-        '</tr>';
-    }).join('') : '<tr><td colspan="8" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
+  function saveCctvReportMoves() {
+    try { localStorage.setItem(CCTV_REPORT_MOVES_KEY, JSON.stringify(cctvReportManualMoves)); }
+    catch (e) { console.warn('[CCTV Report] Failed to persist moves:', e); }
+  }
 
-  var map = null;
-  function initMap() {
-    var mapEl = document.getElementById('map');
-    if (typeof L === 'undefined') {
-      document.getElementById('mapPanel').insertAdjacentHTML('beforeend', '<div class="map-warning">Leaflet failed to load — map disabled. Tables remain functional.</div>');
-      return;
-    }
-    map = L.map(mapEl, { zoomControl: true, scrollWheelZoom: true });
-    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Spatial Services NSW', maxZoom: 21 });
-    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 });
-    sixAerial.addTo(map);
-    L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(map);
-    var allPoints = [];
-    packages.forEach(function(pkg) {
-      var color = colorFor(pkg.id);
-      var pkgPipes = pipes.filter(function(p) { return p.package_id === pkg.id && p.lat != null && p.lon != null; });
-      pkgPipes.forEach(function(p) { allPoints.push([p.lat, p.lon]); });
-      pkgPipes.forEach(function(p) {
-        var marker = L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.78 });
-        marker.bindPopup(
-          '<strong>ASSET ID - ' + linkAssetId(p.asset_id) + ' - ' + esc(p.package_id) + '</strong><br>' +
-          'Suburb: ' + esc(p.suburb) + '<br>' +
-          'Diameter: ' + (p.diameter_mm ? esc(p.diameter_mm + 'mm') : '—') + '<br>' +
-          'Condition: ' + esc(p.condition || '—') + '<br>' +
-          'Length: ' + fmtNum(p.length_m, 1) + ' m' +
-          (p.address ? '<br>Address: ' + esc(p.address) : '') +
-          (p.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '')
-        );
-        marker.addTo(map);
+  function ensureCctvReportLocks() {
+    if (!cctvReportManualMoves) cctvReportManualMoves = emptyCctvMoves();
+    if (!cctvReportManualMoves.locks) cctvReportManualMoves.locks = { pipes: {}, packages: {} };
+    if (!cctvReportManualMoves.locks.pipes) cctvReportManualMoves.locks.pipes = {};
+    if (!cctvReportManualMoves.locks.packages) cctvReportManualMoves.locks.packages = {};
+    if (!cctvReportManualMoves.moveOrigins) cctvReportManualMoves.moveOrigins = {};
+    if (!cctvReportManualMoves.assignments) cctvReportManualMoves.assignments = {};
+  }
+
+  function isCctvReportPipeLocked(uid) {
+    return !!(cctvReportManualMoves && cctvReportManualMoves.locks && cctvReportManualMoves.locks.pipes && cctvReportManualMoves.locks.pipes[String(uid)]);
+  }
+  function isCctvReportPackageLocked(anchorId) {
+    return !!(cctvReportManualMoves && cctvReportManualMoves.locks && cctvReportManualMoves.locks.packages && cctvReportManualMoves.locks.packages[String(anchorId)]);
+  }
+  function getCctvReportPackageLockState(pkg) {
+    var assets = pipes.filter(function(p){ return p.anchor_id === pkg.anchor_id; });
+    if (!assets.length) return isCctvReportPackageLocked(pkg.anchor_id) ? 'all' : 'none';
+    var lockedCount = assets.filter(function(a){ return isCctvReportPipeLocked(a.asset_id); }).length;
+    if (lockedCount === assets.length) return 'all';
+    if (lockedCount === 0) return 'none';
+    return 'partial';
+  }
+  function getCctvReportGlobalLockState() {
+    if (!pipes.length) return 'none';
+    var lockedCount = pipes.filter(function(a){ return isCctvReportPipeLocked(a.asset_id); }).length;
+    if (lockedCount === pipes.length) return 'all';
+    if (lockedCount === 0) return 'none';
+    return 'partial';
+  }
+  function manualCctvReportAssignmentCount() {
+    var assigns = (cctvReportManualMoves && cctvReportManualMoves.assignments) || {};
+    var n = 0;
+    Object.keys(assigns).forEach(function(uid) {
+      var natural = originalAssignments[uid];
+      if (assigns[uid] !== natural) n++;
+    });
+    return n;
+  }
+
+  function resetCctvReportMoves() {
+    var moves = manualCctvReportAssignmentCount();
+    var lockedPkgs = (cctvReportManualMoves.locks && Object.keys(cctvReportManualMoves.locks.packages || {}).length) || 0;
+    var lockedPipes = (cctvReportManualMoves.locks && Object.keys(cctvReportManualMoves.locks.pipes || {}).length) || 0;
+    var summaryParts = [];
+    if (moves) summaryParts.push(moves + ' move' + (moves === 1 ? '' : 's'));
+    if (lockedPkgs) summaryParts.push(lockedPkgs + ' locked package' + (lockedPkgs === 1 ? '' : 's'));
+    if (lockedPipes) summaryParts.push(lockedPipes + ' locked pipe' + (lockedPipes === 1 ? '' : 's'));
+    var msg = summaryParts.length ? 'Clear ' + summaryParts.join(', ') + '? This cannot be undone.' : 'Nothing to clear.';
+    if (!summaryParts.length) { alert(msg); return; }
+    if (!confirm(msg)) return;
+    cctvReportManualMoves = emptyCctvMoves();
+    saveCctvReportMoves();
+    applyCctvMovesAndRender();
+  }
+  window.resetCctvReportMoves = resetCctvReportMoves;
+
+  // ---------- Core rebuild helpers ----------
+  function haversineM(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = function(d) { return d * Math.PI / 180; };
+    const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function rebuildCctvPackagesFromPipes() {
+    const byAnchor = new Map();
+    pipes.forEach(function(p) {
+      var key = p.anchor_id || p.package_id;
+      if (!byAnchor.has(key)) byAnchor.set(key, []);
+      byAnchor.get(key).push(p);
+    });
+    packages.length = 0;
+    byAnchor.forEach(function(items, anchorId) {
+      const lengths = items.map(function(i){ return Number(i.length_m) || 0; });
+      const totalLength = lengths.reduce(function(a,b){return a+b;}, 0);
+      const diameters = Array.from(new Set(items.map(function(i){ return Number(i.diameter_mm); }).filter(Number.isFinite))).sort(function(a,b){ return a-b; });
+      const suburbs = Array.from(new Set(items.map(function(i){ return i.suburb; }).filter(Boolean)));
+      const coords = items.filter(function(i){ return Number.isFinite(i.lat) && Number.isFinite(i.lon); });
+      const centroid = coords.length
+        ? [coords.reduce(function(s,c){return s+c.lat;},0)/coords.length, coords.reduce(function(s,c){return s+c.lon;},0)/coords.length]
+        : null;
+      let maxSpan = 0;
+      for (let i = 0; i < coords.length; i++) for (let j = i+1; j < coords.length; j++) {
+        const d = haversineM(coords[i].lat, coords[i].lon, coords[j].lat, coords[j].lon);
+        if (d > maxSpan) maxSpan = d;
+      }
+      var original = ORIGINAL_PACKAGES_BY_ANCHOR[anchorId] || {};
+      var rate = Number(original.cctv_rate) || CCTV_FALLBACK_RATE;
+      var hours = Math.max(totalLength / CCTV_MPH, items.length * CCTV_MIN_HOURS_PER_PIPE);
+      var cost = hours * rate;
+      packages.push({
+        id: original.id || INITIAL_PKG_ID_BY_ANCHOR[anchorId] || anchorId,
+        anchor_id: anchorId,
+        original_package_id: original.original_package_id || original.id || anchorId,
+        suburb: suburbs[0] || '',
+        suburbs: suburbs,
+        diameters_mm: diameters,
+        pipe_count: items.length,
+        total_length_m: totalLength,
+        cctv_hours: hours,
+        cctv_rate: rate,
+        total_cost: cost,
+        max_span_m: maxSpan,
+        tba_pipe_count: items.filter(function(i){ return i.tba_priority === 'Yes'; }).length,
+        critical_pipe_count: items.filter(function(i){ return Number(i.criticality_score) > 0; }).length,
+        criticality_score: items.reduce(function(s,i){ return s + (Number(i.criticality_score) || 0); }, 0),
+        asset_ids: items.map(function(i){ return i.asset_id; }),
+        centroid: centroid,
+        coordinate_sources: original.coordinate_sources || '',
+        distance_warning: original.distance_warning || '',
+        conditionMix: original.conditionMix || {},
+        diameterMix: original.diameterMix || {},
+        dedicated_map_url: original.dedicated_map_url || '',
+        max_from_centroid_m: original.max_from_centroid_m || 0,
+        manual_origin: original.manual_origin || (ORIGINAL_PACKAGES_BY_ANCHOR[anchorId] ? null : 'new')
       });
     });
-    if (allPoints.length) map.fitBounds(L.latLngBounds(allPoints).pad(0.1));
-    else {
-      map.setView([-33.75, 151.27], 11);
-      var n = document.createElement('div'); n.className = 'map-warning'; n.style.marginTop = '8px';
-      n.textContent = 'No pipe coordinates available — map shows default extent only.';
-      mapEl.parentNode.insertBefore(n, mapEl.nextSibling);
+  }
+
+  function renumberCctvReportPackages() {
+    // Sort by criticality + length + pipes (descending), with locked packages keeping their numeric id.
+    packages.sort(function(a, b) {
+      var keys = ['criticality_score','total_length_m','pipe_count'];
+      for (let k = 0; k < keys.length; k++) {
+        var d = (Number(b[keys[k]])||0) - (Number(a[keys[k]])||0);
+        if (d !== 0) return d;
+      }
+      return String(a.id).localeCompare(String(b.id));
+    });
+    // Reserve numeric ids for locked packages — they keep their current id.
+    // Inside template literal — use \\d for digit class so emitted regex is \\d not d.
+    var reserved = {};
+    packages.forEach(function(pkg) {
+      if (isCctvReportPackageLocked(pkg.anchor_id)) {
+        var m = String(pkg.id || '').match(/(\\d+)$/);
+        if (m) reserved[Number(m[1])] = true;
+      }
+    });
+    // PHASE 1 — compute id remap (anchor-keyed)
+    var anchorIdRemap = {};
+    var nextNum = 1;
+    packages.forEach(function(pkg) {
+      if (isCctvReportPackageLocked(pkg.anchor_id)) return;
+      while (reserved[nextNum]) nextNum++;
+      var newId = 'CCTV_' + String(nextNum).padStart(3, '0');
+      nextNum++;
+      if (pkg.id !== newId) anchorIdRemap[pkg.anchor_id] = newId;
+    });
+    // PHASE 2 — apply package id renames (anchor-keyed, no risk of collision)
+    packages.forEach(function(pkg) {
+      if (anchorIdRemap[pkg.anchor_id]) pkg.id = anchorIdRemap[pkg.anchor_id];
+    });
+    // PHASE 3 — propagate the new package_id label down to pipes (anchor stays stable)
+    pipes.forEach(function(p) {
+      var newId = anchorIdRemap[p.anchor_id];
+      if (newId) p.package_id = newId;
+    });
+    pkgIndex = {};
+    packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+  }
+
+  function applyCctvMovesAndRender() {
+    ensureCctvReportLocks();
+    // 1. Reset every pipe to its original anchor
+    pipes.forEach(function(p) {
+      p.anchor_id = originalAssignments[p.asset_id] || p.anchor_id;
+    });
+    // 2. Apply manual assignments (asset_id → target anchor_id)
+    Object.keys(cctvReportManualMoves.assignments || {}).forEach(function(assetId) {
+      var target = cctvReportManualMoves.assignments[assetId];
+      var pipe = pipes.find(function(p){ return p.asset_id === assetId; });
+      if (pipe) pipe.anchor_id = target;
+    });
+    // 3. Rebuild package objects from current pipe assignments
+    rebuildCctvPackagesFromPipes();
+    // 3b. Materialise locked-but-empty packages
+    var lockedPkgs = (cctvReportManualMoves.locks && cctvReportManualMoves.locks.packages) || {};
+    Object.keys(lockedPkgs).forEach(function(anchorId) {
+      if (!packages.find(function(p){ return p.anchor_id === anchorId; })) {
+        packages.push({
+          id: INITIAL_PKG_ID_BY_ANCHOR[anchorId] || anchorId,
+          anchor_id: anchorId,
+          original_package_id: anchorId,
+          suburb: '',
+          suburbs: [],
+          diameters_mm: [],
+          pipe_count: 0,
+          total_length_m: 0,
+          cctv_hours: 0,
+          cctv_rate: CCTV_FALLBACK_RATE,
+          total_cost: 0,
+          max_span_m: 0,
+          tba_pipe_count: 0,
+          critical_pipe_count: 0,
+          criticality_score: 0,
+          asset_ids: [],
+          centroid: null,
+          coordinate_sources: '',
+          distance_warning: '',
+          conditionMix: {}, diameterMix: {},
+          dedicated_map_url: '',
+          max_from_centroid_m: 0,
+          manual_origin: 'new'
+        });
+      }
+    });
+    // 4. Renumber (priority order, lock-aware)
+    renumberCctvReportPackages();
+    // 5. Re-render everything
+    if (typeof renderCctvReportPackageCards === 'function') renderCctvReportPackageCards();
+    if (typeof renderCctvReportPackagesTable === 'function') renderCctvReportPackagesTable();
+    if (typeof renderCctvReportEditPanel === 'function') renderCctvReportEditPanel();
+    if (typeof renderCctvReportPackagesMap === 'function') renderCctvReportPackagesMap({ fit: false });
+    if (typeof renderCctvReportMetaStrip === 'function') renderCctvReportMetaStrip();
+  }
+  window.applyCctvMovesAndRender = applyCctvMovesAndRender;
+
+  // ---------- Lock / move mutators ----------
+  function cctvReportToggleAllPackagesLock() {
+    ensureCctvReportLocks();
+    if (getCctvReportGlobalLockState() === 'all') {
+      cctvReportManualMoves.locks.pipes = {};
+      cctvReportManualMoves.locks.packages = {};
+    } else {
+      packages.forEach(function(pkg) {
+        cctvReportManualMoves.locks.packages[pkg.anchor_id] = true;
+        pipes.filter(function(p){ return p.anchor_id === pkg.anchor_id; }).forEach(function(a){
+          cctvReportManualMoves.locks.pipes[a.asset_id] = true;
+        });
+      });
+    }
+    saveCctvReportMoves();
+    // Lock toggles are pure metadata — never trigger applyCctvMovesAndRender (renumbering).
+    if (typeof renderCctvReportPackageCards === 'function') renderCctvReportPackageCards();
+    if (typeof renderCctvReportPackagesTable === 'function') renderCctvReportPackagesTable();
+    if (typeof renderCctvReportEditPanel === 'function') renderCctvReportEditPanel();
+    if (typeof renderCctvReportPackagesMap === 'function') renderCctvReportPackagesMap({ fit: false });
+  }
+  window.cctvReportToggleAllPackagesLock = cctvReportToggleAllPackagesLock;
+
+  function cctvReportTogglePackageLock(anchorId) {
+    ensureCctvReportLocks();
+    var pkg = packages.find(function(p){ return p.anchor_id === anchorId; });
+    if (!pkg) return;
+    var assets = pipes.filter(function(p){ return p.anchor_id === anchorId; });
+    if (getCctvReportPackageLockState(pkg) === 'all') {
+      delete cctvReportManualMoves.locks.packages[anchorId];
+      assets.forEach(function(a){ delete cctvReportManualMoves.locks.pipes[a.asset_id]; });
+    } else {
+      cctvReportManualMoves.locks.packages[anchorId] = true;
+      assets.forEach(function(a){ cctvReportManualMoves.locks.pipes[a.asset_id] = true; });
+    }
+    saveCctvReportMoves();
+    if (typeof renderCctvReportPackageCards === 'function') renderCctvReportPackageCards();
+    if (typeof renderCctvReportPackagesTable === 'function') renderCctvReportPackagesTable();
+    if (typeof renderCctvReportEditPanel === 'function') renderCctvReportEditPanel();
+    if (typeof renderCctvReportPackagesMap === 'function') renderCctvReportPackagesMap({ fit: false });
+  }
+  window.cctvReportTogglePackageLock = cctvReportTogglePackageLock;
+
+  function cctvReportTogglePipeLock(uid, anchorId) {
+    ensureCctvReportLocks();
+    var u = String(uid);
+    if (isCctvReportPipeLocked(u)) {
+      delete cctvReportManualMoves.locks.pipes[u];
+    } else {
+      cctvReportManualMoves.locks.pipes[u] = true;
+    }
+    saveCctvReportMoves();
+    if (typeof renderCctvReportPackageCards === 'function') renderCctvReportPackageCards();
+    if (typeof renderCctvReportPackagesTable === 'function') renderCctvReportPackagesTable();
+    if (typeof renderCctvReportEditPanel === 'function') renderCctvReportEditPanel();
+    if (typeof renderCctvReportPackagesMap === 'function') renderCctvReportPackagesMap({ fit: false });
+  }
+  window.cctvReportTogglePipeLock = cctvReportTogglePipeLock;
+
+  function cctvReportMovePipeToPackage(uid, targetAnchorId) {
+    ensureCctvReportLocks();
+    var u = String(uid);
+    var pipe = pipes.find(function(p){ return String(p.asset_id) === u; });
+    if (!pipe) { alert('Asset not found in current report.'); return; }
+    if (pipe.anchor_id === targetAnchorId) return;
+    var targetPkg = packages.find(function(p){ return p.anchor_id === targetAnchorId; });
+    if (!targetPkg) { alert('Target package not found.'); return; }
+    cctvReportManualMoves.assignments[u] = targetAnchorId;
+    cctvReportManualMoves.locks.pipes[u] = true;
+    cctvReportManualMoves.moveOrigins[u] = true;
+    saveCctvReportMoves();
+    applyCctvMovesAndRender();
+  }
+  window.cctvReportMovePipeToPackage = cctvReportMovePipeToPackage;
+
+  function _generateCctvAnchorId() {
+    // Mirror live tool's generateReliningAnchorId roughly — random hex.
+    return 'A_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  }
+
+  function cctvReportCreateNewPackageForPipe(uid) {
+    ensureCctvReportLocks();
+    var u = String(uid);
+    var pipe = pipes.find(function(p){ return String(p.asset_id) === u; });
+    if (!pipe) { alert('Asset not found in current report.'); return; }
+    var newAnchor = _generateCctvAnchorId();
+    var maxNum = packages.reduce(function(m, p) {
+      var match = String(p.id).match(/(\\d+)$/);
+      return Math.max(m, match ? Number(match[1]) : 0);
+    }, 0);
+    var newPkgId = 'CCTV_' + String(maxNum + 1).padStart(3, '0');
+    INITIAL_PKG_ID_BY_ANCHOR[newAnchor] = newPkgId;
+    cctvReportManualMoves.assignments[u] = newAnchor;
+    cctvReportManualMoves.locks.pipes[u] = true;
+    cctvReportManualMoves.moveOrigins[u] = true;
+    saveCctvReportMoves();
+    applyCctvMovesAndRender();
+  }
+  window.cctvReportCreateNewPackageForPipe = cctvReportCreateNewPackageForPipe;
+
+  function cctvReportClearMove(uid) {
+    ensureCctvReportLocks();
+    var u = String(uid);
+    if (!(u in (cctvReportManualMoves.assignments || {}))) return;
+    delete cctvReportManualMoves.assignments[u];
+    if (cctvReportManualMoves.moveOrigins) delete cctvReportManualMoves.moveOrigins[u];
+    if (cctvReportManualMoves.locks && cctvReportManualMoves.locks.pipes) delete cctvReportManualMoves.locks.pipes[u];
+    saveCctvReportMoves();
+    applyCctvMovesAndRender();
+  }
+  window.cctvReportClearMove = cctvReportClearMove;
+
+  // ---------- Edit panel target options helper ----------
+  function cctvReportEditTargetOptionsHtml(currentAnchor) {
+    var opts = packages
+      .filter(function(p){ return p.anchor_id === currentAnchor || !isCctvReportPackageLocked(p.anchor_id); })
+      .map(function(p) {
+        var isCurrent = p.anchor_id === currentAnchor;
+        var isManual = !!p.manual_origin;
+        var tag = isManual ? ' (manual)' : '';
+        var suburbs = (p.suburbs || []).filter(Boolean).join(', ') || 'no suburb';
+        var label = p.id + tag + ' — ' + suburbs + ' (' + (p.pipe_count || 0) + ' pipes)';
+        return '<option value="' + esc(p.anchor_id) + '"' + (isCurrent ? ' selected disabled' : '') + '>' + esc(label) + '</option>';
+      }).join('');
+    return opts + '<option value="__NEW__">+ Create new package</option>';
+  }
+
+  // ---------- Per-package pipe sort (Edit panel) ----------
+  var _cctvReportEditPipeSorts = {};
+  function _cctvReportEditPipeSortIndicator(anchorId, key) {
+    var s = _cctvReportEditPipeSorts[anchorId];
+    if (!s || s.key !== key) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+    return s.dir === 'desc'
+      ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+      : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+  }
+  function _cctvReportEditSortPipes(assets, state) {
+    if (!state || !state.key) return assets;
+    var key = state.key;
+    var mult = state.dir === 'desc' ? -1 : 1;
+    return assets.slice().sort(function(a, b) {
+      var av, bv;
+      if (key === 'asset')       { av = String(a.asset_id || ''); bv = String(b.asset_id || ''); return av.localeCompare(bv, undefined, { numeric: true }) * mult; }
+      if (key === 'suburb')      { av = String(a.suburb || '');   bv = String(b.suburb || '');   return av.localeCompare(bv) * mult; }
+      if (key === 'diam')        { av = Number(a.diameter_mm) || 0; bv = Number(b.diameter_mm) || 0; }
+      else if (key === 'length') { av = Number(a.length_m) || 0;    bv = Number(b.length_m) || 0; }
+      else if (key === 'cost')   { av = Number(a._cctvEstCost) || 0; bv = Number(b._cctvEstCost) || 0; }
+      else return 0;
+      return (av - bv) * mult;
+    });
+  }
+  function cctvReportToggleEditPipeSort(anchorId, key) {
+    if (!anchorId || !key) return;
+    var cur = _cctvReportEditPipeSorts[anchorId];
+    if (!cur || cur.key !== key) {
+      var numeric = key === 'diam' || key === 'length' || key === 'cost';
+      _cctvReportEditPipeSorts[anchorId] = { key: key, dir: numeric ? 'desc' : 'asc' };
+    } else if (cur.dir === 'asc') {
+      _cctvReportEditPipeSorts[anchorId] = { key: key, dir: 'desc' };
+    } else {
+      delete _cctvReportEditPipeSorts[anchorId];
+    }
+    renderCctvReportEditPanel();
+  }
+  window.cctvReportToggleEditPipeSort = cctvReportToggleEditPipeSort;
+
+  // ---------- Event delegation ----------
+  var _cctvReportEditListenersAttached = false;
+  function attachCctvReportEditPanelListeners() {
+    if (_cctvReportEditListenersAttached) return;
+    _cctvReportEditListenersAttached = true;
+    document.addEventListener('change', function(event) {
+      var sel = event.target && event.target.closest && event.target.closest('select[data-cctv-report-edit-target]');
+      if (sel) {
+        var value = sel.value;
+        var uid = sel.getAttribute('data-asset-uid') || '';
+        var current = sel.getAttribute('data-current-anchor') || '';
+        if (!value || value === current) return;
+        if (value === '__NEW__') cctvReportCreateNewPackageForPipe(uid);
+        else cctvReportMovePipeToPackage(uid, value);
+        return;
+      }
+    });
+    document.addEventListener('click', function(event) {
+      var t = event.target;
+      if (!t || !t.closest) return;
+      var clearBtn = t.closest('button[data-cctv-report-edit-clear]');
+      if (clearBtn) { event.preventDefault(); cctvReportClearMove(clearBtn.getAttribute('data-asset-uid') || ''); return; }
+      var lockPipeBtn = t.closest('button[data-cctv-report-lock-pipe]');
+      if (lockPipeBtn) { event.preventDefault(); cctvReportTogglePipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-cctv-anchor-id') || ''); return; }
+      var lockPkgBtn = t.closest('button[data-cctv-report-lock-pkg]');
+      if (lockPkgBtn) { event.preventDefault(); cctvReportTogglePackageLock(lockPkgBtn.getAttribute('data-cctv-anchor-id') || ''); return; }
+      var sortCell = t.closest('[data-cctv-report-edit-sort]');
+      if (sortCell) { event.preventDefault(); cctvReportToggleEditPipeSort(sortCell.getAttribute('data-cctv-anchor-id') || '', sortCell.getAttribute('data-cctv-report-edit-sort') || ''); return; }
+    });
+  }
+
+  // ---------- Edit panel renderer ----------
+  function renderCctvReportEditPanel() {
+    var area = document.getElementById('cctvReportEditArea');
+    if (!area) return;
+    attachCctvReportEditPanelListeners();
+    if (!packages.length) { area.innerHTML = '<div class="pkg-empty">No packages.</div>'; return; }
+
+    var moveCount = manualCctvReportAssignmentCount();
+    var affectedAnchors = {};
+    Object.values((cctvReportManualMoves && cctvReportManualMoves.assignments) || {}).forEach(function(v){ affectedAnchors[v] = true; });
+    var affectedCount = Object.keys(affectedAnchors).length;
+
+    var globalLockState = getCctvReportGlobalLockState();
+    var globalLockCls = globalLockState === 'all' ? 'locked' : (globalLockState === 'partial' ? 'partial' : 'unlocked');
+    var globalLockIcon = globalLockState === 'all' ? '🔒' : '🔓';
+    var globalLockTitle = globalLockState === 'all' ? 'All packages locked — click to unlock all' : 'Click to lock all packages';
+    var toolbarHtml = '<div class="edit-pkg-toolbar">'
+      + '<div style="display:flex;align-items:center;gap:10px">'
+      +   '<button class="pkg-lock-btn ' + globalLockCls + '" style="font-size:18px;padding:4px 9px" type="button" onclick="cctvReportToggleAllPackagesLock()" title="' + esc(globalLockTitle) + '">' + globalLockIcon + '</button>'
+      +   '<div>'
+      +     '<strong>' + moveCount.toLocaleString() + '</strong> manual move' + (moveCount === 1 ? '' : 's') + ' active.'
+      +     ' Affected packages: <strong>' + affectedCount.toLocaleString() + '</strong>.'
+      +     ' Manual edits persist in this browser (per-report).'
+      +   '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px">'
+      +   '<button class="export-btn" type="button" onclick="resetCctvReportMoves()">Reset All Manual Edits</button>'
+      + '</div>'
+      + '</div>';
+
+    var cardsHtml = packages.map(function(pkg) {
+      var rawAssets = pipes.filter(function(p){ return p.anchor_id === pkg.anchor_id; });
+      var assets = rawAssets.map(function(a){ return Object.assign({}, a, { _cctvEstCost: _cctvEstPipeCost(a, pkg) }); });
+      var isManual = !!pkg.manual_origin;
+      var suburbs = (pkg.suburbs || []).filter(Boolean).join(', ') || 'No suburb';
+      var pkgLockState = getCctvReportPackageLockState(pkg);
+      var pkgLockCls = pkgLockState === 'all' ? 'locked' : (pkgLockState === 'partial' ? 'partial' : 'unlocked');
+      var pkgLockIcon = pkgLockState === 'all' ? '🔒' : '🔓';
+      var pkgLockTitle = pkgLockState === 'all' ? 'Package locked — click to unlock all pipes'
+        : pkgLockState === 'partial' ? 'Partially locked — click to lock all pipes'
+        : 'Package unlocked — click to lock all pipes';
+      var totalCost = assets.reduce(function(s,a){ return s + (Number(a._cctvEstCost)||0); }, 0);
+      var totalLength = assets.reduce(function(s,a){ return s + (Number(a.length_m)||0); }, 0);
+
+      var anchorAttr = esc(pkg.anchor_id || '');
+      var headerHtml = '<div class="edit-pkg-header">'
+        + '<div>'
+        +   '<div class="edit-pkg-title">'
+        +     esc(pkg.id || '')
+        +     (isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : '')
+        +     (assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : '')
+        +     '<button class="pkg-lock-btn pkg-lock-btn-pkg ' + pkgLockCls + '" type="button" data-cctv-report-lock-pkg data-cctv-anchor-id="' + anchorAttr + '" title="' + esc(pkgLockTitle) + '">' + pkgLockIcon + '</button>'
+        +   '</div>'
+        +   '<div class="edit-pkg-meta">' + esc(suburbs) + ' · ' + assets.length + ' pipe' + (assets.length === 1 ? '' : 's') + ' · ' + esc(fmtCurrency(totalCost) || '—') + ' · ' + Number(totalLength).toFixed(1) + ' m</div>'
+        + '</div>'
+        + '</div>';
+
+      if (!assets.length) {
+        return '<div class="edit-pkg-card" data-cctv-anchor-id="' + anchorAttr + '">' + headerHtml + '<div class="edit-pkg-empty-msg">This package has no pipes. Move pipes here from another package.</div></div>';
+      }
+
+      var headRow = '<div class="edit-pkg-asset-row head">'
+        + '<div data-cctv-report-edit-sort="asset"  data-cctv-anchor-id="' + anchorAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Asset">Asset'           + _cctvReportEditPipeSortIndicator(pkg.anchor_id, 'asset')  + '</div>'
+        + '<div data-cctv-report-edit-sort="suburb" data-cctv-anchor-id="' + anchorAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Suburb">Suburb'         + _cctvReportEditPipeSortIndicator(pkg.anchor_id, 'suburb') + '</div>'
+        + '<div data-cctv-report-edit-sort="diam"   data-cctv-anchor-id="' + anchorAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Diameter">Diam (mm)'    + _cctvReportEditPipeSortIndicator(pkg.anchor_id, 'diam')   + '</div>'
+        + '<div data-cctv-report-edit-sort="length" data-cctv-anchor-id="' + anchorAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Length">Length (m)'     + _cctvReportEditPipeSortIndicator(pkg.anchor_id, 'length') + '</div>'
+        + '<div data-cctv-report-edit-sort="cost"   data-cctv-anchor-id="' + anchorAttr + '" style="cursor:pointer;user-select:none" title="Click to sort by Cost">Cost'             + _cctvReportEditPipeSortIndicator(pkg.anchor_id, 'cost')   + '</div>'
+        + '<div>Move to package</div><div></div><div>Lock</div>'
+        + '</div>';
+
+      var rows = _cctvReportEditSortPipes(assets, _cctvReportEditPipeSorts[pkg.anchor_id]).map(function(asset) {
+        var uid = String(asset.asset_id || '');
+        var isLocked = isCctvReportPipeLocked(uid);
+        var isMoveOrigin = !!(cctvReportManualMoves.moveOrigins && cctvReportManualMoves.moveOrigins[uid]);
+        var lockCls = isLocked ? 'locked' : 'unlocked';
+        var lockIcon = isLocked ? '🔒' : '🔓';
+        var lockTitle = isLocked ? 'Locked — click to unlock' : 'Unlocked — click to lock';
+        var lockedTag = isLocked
+          ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
+          : '';
+        var assetColor = isLocked ? '#dc2626' : '#16a34a';
+        var assetLinkHtml = '<a href="#cctvReportPackagesMap" data-cctv-asset-id="' + encodeURIComponent(uid) + '" style="color:' + assetColor + ' !important;text-decoration:underline;cursor:pointer" title="Show this pipe on the map">' + esc(uid) + '</a>';
+        var moveCellHtml = '<select data-cctv-report-edit-target data-asset-uid="' + esc(uid) + '" data-current-anchor="' + anchorAttr + '">' + cctvReportEditTargetOptionsHtml(pkg.anchor_id) + '</select>';
+        var clearCellHtml = isMoveOrigin ? '<button class="export-btn" type="button" data-cctv-report-edit-clear data-asset-uid="' + esc(uid) + '" style="padding:4px 8px;font-size:10px">Clear</button>' : '';
+        var lockCellHtml = '<button class="pkg-lock-btn ' + lockCls + '" type="button" data-cctv-report-lock-pipe data-asset-uid="' + esc(uid) + '" data-cctv-anchor-id="' + anchorAttr + '" title="' + esc(lockTitle) + '">' + lockIcon + '</button>';
+        return '<div class="edit-pkg-asset-row" data-asset-uid="' + esc(uid) + '">'
+          + '<div>' + assetLinkHtml + lockedTag + '</div>'
+          + '<div>' + esc(asset.suburb || '') + '</div>'
+          + '<div>' + esc(String(asset.diameter_mm == null ? '' : asset.diameter_mm)) + '</div>'
+          + '<div>' + Number(asset.length_m || 0).toFixed(1) + '</div>'
+          + '<div>' + esc(fmtCurrency(asset._cctvEstCost) || '') + '</div>'
+          + '<div>' + moveCellHtml + '</div>'
+          + '<div>' + clearCellHtml + '</div>'
+          + '<div>' + lockCellHtml + '</div>'
+          + '</div>';
+      }).join('');
+
+      return '<div class="edit-pkg-card" data-cctv-anchor-id="' + anchorAttr + '">' + headerHtml + headRow + rows + '</div>';
+    }).join('');
+
+    area.innerHTML = toolbarHtml + cardsHtml;
+  }
+  window.renderCctvReportEditPanel = renderCctvReportEditPanel;
+
+  // ---------- Top-level meta + cards + table renderers ----------
+  function renderCctvReportMetaStrip() {
+    var totalCost = packages.reduce(function(s,p){ return s + (Number(p.total_cost)||0); }, 0);
+    var totalLength = packages.reduce(function(s,p){ return s + (Number(p.total_length_m)||0); }, 0);
+    var totalHours = packages.reduce(function(s,p){ return s + (Number(p.cctv_hours)||0); }, 0);
+    var totalPipes = pipes.length;
+    var meta = [
+      { label: 'Total Packages', value: fmtNum(packages.length, 0) },
+      { label: 'Total Pipes', value: fmtNum(totalPipes, 0) },
+      { label: 'Total Length', value: (fmtNum(totalLength, 1) || '0') + ' m' },
+      { label: 'Total CCTV Hours', value: fmtNum(totalHours, 1) || '0' },
+      { label: 'Estimated Cost', value: fmtCurrency(totalCost) || '$0' }
+    ];
+    var el = document.getElementById('metaStrip');
+    if (!el) return;
+    el.innerHTML = meta.map(function(s) {
+      return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+    }).join('');
+  }
+  window.renderCctvReportMetaStrip = renderCctvReportMetaStrip;
+
+  function renderCctvReportPackageCards() {
+    var el = document.getElementById('packageCards');
+    if (!el) return;
+    var cardsHtml = packages.map(function(pkg) {
+      var color = colorFor(pkg.id);
+      var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
+      var lockTag = isCctvReportPackageLocked(pkg.anchor_id) ? '<span class="edit-pkg-tag locked" style="margin-left:6px">🔒 Locked</span>' : '';
+      var manualTag = pkg.manual_origin ? '<span class="edit-pkg-tag manual" style="margin-left:6px">Manual</span>' : '';
+      return '<div class="pkg-card" data-cctv-anchor-id="' + esc(pkg.anchor_id || '') + '">' +
+        '<div class="pkg-card-head">' +
+          '<span class="pipe-color" style="background:' + color + '"></span>' +
+          '<div class="pkg-card-title">' + esc(pkg.id) + manualTag + lockTag + '</div>' +
+        '</div>' +
+        '<div class="pkg-card-val">' + fmtNum(pkg.pipe_count, 0) + '<span class="pkg-card-val-unit"> pipes</span></div>' +
+        '<div class="pkg-card-sub">' + esc((pkg.suburbs||[]).join(', ') || '—') + '</div>' +
+        '<dl class="pkg-card-dl">' +
+          '<dt>Length</dt><dd>' + esc(fmtNum(pkg.total_length_m, 1)) + ' m</dd>' +
+          '<dt>CCTV hrs</dt><dd>' + esc(fmtNum(pkg.cctv_hours, 1)) + '</dd>' +
+          '<dt>Cost</dt><dd>' + esc(fmtCurrency(pkg.total_cost) || '—') + '</dd>' +
+          '<dt>Diameters</dt><dd>' + esc(diam || '—') + '</dd>' +
+          '<dt>Max span</dt><dd>' + (pkg.max_span_m ? esc((pkg.max_span_m / 1000).toFixed(2)) + ' km' : '—') + '</dd>' +
+        '</dl>' +
+        (pkg.dedicated_map_url ? '<div class="pkg-card-actions">' +
+          '<a class="pkg-card-link-btn pkg-card-link-primary" href="' + esc(pkg.dedicated_map_url) + '" target="_blank" rel="noopener">Open map ↗</a>' +
+        '</div>' : '') +
+        '</div>';
+    }).join('');
+    el.innerHTML = cardsHtml || '<div class="pkg-empty">No packages were generated.</div>';
+  }
+  window.renderCctvReportPackageCards = renderCctvReportPackageCards;
+
+  function renderCctvReportPackagesTable() {
+    var el = document.getElementById('packagesTable');
+    if (!el) return;
+    el.innerHTML =
+      '<thead><tr><th>Package</th><th>Suburbs</th><th>Diameters</th><th class="r">Pipes</th>' +
+      '<th class="r">Length (m)</th><th class="r">CCTV hrs</th><th class="r">Cost</th><th>Asset IDs (first 12)</th></tr></thead>' +
+      '<tbody>' + (packages.length ? packages.map(function(pkg) {
+        var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ');
+        var ids = (pkg.asset_ids || []).slice(0, 12);
+        var more = (pkg.asset_ids || []).length > 12 ? ' …' : '';
+        return '<tr class="package-row" data-cctv-anchor-id="' + esc(pkg.anchor_id || '') + '">' +
+          '<td><span class="pipe-color" style="background:' + colorFor(pkg.id) + '"></span><strong>' + esc(pkg.id) + '</strong></td>' +
+          '<td>' + esc((pkg.suburbs||[]).join(', ')) + '</td>' +
+          '<td>' + esc(diam) + '</td>' +
+          '<td class="r">' + fmtNum(pkg.pipe_count, 0) + '</td>' +
+          '<td class="r">' + fmtNum(pkg.total_length_m, 1) + '</td>' +
+          '<td class="r">' + fmtNum(pkg.cctv_hours, 1) + '</td>' +
+          '<td class="r">' + esc(fmtCurrency(pkg.total_cost)) + '</td>' +
+          '<td style="font-size:11px;color:#5A6B7A">' + linkAssetIdList(ids) + more + '</td>' +
+          '</tr>';
+      }).join('') : '<tr><td colspan="8" class="pkg-empty-cell">No packages were generated.</td></tr>') + '</tbody>';
+  }
+  window.renderCctvReportPackagesTable = renderCctvReportPackagesTable;
+
+  function renderCctvReportOptionsStrip() {
+    var el = document.getElementById('optionsStrip');
+    if (!el) return;
+    var opt = [
+      { label: 'Condition Selection', value: (options.conditionGroups || []).join(', ') || '—' },
+      { label: 'Lookback Exclusion', value: options.lookbackYears != null ? options.lookbackYears + ' years' : '—' },
+      { label: 'Target Proximity', value: options.proximityM != null ? Number(options.proximityM).toLocaleString() + ' m' : '—' },
+      { label: 'Package Target', value: options.targetMode === 'count' ? 'Pipe count' : (options.targetMode === 'both' ? 'Length and count' : 'Total length') },
+      { label: 'Target Length / Count', value: options.targetMode === 'count' ? (options.pipesPerPackage + ' pipes') : (options.targetMode === 'both' ? (options.targetLengthM + ' m + ' + options.pipesPerPackage + ' pipes') : (options.targetLengthM + ' m')) },
+      { label: 'CCTV Production Rate', value: options.metresPerHour != null ? options.metresPerHour + ' m/hr' : '—' },
+      { label: 'CCTV Rate', value: options.cctvRatePerHour != null ? '$' + options.cctvRatePerHour + '/hr' : '—' },
+      { label: 'Criticality Influence', value: options.criticalityWeight != null ? String(options.criticalityWeight) : '—' },
+      { label: 'Consolidation', value: options.consolidateSmallPackages ? '<5 pipes consolidated within ' + (options.consolidateSmallDistanceM || 500) + ' m' : 'Off' }
+    ];
+    el.innerHTML = opt.map(function(s) {
+      return '<div class="pkg-meta-item"><div class="pkg-meta-lbl">' + esc(s.label) + '</div><div class="pkg-meta-val">' + esc(s.value) + '</div></div>';
+    }).join('');
+  }
+
+  function renderCctvReportOverallReasoning() {
+    var el = document.getElementById('overallReasoning');
+    if (!el) return;
+    var ovBullets = [];
+    ovBullets.push('Pipes filtered to condition tiers: <strong>' + esc((options.conditionGroups || []).join(', ') || '—') + '</strong>.');
+    ovBullets.push('Assets surveyed within the last <strong>' + esc(String(options.lookbackYears || 4)) + ' years</strong> are excluded from CCTV scheduling.');
+    ovBullets.push('Packages built proximity-first within a <strong>' + esc(String(options.proximityM || 500)) + ' m</strong> radius.');
+    if (options.targetMode === 'count') {
+      ovBullets.push('Packages target <strong>~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
+    } else if (options.targetMode === 'both') {
+      ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m AND ~' + esc(String(options.pipesPerPackage)) + ' pipes</strong> each.');
+    } else {
+      ovBullets.push('Packages target <strong>~' + esc(String(options.targetLengthM)) + ' m</strong> of total pipe length.');
+    }
+    ovBullets.push('CCTV survey hours computed at <strong>' + esc(String(options.metresPerHour || 80)) + ' m/hr</strong> production rate.');
+    ovBullets.push('Cost estimated at <strong>$' + esc(String(options.cctvRatePerHour || 205)) + '/hr</strong> applied to package hours.');
+    ovBullets.push('Criticality weighting (<strong>' + esc(String(options.criticalityWeight || 0.1)) + '</strong>) gently nudges priority order; primary ordering remains spatial.');
+    if (options.consolidateSmallPackages) {
+      ovBullets.push('Post-processing: small packages (<5 pipes) consolidated into the nearest larger package within ' + esc(String(options.consolidateSmallDistanceM || 500)) + ' m.');
+    }
+    ovBullets.push('Methodology note: CCTV outputs are inspection-priority triage, NOT a failure prediction or AEP classification.');
+    el.innerHTML = '<ul>' + ovBullets.map(function(b){ return '<li>' + b + '</li>'; }).join('') + '</ul>';
+  }
+
+  // ---------- Map (CCTV-mirror of relining map; uses createPane for stacking) ----------
+  var cctvReportMap = null;
+  var cctvReportMapLayer = null;
+  var selectedCctvReportAnchor = null;
+
+  function ensureCctvReportMap() {
+    if (cctvReportMap) { setTimeout(function(){ cctvReportMap.invalidateSize(); }, 50); return; }
+    if (typeof L === 'undefined') return;
+    cctvReportMap = L.map('cctvReportPackagesMap').setView([-33.75, 151.25], 11);
+    // Custom pane for selected-package overlay so it sits between tiles (200) and overlay (400).
+    var leaderPane = cctvReportMap.createPane('cctvLeaderPane');
+    leaderPane.style.zIndex = 350;
+    leaderPane.style.pointerEvents = 'none';
+    var sixAerial = L.tileLayer('https://maps.six.nsw.gov.au/arcgis/rest/services/public/NSW_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: '© Spatial Services NSW', maxZoom: 21 });
+    var cartoStreets = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', { attribution: '© OpenStreetMap, © CARTO', subdomains: 'abcd', maxZoom: 19 });
+    sixAerial.addTo(cctvReportMap);
+    L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(cctvReportMap);
+    cctvReportMapLayer = L.layerGroup().addTo(cctvReportMap);
+    window._cctvReportMap = cctvReportMap;
+  }
+
+  function cctvPipeWeight(d) {
+    var v = Number(d);
+    if (!v || isNaN(v) || v <= 0) return 2;
+    return Math.max(2, Math.min(12, v / 50));
+  }
+
+  function buildCctvReportPipePopup(pipe, pkg) {
+    return '<strong>ASSET ID - ' + linkAssetId(pipe.asset_id) + ' - ' + esc(pkg ? pkg.id : pipe.package_id || '') + '</strong><br>' +
+      'Suburb: ' + esc(pipe.suburb) + '<br>' +
+      'Diameter: ' + (pipe.diameter_mm ? esc(pipe.diameter_mm + 'mm') : '—') + '<br>' +
+      'Condition: ' + esc(pipe.condition || '—') + '<br>' +
+      'Length: ' + fmtNum(pipe.length_m, 1) + ' m' +
+      (pipe.address ? '<br>Address: ' + esc(pipe.address) : '') +
+      (pipe.address ? '<br><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(pipe.address) + '" target="_blank" rel="noopener" style="color:#00847F;font-weight:700">Open in Google Street View ↗</a>' : '');
+  }
+
+  function renderCctvReportPackagesMap(opts) {
+    opts = opts || {};
+    ensureCctvReportMap();
+    var subtitle = document.getElementById('cctvReportMapSubtitle');
+    if (!cctvReportMap || !cctvReportMapLayer) {
+      if (subtitle) subtitle.textContent = 'Map is not available in this browser.';
+      return;
+    }
+    cctvReportMapLayer.clearLayers();
+    if (!packages.length) {
+      if (subtitle) subtitle.textContent = 'No packages loaded.';
+      return;
+    }
+    if (subtitle) subtitle.textContent = packages.length + ' package' + (packages.length === 1 ? '' : 's') + ' on map.';
+    var hasSelection = !!selectedCctvReportAnchor;
+    var allPoints = [];
+    packages.forEach(function(pkg) {
+      var baseColor = colorFor(pkg.id);
+      var isSelected = hasSelection && pkg.anchor_id === selectedCctvReportAnchor;
+      var pkgPipes = pipes.filter(function(p){ return p.anchor_id === pkg.anchor_id; });
+      pkgPipes.forEach(function(p) {
+        if (Number.isFinite(p.lat) && Number.isFinite(p.lon)) allPoints.push([p.lat, p.lon]);
+        var color = baseColor, opacity;
+        if (hasSelection) {
+          if (isSelected) { color = SELECT_COLOR; opacity = SELECT_OPACITY; }
+          else { color = DIM_COLOR; opacity = DIM_OPACITY; }
+        } else { opacity = 0.92; }
+        var weight = cctvPipeWeight(p.diameter_mm);
+        var hasLine = Number.isFinite(p.start_lat) && Number.isFinite(p.start_lon)
+          && Number.isFinite(p.end_lat) && Number.isFinite(p.end_lon)
+          && !(p.start_lat === p.end_lat && p.start_lon === p.end_lon);
+        if (hasLine) {
+          L.polyline([[p.start_lat, p.start_lon], [p.end_lat, p.end_lon]], {
+            color: color, weight: isSelected ? weight + 2 : weight, opacity: opacity
+          }).on('click', (function(pipeRef, pkgRef){
+            return function(e) {
+              L.popup({ closeButton: true, autoPan: false })
+                .setLatLng(e.latlng)
+                .setContent(buildCctvReportPipePopup(pipeRef, pkgRef))
+                .openOn(cctvReportMap);
+            };
+          })(p, pkg)).addTo(cctvReportMapLayer);
+        } else if (Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
+          L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: opacity })
+            .bindPopup(buildCctvReportPipePopup(p, pkg))
+            .addTo(cctvReportMapLayer);
+        }
+      });
+    });
+    if (allPoints.length && opts.fit !== false) {
+      try { cctvReportMap.fitBounds(L.latLngBounds(allPoints).pad(0.1)); } catch (e) {}
     }
   }
-  initMap();
+  window.renderCctvReportPackagesMap = renderCctvReportPackagesMap;
+
+  function fitCctvReportMap() {
+    selectedCctvReportAnchor = null;
+    renderCctvReportPackagesMap({ fit: true });
+  }
+  window.fitCctvReportMap = fitCctvReportMap;
+  function refreshCctvReportMap() { renderCctvReportPackagesMap({ fit: false }); }
+  window.refreshCctvReportMap = refreshCctvReportMap;
+  function clearCctvReportSelection() { selectedCctvReportAnchor = null; renderCctvReportPackagesMap({ fit: false }); }
+  window.clearCctvReportSelection = clearCctvReportSelection;
+
+  // ---------- Subtab switcher ----------
+  window.switchCctvReportSubtab = function(name) {
+    var tabs = document.querySelectorAll('.subtab');
+    tabs.forEach(function(t){ t.classList.toggle('active', t.getAttribute('data-subtab') === name); });
+    var pages = document.querySelectorAll('.subpage');
+    pages.forEach(function(p){ p.classList.toggle('active', p.id === 'cctv-report-subpage-' + name); });
+    if (name === 'edit') renderCctvReportEditPanel();
+    if (name === 'main') {
+      // Force a map re-layout when switching back to main (Leaflet hates hidden parents)
+      if (cctvReportMap) setTimeout(function(){ cctvReportMap.invalidateSize(); }, 50);
+    }
+  };
+
+  // ---------- Header / static text ----------
+  document.getElementById('generatedMeta').textContent = 'Generated ' + new Date(data.generated_at).toLocaleString('en-AU');
+  document.getElementById('reportStatusText').textContent = packages.length ? packages.length + ' CCTV package' + (packages.length === 1 ? '' : 's') + ' generated' : 'Empty report';
+  renderCctvReportOptionsStrip();
+  renderCctvReportOverallReasoning();
+
+  // ---------- Initial render ----------
+  applyCctvMovesAndRender();
 })();
 `;
 
@@ -11898,8 +12646,9 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<title>NBC CCTV Work Order Package Report</title>',
     '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">',
-    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"><\\/script>',
+    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"><\/script>',
     '<style>',
+    ':root{--teal:#00847F;--teal-l:#00A89D;--teal-d:#005F5B;--navy:#1A2B3C;--navy-l:#243447;--panel:#F4F0E8;--border:#DDE3E8;--text:#1A2B3C;--text-l:#5A6B7A;--r:8px}',
     'body{margin:0;font-family:Segoe UI,system-ui,sans-serif;color:#1A2B3C;background:#F4F0E8}',
     'header{background:#071B2A;color:#fff;padding:18px 28px}',
     '.h-title{font-size:20px;font-weight:800}',
@@ -11915,7 +12664,7 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '.pkg-card{background:#fff;border:1px solid #DDE3E8;border-radius:6px;padding:12px}',
     '.pkg-card-head{display:flex;align-items:center;gap:6px;margin-bottom:6px}',
     '.pipe-color{display:inline-block;width:10px;height:10px;border-radius:50%}',
-    '.pkg-card-title{font-size:13px;font-weight:700}',
+    '.pkg-card-title{font-size:13px;font-weight:700;display:flex;align-items:center;flex-wrap:wrap;gap:4px}',
     '.pkg-card-val{font-size:22px;font-weight:800;color:#00847F}',
     '.pkg-card-val-unit{font-size:11px;color:#5A6B7A;font-weight:500}',
     '.pkg-card-sub{font-size:11px;color:#5A6B7A;margin-bottom:8px}',
@@ -11929,13 +12678,50 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     'th{text-align:left;padding:8px 10px;background:#F4F0E8;color:#5A6B7A;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.04em}',
     'td{padding:8px 10px;border-top:1px solid #EEF1F4;vertical-align:top}',
     '.r{text-align:right}',
-    '#map{height:480px;width:100%;border-radius:6px}',
+    '.cctv-map-wrap{height:640px;background:#fff;border:1px solid var(--border);border-radius:var(--r);overflow:hidden;display:flex;flex-direction:column;position:relative}',
+    '.cctv-map-toolbar{padding:12px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F8FAFB}',
+    '.cctv-map-title{font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--text-l)}',
+    '.cctv-map-sub{font-size:11px;color:var(--text-l);margin-top:3px}',
+    '.ca-actions{display:flex;gap:10px;flex-wrap:wrap}',
+    '.export-btn{padding:7px 14px;background:var(--teal);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px}',
+    '.export-btn:hover:not(:disabled){background:var(--teal-d)}',
+    '#cctvReportPackagesMap{flex:1;min-height:0;background:#e3edf7}',
     '.map-warning{padding:12px;background:#FEF3C7;color:#92400E;border-radius:4px;margin-top:8px;font-size:12px}',
     '.pkg-empty,.pkg-empty-cell{padding:40px;text-align:center;color:#5A6B7A;font-style:italic}',
     'a{color:#00847F;text-decoration:none}',
     'a:hover{text-decoration:underline}',
     'ul{padding-left:20px}',
     'ul li{margin-bottom:4px;line-height:1.5}',
+    '.subtab-bar{display:flex;gap:4px;border-bottom:2px solid #e5e7eb;margin-bottom:16px}',
+    '.subtab{padding:9px 18px;border:none;background:transparent;font-size:13px;font-weight:700;color:#6B7280;cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-2px}',
+    '.subtab.active{color:#1A2B3C;border-bottom-color:#00847F}',
+    '.subtab:hover:not(.active){color:#1A2B3C}',
+    '.subpage{display:none}',
+    '.subpage.active{display:block}',
+    // ----- Edit Packages CSS (port of styles.css .edit-pkg-* / .pkg-lock-btn) -----
+    '.edit-pkg-toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:12px 14px;background:white;border:1px solid var(--border);border-radius:var(--r);font-size:12px;color:var(--text-l);margin-bottom:12px}',
+    '.edit-pkg-toolbar strong{color:var(--navy)}',
+    '.edit-pkg-card{background:white;border:1px solid var(--border);border-radius:var(--r);padding:14px;margin-bottom:10px}',
+    '.edit-pkg-header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}',
+    '.edit-pkg-title{font-size:14px;font-weight:800;color:var(--navy);display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+    '.edit-pkg-meta{font-size:11px;color:var(--text-l);margin-top:3px}',
+    '.edit-pkg-tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:9px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;background:#F4F0E8;color:var(--text-l)}',
+    '.edit-pkg-tag.manual{background:#FFE9A8;color:#7A5A00}',
+    '.edit-pkg-tag.empty{background:#FAD2CF;color:#7B2D26}',
+    '.edit-pkg-tag.moved{background:#D8EBE5;color:#0E5C4F}',
+    '.edit-pkg-tag.locked{background:#FEE2E2;color:#991B1B}',
+    '.edit-pkg-asset-row{display:grid;grid-template-columns:1.3fr 1.4fr 0.7fr 0.7fr 0.9fr 2fr 0.7fr 0.5fr;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--border);align-items:center}',
+    '.edit-pkg-asset-row:last-child{border-bottom:none}',
+    '.edit-pkg-asset-row.head{font-weight:700;color:var(--text-l);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:8px 0 6px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;background:#F4F0E8}',
+    '.edit-pkg-asset-row select{font-size:11px;padding:4px 6px;width:100%}',
+    '.edit-pkg-empty-msg{color:var(--text-l);font-style:italic;font-size:12px;padding:10px 0}',
+    '.pkg-lock-btn{background:none;border:1.5px solid currentColor;border-radius:4px;cursor:pointer;padding:2px 5px;font-size:13px;line-height:1;transition:opacity .15s;flex-shrink:0}',
+    '.pkg-lock-btn:hover{opacity:.65}',
+    '.pkg-lock-btn.locked{color:#dc2626}',
+    '.pkg-lock-btn.unlocked{color:#16a34a}',
+    '.pkg-lock-btn.partial{color:#d97706}',
+    '.pkg-lock-btn-pkg{font-size:16px;padding:3px 7px;margin-left:6px}',
+    '.edit-pkg-asset-row a{color:inherit}',
     '</style>',
     '</head>',
     '<body>',
@@ -11945,15 +12731,48 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '<div class="h-status" id="reportStatusText">—</div>',
     '</header>',
     '<div class="shell">',
+    '<div class="subtab-bar">',
+    '<button type="button" class="subtab active" data-subtab="main" onclick="switchCctvReportSubtab(\'main\')">CCTV Inspections</button>',
+    '<button type="button" class="subtab" data-subtab="edit" onclick="switchCctvReportSubtab(\'edit\')">Edit Packages</button>',
+    '</div>',
+    '<div id="cctv-report-subpage-main" class="subpage active">',
     '<div class="panel"><div class="panel-lbl">Run Summary</div><div id="metaStrip"></div></div>',
     '<div class="panel"><div class="panel-lbl">Packaging Rules Used</div><div id="optionsStrip"></div></div>',
     '<div class="panel"><div class="panel-lbl">Overall Reasoning</div><div id="overallReasoning"></div></div>',
     '<div class="panel"><div class="panel-lbl">Packages</div><div id="packageCards" class="pkg-card-grid"></div></div>',
-    '<div class="panel" id="mapPanel"><div class="panel-lbl">Package Map</div><div id="map"></div></div>',
+    '<div class="panel" id="mapPanel">',
+    '<div class="panel-lbl">Package Map</div>',
+    '<div class="cctv-map-wrap">',
+    '<div class="cctv-map-toolbar">',
+    '<div>',
+    '<div class="cctv-map-title">CCTV Package Map</div>',
+    '<div class="cctv-map-sub" id="cctvReportMapSubtitle">No packages loaded.</div>',
+    '</div>',
+    '<div class="ca-actions">',
+    '<button class="export-btn" type="button" onclick="fitCctvReportMap()">Fit Packages</button>',
+    '<button class="export-btn" type="button" onclick="refreshCctvReportMap()">Refresh Map</button>',
+    '<button class="export-btn" type="button" onclick="clearCctvReportSelection()">Clear Selection</button>',
+    '</div>',
+    '</div>',
+    '<div id="cctvReportPackagesMap"></div>',
+    '</div>',
+    '</div>',
     '<div class="panel"><div class="panel-lbl">Packages Table</div><div style="overflow:auto"><table id="packagesTable"></table></div></div>',
     '</div>',
-    '<script id="report-data" type="application/json">' + json + '<\\/script>',
-    '<script>' + runtimeJs + '<\\/script>',
+    '<div id="cctv-report-subpage-edit" class="subpage">',
+    '<div class="panel">',
+    '<div class="panel-lbl">Edit Packages</div>',
+    '<div style="font-size:12px;color:#6B7280;margin-top:6px;line-height:1.5">',
+    'Move pipes between packages and lock pipes/packages to keep them put. Manual edits persist in this browser (per-report).',
+    'Moving a pipe to a different package locks it there by default. Use <em>+ Create new package</em> in any pipe&#39;s <strong>Move to package</strong> dropdown to spin one up.',
+    '<strong style="color:#1A2B3C">Note:</strong> Package IDs renumber by priority after every edit, matching the live tool. The pipe you moved stays in its new package; only the ID label may change.',
+    '</div>',
+    '</div>',
+    '<div id="cctvReportEditArea" style="margin-top:12px"></div>',
+    '</div>',
+    '</div>',
+    '<script id="report-data" type="application/json">' + json + '<\/script>',
+    '<script>' + runtimeJs.replace(/<\/script/gi, '<\\/script') + '<\/script>',
     '</body>',
     '</html>'
   ].join('\n');
