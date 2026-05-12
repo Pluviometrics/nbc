@@ -5770,10 +5770,13 @@ function prioritiseAndRenumberReliningPackages(packages) {
   // addPackagePriority sorts ALL packages by priority and stamps package_priority_rank.
   const prioritised = addPackagePriority(packages);
   // Reserve numeric IDs for locked packages — they keep their current package_id.
+  // Only match the canonical RLN_\d+ form so a custom rename like "ACME_001"
+  // doesn't accidentally reserve 1 in the numeric ladder (custom names live
+  // in their own namespace and never collide with fresh RLN_NNN ids).
   const reserved = new Set();
   prioritised.forEach(pkg => {
     if (isReliningPackageLocked(pkg.anchor_id)) {
-      const m = String(pkg.package_id || '').match(/(\d+)$/);
+      const m = String(pkg.package_id || '').match(/^RLN_(\d+)$/);
       if (m) reserved.add(Number(m[1]));
     }
   });
@@ -5924,7 +5927,7 @@ const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
 let reliningManualMoves = loadReliningManualMoves();
 
 function loadReliningManualMoves() {
-  const empty = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  const empty = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   try {
     const raw = localStorage.getItem(RELINING_MANUAL_MOVES_KEY);
     if (!raw) return empty;
@@ -5939,7 +5942,11 @@ function loadReliningManualMoves() {
       },
       moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {},
       c6Excluded: parsed.c6Excluded && typeof parsed.c6Excluded === 'object' ? parsed.c6Excluded : {},
-      c6Included: parsed.c6Included && typeof parsed.c6Included === 'object' ? parsed.c6Included : {}
+      c6Included: parsed.c6Included && typeof parsed.c6Included === 'object' ? parsed.c6Included : {},
+      // v2: persistent map of anchor_id → custom package_id (applied after each regen)
+      renamedPackages: parsed.renamedPackages && typeof parsed.renamedPackages === 'object' ? parsed.renamedPackages : {},
+      // v2: transient handoff from lock-file import to engine — array of full per-package snapshots
+      lockedPackages: Array.isArray(parsed.lockedPackages) ? parsed.lockedPackages : []
     };
   } catch (err) {
     console.warn('[Relining manual edit] load failed', err);
@@ -5972,7 +5979,8 @@ function pushReliningMoveHistory(label) {
     },
     moveOrigins: { ...(reliningManualMoves.moveOrigins || {}) },
     c6Excluded:  { ...(reliningManualMoves.c6Excluded || {}) },
-    c6Included:  { ...(reliningManualMoves.c6Included || {}) }
+    c6Included:  { ...(reliningManualMoves.c6Included || {}) },
+    renamedPackages: { ...(reliningManualMoves.renamedPackages || {}) }
   };
   reliningManualMoves.history.push(snap);
   while (reliningManualMoves.history.length > RELINING_HISTORY_MAX) {
@@ -5992,6 +6000,7 @@ function undoLastReliningMove() {
   reliningManualMoves.moveOrigins = snap.moveOrigins;
   reliningManualMoves.c6Excluded = snap.c6Excluded;
   reliningManualMoves.c6Included = snap.c6Included;
+  reliningManualMoves.renamedPackages = snap.renamedPackages || {};
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
     generateReliningPackages();
@@ -6009,6 +6018,11 @@ function translateLocksForExport(moves, packages, options) {
     if (p && p.anchor_id && p.package_id) anchorToPkgId[p.anchor_id] = p.package_id;
   });
   var translated = JSON.parse(JSON.stringify(moves));
+  // Schema v2: full per-package pipe-membership snapshots travel in the
+  // lock file so a re-import can faithfully reproduce the locked package
+  // layout (including PM-created packages and manual renames). Legacy v1
+  // fields are kept alongside for backward compat with older importers.
+  translated.schema = 2;
   // Stamp the packaging options that were active when this state was built.
   // Import side rejects mismatch so users can't silently apply locks across
   // different method/grouping settings (which produces wrong packages).
@@ -6028,6 +6042,36 @@ function translateLocksForExport(moves, packages, options) {
       }
     };
   }
+  // v2 lockedPackages array: emit one entry per package that is either
+  // explicitly package-locked OR every-pipe-locked (auto-promote).
+  // Carries asset_ids verbatim so import side can carve out the exact
+  // pipes regardless of how the new session reorders / regenerates.
+  var lockedPackagesOut = [];
+  var renamedMap = (moves && moves.renamedPackages) || {};
+  (packages || []).forEach(function(pkg) {
+    if (!pkg) return;
+    if (!isReliningPackageFullyLocked(pkg)) return;
+    var assets = pkg.assets || [];
+    var assetIds = (pkg.asset_ids && pkg.asset_ids.length
+      ? pkg.asset_ids
+      : assets.map(function(a) { return a && a.assetId; }))
+      .map(function(v) { return String(v == null ? '' : v); })
+      .filter(Boolean);
+    var renamed = !!(pkg.anchor_id && renamedMap[pkg.anchor_id]);
+    lockedPackagesOut.push({
+      anchor_id: pkg.anchor_id || '',
+      package_id: pkg.package_id || '',
+      asset_ids: assetIds,
+      manual_origin: !!pkg.manual_origin,
+      renamed: renamed,
+      suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : (pkg.suburb ? [pkg.suburb] : []),
+      total_length_m: Number(pkg.total_length_m) || 0,
+      total_cost: Number(pkg.total_cost) || 0
+    });
+  });
+  translated.lockedPackages = lockedPackagesOut;
+  // Legacy v1 fields below: translate anchor_id → package_id for portability
+  // across sessions (kept so v1 importers / older code paths still work).
   if (translated.locks && translated.locks.packages) {
     var newPkgLocks = {};
     Object.keys(translated.locks.packages).forEach(function(k) {
@@ -6057,6 +6101,8 @@ function translateLocksForExport(moves, packages, options) {
     });
     translated.anchorOrigins = newAnchorOrigins;
   }
+  // Internal-only fields — never export the per-session history undo log.
+  delete translated.history;
   return translated;
 }
 
@@ -6223,7 +6269,7 @@ function clearReliningManualMove(assetUid) {
 }
 
 function _ensureC6OverrideMaps() {
-  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   if (!reliningManualMoves.c6Excluded) reliningManualMoves.c6Excluded = {};
   if (!reliningManualMoves.c6Included) reliningManualMoves.c6Included = {};
 }
@@ -6283,6 +6329,18 @@ function isReliningPipeLocked(uid) {
 
 function isReliningPackageLocked(anchorId) {
   return !!(reliningManualMoves?.locks?.packages?.[String(anchorId)]);
+}
+
+// Lock-v2: a package is "fully locked" if it carries an explicit package
+// lock OR if every pipe in it is pipe-locked. Used at carve-out time so
+// an all-pipes-locked package is auto-promoted to package-locked.
+function isReliningPackageFullyLocked(pkg) {
+  if (!pkg) return false;
+  if (pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id)) return true;
+  if (pkg.package_id && isReliningPackageLocked(pkg.package_id)) return true;
+  const assets = pkg.assets || [];
+  if (!assets.length) return false;
+  return assets.every(a => isReliningPipeLocked(String(a.assetId || '')));
 }
 
 function getReliningPackageLockState(pkg) {
@@ -6380,6 +6438,53 @@ function getReliningGlobalLockState() {
   if (lockedCount === 0) return 'none';
   return 'partial';
 }
+
+// Lock-v2 rename: assign a custom package_id to a locked package. Persisted
+// as renamedPackages[anchor_id] = newPackageId so it survives regens. Only
+// applied to locked packages — renaming an unlocked package is meaningless
+// because the renumber pass will overwrite it on the next regen.
+function renameReliningPackage(anchorId, newPackageId) {
+  if (!anchorId) return;
+  const trimmed = String(newPackageId || '').trim();
+  if (!trimmed) { alert('Package ID cannot be empty.'); return; }
+  if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
+  if (/\s/.test(trimmed) && trimmed !== trimmed.trim()) { alert('Package ID cannot start or end with whitespace.'); return; }
+  const packages = (lastPackagingGeneration?.packages || []);
+  const target = packages.find(p => p.anchor_id === anchorId);
+  if (!target) { alert('Package not found in the current generation.'); return; }
+  // Collision check: any other current package using this id?
+  if (packages.some(p => p.anchor_id !== anchorId && String(p.package_id) === trimmed)) {
+    alert('Package ID "' + trimmed + '" is already in use by another package.');
+    return;
+  }
+  // Collision check: any other anchor's stored rename targeting this id?
+  const renamed = (reliningManualMoves && reliningManualMoves.renamedPackages) || {};
+  const collidingAnchor = Object.keys(renamed).find(a => a !== anchorId && renamed[a] === trimmed);
+  if (collidingAnchor) {
+    alert('Package ID "' + trimmed + '" is already reserved by another locked package.');
+    return;
+  }
+  pushReliningMoveHistory('Rename package');
+  if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
+  if (!reliningManualMoves.renamedPackages) reliningManualMoves.renamedPackages = {};
+  reliningManualMoves.renamedPackages[anchorId] = trimmed;
+  // Mutate the live package so the UI reflects the rename without a full regen.
+  target.package_id = trimmed;
+  (target.assets || []).forEach(asset => { asset.package_id = trimmed; });
+  // Make sure the lock metadata sees the new id too (some helpers index by package_id).
+  _ensureLocks();
+  if (reliningManualMoves.locks.packages[anchorId] || isReliningPackageFullyLocked(target)) {
+    reliningManualMoves.locks.packages[anchorId] = true;
+  }
+  if (reliningManualMoves.anchorOrigins[anchorId]) {
+    reliningManualMoves.anchorOrigins[anchorId].last_package_id = trimmed;
+  }
+  persistReliningManualMoves();
+  renderGeneratedPackages(lastPackagingGeneration);
+  renderEditPackagesPanel();
+  if (typeof renderReliningPackagesMap === 'function') renderReliningPackagesMap();
+}
+window.renameReliningPackage = renameReliningPackage;
 
 function toggleReliningAllPackagesLock() {
   const packages = lastPackagingGeneration?.packages || [];
@@ -6764,8 +6869,85 @@ async function loadReliningLocksFile(file) {
         pipes:    parsed.locks?.pipes    && typeof parsed.locks.pipes    === 'object' ? parsed.locks.pipes    : {},
         packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
       },
-      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
+      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {},
+      c6Excluded:  parsed.c6Excluded  && typeof parsed.c6Excluded  === 'object' ? parsed.c6Excluded  : {},
+      c6Included:  parsed.c6Included  && typeof parsed.c6Included  === 'object' ? parsed.c6Included  : {},
+      renamedPackages: parsed.renamedPackages && typeof parsed.renamedPackages === 'object' ? parsed.renamedPackages : {},
+      lockedPackages: []
     };
+    // ── Schema v2 path: lock file carries full per-package pipe-membership ──
+    // When parsed.schema === 2 and parsed.lockedPackages is an array, we use
+    // it as the source of truth for locked packages. The engine consumes this
+    // handoff in generateReliningPackages, carves out the pipes by asset_id,
+    // builds locked package objects via buildReliningPackageObject, and merges
+    // them back before the renumber pass. v1 fields are kept for non-locked
+    // moves and as a fallback for older files.
+    const isSchemaV2 = parsed.schema === 2 && Array.isArray(parsed.lockedPackages);
+    if (isSchemaV2 && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length) {
+      // Build an assetId → row index lookup once (same alias chain the engine uses).
+      const assetIdToRowIndex = new Map();
+      reliningAssetsRows.forEach((row, idx) => {
+        const id = _getReliningRowAssetId(row, idx);
+        if (id && !assetIdToRowIndex.has(id)) assetIdToRowIndex.set(id, idx);
+      });
+      const resolvedHandoff = [];
+      const newPkgLocks = {};
+      const newPipeLocks = { ...reliningManualMoves.locks.pipes };
+      const newAnchorOrigins = { ...reliningManualMoves.anchorOrigins };
+      const newRenamed = { ...reliningManualMoves.renamedPackages };
+      parsed.lockedPackages.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return;
+        const fileAnchor = String(entry.anchor_id || '').trim();
+        const filePkgId = String(entry.package_id || '').trim();
+        if (!filePkgId) return;
+        // Generate a fresh anchor if the file didn't carry one (defensive).
+        const anchorId = fileAnchor || generateReliningAnchorId();
+        const ids = Array.isArray(entry.asset_ids) ? entry.asset_ids : [];
+        const resolvedIds = [];
+        ids.forEach(rawId => {
+          const id = String(rawId == null ? '' : rawId).trim();
+          if (!id) return;
+          // Keep the asset id even if no row matches yet — the engine will
+          // carve out by id-set; missing rows just become "drop-throughs".
+          resolvedIds.push(id);
+          newPipeLocks[id] = true;
+        });
+        if (!resolvedIds.length) return;
+        newPkgLocks[anchorId] = true;
+        if (!newAnchorOrigins[anchorId]) {
+          newAnchorOrigins[anchorId] = {
+            kind: entry.manual_origin ? 'manual' : 'existing',
+            created_at: new Date().toISOString(),
+            last_package_id: filePkgId
+          };
+        } else {
+          newAnchorOrigins[anchorId].last_package_id = filePkgId;
+        }
+        if (entry.renamed) newRenamed[anchorId] = filePkgId;
+        resolvedHandoff.push({
+          anchor_id: anchorId,
+          package_id: filePkgId,
+          asset_ids: resolvedIds,
+          manual_origin: !!entry.manual_origin,
+          renamed: !!entry.renamed,
+          suburbs: Array.isArray(entry.suburbs) ? entry.suburbs.slice() : []
+        });
+      });
+      reliningManualMoves.locks.packages = newPkgLocks;
+      reliningManualMoves.locks.pipes    = newPipeLocks;
+      reliningManualMoves.anchorOrigins  = newAnchorOrigins;
+      reliningManualMoves.renamedPackages = newRenamed;
+      reliningManualMoves.lockedPackages = resolvedHandoff;
+      persistReliningManualMoves();
+      if (typeof generateReliningPackages === 'function' && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
+        generateReliningPackages();
+      } else {
+        renderEditPackagesPanel();
+      }
+      console.info(`[Locks] Loaded v2 lock file: ${resolvedHandoff.length} locked package(s) from ${file.name}`);
+      return;
+    }
+    // ── Legacy v1 path: fall through to the package_id → anchor_id translation ──
     // Normalise lock keys: saved files use package_id everywhere, live tool uses anchor_id.
     // Translate package_id → anchor_id for ALL fields (locks.packages keys,
     // assignments values, anchorOrigins keys, c6Included values) so every
@@ -6837,7 +7019,7 @@ async function loadReliningLocksFile(file) {
 
 function clearAllReliningLocks() {
   if (!confirm('Clear all saved locks, manual edits, and C6 add/remove state in this browser? This cannot be undone.')) return;
-  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
     generateReliningPackages();
@@ -6922,7 +7104,7 @@ function resetAllReliningManualMoves() {
     : 'Nothing to clear.';
   if (!summary.length) { alert(msg); return; }
   if (!confirm(msg)) return;
-  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+  reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   persistReliningManualMoves();
   if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
     generateReliningPackages();
@@ -7035,6 +7217,19 @@ function attachReliningEditPanelListeners() {
     if (lockPipeBtn) { event.preventDefault(); toggleReliningPipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-anchor-id') || ''); return; }
     const lockPkgBtn = event.target?.closest?.('button[data-relining-lock-pkg]');
     if (lockPkgBtn) { event.preventDefault(); toggleReliningPackageLock(lockPkgBtn.getAttribute('data-anchor-id') || ''); return; }
+    const renameBtn = event.target?.closest?.('button[data-relining-rename-pkg]');
+    if (renameBtn) {
+      event.preventDefault();
+      const anchorId = renameBtn.getAttribute('data-anchor-id') || '';
+      if (!anchorId) return;
+      const pkg = (lastPackagingGeneration?.packages || []).find(p => p.anchor_id === anchorId);
+      if (!pkg) return;
+      const newName = prompt('New package ID for ' + pkg.package_id + ':\n(Use letters, numbers, underscores. Max 50 chars.)', pkg.package_id);
+      if (newName && newName.trim() && newName.trim() !== pkg.package_id) {
+        renameReliningPackage(anchorId, newName.trim());
+      }
+      return;
+    }
     const sortCell = event.target?.closest?.('[data-relining-edit-sort]');
     if (sortCell) { event.preventDefault(); toggleReliningEditPipeSort(sortCell.getAttribute('data-anchor-id') || '', sortCell.getAttribute('data-relining-edit-sort') || ''); return; }
   });
@@ -7127,6 +7322,12 @@ function renderEditPackagesPanel() {
     const pkgLockCls = pkgLockState === 'all' ? 'locked' : pkgLockState === 'partial' ? 'partial' : 'unlocked';
     const pkgLockIcon = pkgLockState === 'all' ? '🔒' : '🔓';
     const pkgLockTitle = pkgLockState === 'all' ? 'Package locked — click to unlock all pipes' : pkgLockState === 'partial' ? 'Partially locked — click to lock all pipes' : 'Package unlocked — click to lock all pipes';
+    const isRenamed = !!(reliningManualMoves?.renamedPackages?.[pkg.anchor_id]);
+    const renameTitle = pkgLockState === 'all'
+      ? (isRenamed ? 'Custom name — click to rename again' : 'Click to rename this locked package')
+      : 'Lock the package first to rename it';
+    const renameDisabled = pkgLockState !== 'all';
+    const renameBtnHtml = `<button class="export-btn" type="button" data-relining-rename-pkg data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(renameTitle)}" style="padding:2px 6px;font-size:11px;line-height:1${renameDisabled ? ';opacity:0.4;cursor:not-allowed' : ''}"${renameDisabled ? ' disabled' : ''}>✏️</button>`;
     const headerHtml = `
       <div class="edit-pkg-header">
         <div>
@@ -7134,7 +7335,9 @@ function renderEditPackagesPanel() {
             ${escapeHtml(pkg.package_id || '')}
             ${isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : ''}
             ${assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : ''}
+            ${isRenamed ? '<span class="edit-pkg-tag" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a">Renamed</span>' : ''}
             <button class="pkg-lock-btn pkg-lock-btn-pkg ${pkgLockCls}" data-relining-lock-pkg data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(pkgLockTitle)}">${pkgLockIcon}</button>
+            ${renameBtnHtml}
           </div>
           <div class="edit-pkg-meta">${escapeHtml(suburbs)} · ${assets.length} pipe${assets.length === 1 ? '' : 's'} · ${escapeHtml(formatCurrency(pkg.total_cost))} · ${Number(pkg.total_length_m || 0).toFixed(1)} m</div>
         </div>
@@ -8524,12 +8727,18 @@ function _getReliningRowAssetId(row, index = 0) {
 function _collectLockedPackageSnapshots() {
   const prev = lastPackagingGeneration?.packages;
   if (!Array.isArray(prev) || !prev.length) return [];
-  if (!reliningManualMoves?.locks?.packages) return [];
+  if (!reliningManualMoves?.locks) return [];
+  // Auto-promote: a package whose every pipe is pipe-locked counts as a
+  // package-lock for carve-out, even if no explicit package-lock flag is set.
+  // We also promote its package-lock so downstream code sees consistent state.
+  prev.forEach(pkg => {
+    if (pkg && pkg.anchor_id && !isReliningPackageLocked(pkg.anchor_id) && isReliningPackageFullyLocked(pkg)) {
+      _ensureLocks();
+      reliningManualMoves.locks.packages[String(pkg.anchor_id)] = true;
+    }
+  });
   return prev
-    .filter(pkg => pkg && (
-      (pkg.anchor_id && isReliningPackageLocked(pkg.anchor_id)) ||
-      (pkg.package_id && isReliningPackageLocked(pkg.package_id))
-    ))
+    .filter(pkg => pkg && isReliningPackageFullyLocked(pkg))
     .map(pkg => ({
       // shallow-copy the package shell, deep-copy assets so subsequent
       // re-costing does not touch the live lastPackagingGeneration.
@@ -8539,6 +8748,106 @@ function _collectLockedPackageSnapshots() {
       diameters_mm: [...(pkg.diameters_mm || [])],
       suburbs: [...(pkg.suburbs || [])]
     }));
+}
+
+// v2 import handoff: build locked-package snapshots from the array stamped by
+// loadReliningLocksFile (reliningManualMoves.lockedPackages). Resolves each
+// entry's asset_ids against the current reliningAssetsRows via the same alias
+// chain the engine uses, then constructs a costed package object via
+// buildReliningPackageObject. After consumption the handoff is cleared so a
+// later regen falls back to the lastPackagingGeneration-based snapshot path.
+function _buildLockedSnapshotsFromHandoff(options) {
+  const handoff = reliningManualMoves && Array.isArray(reliningManualMoves.lockedPackages)
+    ? reliningManualMoves.lockedPackages
+    : [];
+  if (!handoff.length) return [];
+  if (!Array.isArray(reliningAssetsRows) || !reliningAssetsRows.length) return [];
+  // Build assetId → row lookup using the engine's alias chain.
+  const idToRow = new Map();
+  reliningAssetsRows.forEach((row, idx) => {
+    const id = _getReliningRowAssetId(row, idx);
+    if (id && !idToRow.has(id)) idToRow.set(id, row);
+  });
+  const snapshots = [];
+  handoff.forEach(entry => {
+    if (!entry || !Array.isArray(entry.asset_ids) || !entry.asset_ids.length) return;
+    const rows = [];
+    entry.asset_ids.forEach(rawId => {
+      const id = String(rawId == null ? '' : rawId).trim();
+      if (!id) return;
+      const row = idToRow.get(id);
+      if (row) rows.push(row);
+    });
+    if (!rows.length) {
+      console.warn('[Locks v2] Locked package ' + entry.package_id + ' resolved 0 asset rows; skipping.');
+      return;
+    }
+    // Build costed items from raw rows. Locked packages can legitimately
+    // contain pipes whose condition wouldn't survive the current
+    // reliningMode filter (e.g. a C6 add-on saved in a C7-only session,
+    // or a PM-merged pipe from a different condition). The v1 normaliser
+    // would reject those — for locked packages we trust the file and
+    // include every named asset.
+    const suburbCol = resolveSuburbColumn(reliningAssetsRows);
+    let items = rows.map((row, idx) => {
+      const rateInfo = getReliningRateInfoForRow(row, options);
+      const lengthM = Number.isFinite(rateInfo.lengthM) ? rateInfo.lengthM : 0;
+      const diameterMm = Number.isFinite(rateInfo.diameter) ? rateInfo.diameter : (Number(getReliningDiameterValue(row)) || null);
+      let pipeCost = Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM) ? rateInfo.rate * lengthM : null;
+      if (Number.isFinite(pipeCost)) {
+        if (options.trafficControl !== false) pipeCost += 2000;
+        if (options.projectInitiation !== false) pipeCost *= 1.15;
+      }
+      const coord = resolveReliningCoordinate(row);
+      const xMid = cleanNumber(getValueByAliases(row, ['XMid', 'XMid.1']));
+      const yMid = cleanNumber(getValueByAliases(row, ['YMid', 'YMid.1']));
+      const assetId = _getReliningRowAssetId(row, idx);
+      const condition = getReliningConditionNumber(row);
+      const suburb = resolveReliningSuburb(row, suburbCol);
+      const usPit = normaliseReliningPit(getValueByAliases(row, ['SW_Upstream_Node', 'US_Pit', 'US Pit', 'Upstream_Node']));
+      const dsPit = normaliseReliningPit(getValueByAliases(row, ['SW_Downstream_Node', 'DS_Pit', 'DS Pit', 'Downstream_Node']));
+      return {
+        assetId,
+        asset_id: assetId,
+        suburb,
+        diameterMm,
+        diameter_mm: diameterMm,
+        lengthM,
+        length_m: lengthM,
+        ratePerM: Number.isFinite(rateInfo.rate) ? rateInfo.rate : null,
+        rate_per_m: Number.isFinite(rateInfo.rate) ? rateInfo.rate : null,
+        pipeCost: Number.isFinite(pipeCost) ? pipeCost : null,
+        pipe_cost: Number.isFinite(pipeCost) ? pipeCost : null,
+        rateDescriptor: rateInfo.descriptor || '',
+        rateMatchCount: Number.isFinite(rateInfo.matchCount) ? rateInfo.matchCount : 0,
+        costStatus: Number.isFinite(pipeCost) ? 'Costed' : 'Uncosted',
+        condition,
+        condition_score: condition,
+        criticalityScore: resolveReliningCriticalityScore(row),
+        lat: coord?.lat ?? null,
+        lon: coord?.lon ?? null,
+        x_mid: xMid,
+        y_mid: yMid,
+        usPit,
+        dsPit,
+        upstream: usPit,
+        downstream: dsPit,
+        is_c6_addon: condition === 6,
+        package_id: entry.package_id,
+        raw: row
+      };
+    });
+    const pkg = buildReliningPackageObject(entry.package_id, items, options, {
+      anchor_id: entry.anchor_id,
+      manual_origin: entry.manual_origin ? 'manual' : undefined,
+      original_package_id: entry.package_id
+    });
+    snapshots.push(pkg);
+  });
+  // Clear the transient handoff — it was a one-shot consumption.
+  reliningManualMoves.lockedPackages = [];
+  persistReliningManualMoves();
+  return snapshots;
 }
 
 function _buildLockedAssetIdSet(snapshots) {
@@ -8628,7 +8937,15 @@ async function generateReliningPackages() {
     const options = getReliningPackagingOptions();
     // --- Locked-package carve-out: capture locked snapshots and exclude
     // their assets from the candidate pool before any engine work. ---
-    const lockedSnapshots = _collectLockedPackageSnapshots();
+    // v2 import handoff takes precedence: when a v2 lock file was just
+    // imported, reliningManualMoves.lockedPackages is non-empty and is
+    // treated as the source of truth (it carries the PM's pipe-membership
+    // verbatim, which lastPackagingGeneration would otherwise overwrite
+    // on subsequent regens). The helper clears the handoff after use.
+    const handoffSnapshots = _buildLockedSnapshotsFromHandoff(options);
+    const lockedSnapshots = handoffSnapshots.length
+      ? handoffSnapshots
+      : _collectLockedPackageSnapshots();
     const lockedAssetIds = _buildLockedAssetIdSet(lockedSnapshots);
     const carvedRows = _filterRowsExcludingAssetIds(reliningAssetsRows, lockedAssetIds);
     const preview = buildReliningPackagingPreview(carvedRows, options);
@@ -8688,6 +9005,22 @@ async function generateReliningPackages() {
         console.warn('[Relining] ' + rateStaleCount + ' locked-package asset(s) used stale rates (current rates table missed them).');
       }
       packages = packages.concat(recosted);
+    }
+    // Apply persistent rename map: locked packages whose anchor_id has a
+    // stored renamedPackages entry adopt the custom package_id BEFORE the
+    // renumber pass so the reserved-id check sees the final id.
+    const renameMap = (reliningManualMoves && reliningManualMoves.renamedPackages) || {};
+    if (Object.keys(renameMap).length) {
+      packages = packages.map(pkg => {
+        if (!pkg || !pkg.anchor_id) return pkg;
+        const newId = renameMap[pkg.anchor_id];
+        if (!newId || newId === pkg.package_id) return pkg;
+        return {
+          ...pkg,
+          package_id: newId,
+          assets: (pkg.assets || []).map(a => ({ ...a, package_id: newId }))
+        };
+      });
     }
     _phase++;
     setLoadTxt('Prioritising and renumbering packages...', _phase, TOTAL_PHASES);
@@ -9164,13 +9497,14 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         locks: { pipes: (parsed.locks && parsed.locks.pipes) || {}, packages: (parsed.locks && parsed.locks.packages) || {} },
         moveOrigins: parsed.moveOrigins || {},
         c6Excluded: parsed.c6Excluded || {},
-        c6Included: parsed.c6Included || {}
+        c6Included: parsed.c6Included || {},
+        renamedPackages: parsed.renamedPackages || {}
       };
     } catch (e) { return emptyMoves(); }
   }
 
   function emptyMoves() {
-    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {} };
+    return { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   }
 
   function saveReportMoves() {
@@ -9296,10 +9630,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     // NOTE: this code lives inside a template literal — the regex must use \\d (which
     // emits \d in the runtime), not bare \d (which the template-literal parser strips
     // to plain "d", silently breaking the digit class and leaking pipes into RLN_001).
+    // Only match the canonical RLN_\\d+ form so a custom rename like ACME_001
+    // doesn't accidentally reserve 1 in the numeric ladder (custom names live
+    // in their own namespace and never collide with fresh RLN_NNN ids).
     var reserved = {};
     packages.forEach(function(pkg) {
       if (isReportPackageLocked(pkg.id)) {
-        var m = String(pkg.id || '').match(/(\\d+)$/);
+        var m = String(pkg.id || '').match(/^RLN_(\\d+)$/);
         if (m) reserved[Number(m[1])] = true;
       }
     });
@@ -9477,7 +9814,12 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         });
       }
     });
-    // 4. Re-prioritise + renumber
+    // 4. Re-prioritise + renumber. Locked packages keep their id verbatim
+    // — including any custom rename the user applied, since the rename
+    // mutates pkg.id directly via reportRenamePackage and is preserved
+    // across rebuilds by rebuildPackagesFromPipes (which keys packages by
+    // each pipe's current package_id, and we cascade the rename through
+    // pipes at rename time).
     prioritiseAndRenumberReportPackages();
     // 5. Re-render everything
     if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
@@ -9491,8 +9833,87 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   window.applyMovesAndRender = applyMovesAndRender;
 
+  // Lock file v2: emit a lockedPackages array carrying full per-package
+  // pipe-membership so a re-import can faithfully reconstruct the PM's
+  // package structure. Detects locked packages by EITHER an explicit
+  // locks.packages[pkgId] flag OR every pipe in the package being
+  // pipe-locked (auto-promotion). Custom renames stored in
+  // reportManualMoves.renamedPackages are echoed via the renamed flag.
+  function reportIsPipeLockedById(uid) {
+    return !!(reportManualMoves && reportManualMoves.locks && reportManualMoves.locks.pipes && reportManualMoves.locks.pipes[String(uid)]);
+  }
+  function reportIsPackageFullyLockedSave(pkgId, items) {
+    if (reportManualMoves && reportManualMoves.locks && reportManualMoves.locks.packages && reportManualMoves.locks.packages[pkgId]) return true;
+    if (!items || !items.length) return false;
+    return items.every(function(p){ return reportIsPipeLockedById(p.asset_id); });
+  }
   window.saveReportLockFile = function() {
-    var blob = new Blob([JSON.stringify(reportManualMoves, null, 2)], { type: 'application/json' });
+    var renamedMap = (reportManualMoves && reportManualMoves.renamedPackages) || {};
+    // Build the per-package map of pipes from the CURRENT pipes array
+    // (which reflects all manual moves applied this session).
+    var byPkg = {};
+    pipes.forEach(function(p) {
+      if (!byPkg[p.package_id]) byPkg[p.package_id] = [];
+      byPkg[p.package_id].push(p);
+    });
+    var lockedPackagesOut = [];
+    Object.keys(byPkg).forEach(function(pkgId) {
+      var items = byPkg[pkgId];
+      if (!reportIsPackageFullyLockedSave(pkgId, items)) return;
+      var pkgSnap = packages.find(function(p){ return p.id === pkgId; }) || {};
+      var anchorId = pkgSnap.anchor_id || pkgId;
+      var renamed = false;
+      Object.keys(renamedMap).forEach(function(a) {
+        if (renamedMap[a] === pkgId) renamed = true;
+      });
+      var totalLength = items.reduce(function(s,i){ return s + (Number(i.length_m)||0); }, 0);
+      var totalCost   = items.reduce(function(s,i){ return s + (Number(i.pipe_cost)||0); }, 0);
+      var suburbs = Array.from(new Set(items.map(function(i){ return i.suburb; }).filter(Boolean)));
+      lockedPackagesOut.push({
+        anchor_id: anchorId,
+        package_id: pkgId,
+        asset_ids: items.map(function(i){ return String(i.asset_id == null ? '' : i.asset_id); }).filter(Boolean),
+        manual_origin: !!pkgSnap.manual_origin,
+        renamed: renamed,
+        suburbs: suburbs,
+        total_length_m: totalLength,
+        total_cost: totalCost
+      });
+    });
+    // Also surface empty-but-locked packages (PM created a placeholder).
+    Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).forEach(function(pkgId) {
+      if (byPkg[pkgId]) return;
+      var pkgSnap = packages.find(function(p){ return p.id === pkgId; }) || {};
+      lockedPackagesOut.push({
+        anchor_id: pkgSnap.anchor_id || pkgId,
+        package_id: pkgId,
+        asset_ids: [],
+        manual_origin: !!pkgSnap.manual_origin,
+        renamed: false,
+        suburbs: [],
+        total_length_m: 0,
+        total_cost: 0
+      });
+    });
+    // Build the export envelope. Keep all v1 fields for backward compat
+    // (legacy importers still read locks.packages / assignments / etc.).
+    var exportObj = {
+      schema: 2,
+      meta: {
+        schema: 1,
+        generated_at: new Date().toISOString(),
+        options: data.options || {}
+      },
+      lockedPackages: lockedPackagesOut,
+      assignments: reportManualMoves.assignments || {},
+      anchorOrigins: reportManualMoves.anchorOrigins || {},
+      locks: reportManualMoves.locks || { pipes: {}, packages: {} },
+      moveOrigins: reportManualMoves.moveOrigins || {},
+      c6Excluded: reportManualMoves.c6Excluded || {},
+      c6Included: reportManualMoves.c6Included || {},
+      renamedPackages: renamedMap
+    };
+    var blob = new Blob([JSON.stringify(exportObj, null, 2)], { type: 'application/json' });
     var generated = (data.generated_at || '').replace(/[:T]/g,'-').replace(/\\..*$/, '') || 'unknown';
     var filename = 'relining_locks_' + generated + '.json';
     var a = document.createElement('a');
@@ -9515,6 +9936,74 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function mergeLocksData(parsed) {
     if (!parsed || typeof parsed !== 'object') throw new Error('Invalid lock file format.');
 
+    // ── Schema v2 path ──
+    // The standalone editor doesn't run the live engine, so we materialise
+    // each lockedPackages entry by force-assigning its asset_ids to the
+    // file's package_id (creating placeholder packages for ids that don't
+    // exist in this report). Pipe-locks cascade for every named asset.
+    if (parsed.schema === 2 && Array.isArray(parsed.lockedPackages)) {
+      var newAssignments = (parsed.assignments && typeof parsed.assignments === 'object') ? parsed.assignments : {};
+      var newPkgLocks = {};
+      var newPipeLocks = (parsed.locks && parsed.locks.pipes && typeof parsed.locks.pipes === 'object') ? parsed.locks.pipes : {};
+      var newRenamed = (parsed.renamedPackages && typeof parsed.renamedPackages === 'object') ? parsed.renamedPackages : {};
+      var existingPkgIds = {};
+      (packages || []).forEach(function(p){ existingPkgIds[p.id] = true; });
+      parsed.lockedPackages.forEach(function(entry) {
+        if (!entry || !entry.package_id) return;
+        var pid = String(entry.package_id);
+        var ids = Array.isArray(entry.asset_ids) ? entry.asset_ids : [];
+        newPkgLocks[pid] = true;
+        ids.forEach(function(rawId) {
+          var id = String(rawId == null ? '' : rawId).trim();
+          if (!id) return;
+          newPipeLocks[id] = true;
+          newAssignments[id] = pid;
+        });
+        // Materialise an empty placeholder when the file's package_id is
+        // unknown to this report (PM created a new package the engineer
+        // never saw). applyMovesAndRender's "locked-but-empty" pass also
+        // catches this, but doing it here keeps the picture consistent.
+        if (!existingPkgIds[pid]) {
+          packages.push({
+            id: pid,
+            original_package_id: pid,
+            suburbs: Array.isArray(entry.suburbs) ? entry.suburbs : [],
+            diameters_mm: [],
+            pipe_count: 0,
+            total_length_m: Number(entry.total_length_m) || 0,
+            total_cost: Number(entry.total_cost) || 0,
+            max_span_m: 0,
+            condition_6_count: 0,
+            condition_7_count: 0,
+            condition_8_count: 0,
+            c6_addon_count: 0,
+            asset_ids: ids,
+            centroid: null,
+            coordinate_sources: '',
+            distance_warning: '',
+            materialMix: {}, conditionMix: {}, diameterMix: {},
+            dedicated_map_url: '',
+            max_from_centroid_m: 0,
+            manual_origin: !!entry.manual_origin
+          });
+          existingPkgIds[pid] = true;
+        }
+      });
+      reportManualMoves = {
+        assignments: newAssignments,
+        anchorOrigins: (parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object') ? parsed.anchorOrigins : {},
+        locks: { pipes: newPipeLocks, packages: newPkgLocks },
+        moveOrigins: (parsed.moveOrigins && typeof parsed.moveOrigins === 'object') ? parsed.moveOrigins : {},
+        c6Excluded: (parsed.c6Excluded && typeof parsed.c6Excluded === 'object') ? parsed.c6Excluded : {},
+        c6Included: (parsed.c6Included && typeof parsed.c6Included === 'object') ? parsed.c6Included : {},
+        renamedPackages: newRenamed
+      };
+      saveReportMoves();
+      if (typeof applyMovesAndRender === 'function') applyMovesAndRender();
+      return;
+    }
+
+    // ── Legacy v1 path ──
     // Build anchor_id → package_id map from the snapshot embedded at report build time.
     var anchorToPkgId = {};
     (data.packages || []).forEach(function(p) {
@@ -9566,7 +10055,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       },
       moveOrigins: (parsed.moveOrigins && typeof parsed.moveOrigins === 'object') ? parsed.moveOrigins : {},
       c6Excluded:  (parsed.c6Excluded && typeof parsed.c6Excluded === 'object') ? parsed.c6Excluded : {},
-      c6Included:  translatedC6Included
+      c6Included:  translatedC6Included,
+      renamedPackages: (parsed.renamedPackages && typeof parsed.renamedPackages === 'object') ? parsed.renamedPackages : {}
     };
     saveReportMoves();
     if (typeof applyMovesAndRender === 'function') applyMovesAndRender();
@@ -9795,6 +10285,71 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   window.reportTogglePackageLock = reportTogglePackageLock;
 
+  // Lock-v2 rename: apply a custom package_id to a locked report package.
+  // Mutates the live packages + pipes + lock state in-place, and stores
+  // the rename in renamedPackages (keyed by the package's original
+  // anchor_id when available — falling back to the current pkg id —
+  // so the v2 lock-file save can echo the renamed flag).
+  function reportRenamePackage(currentPkgId, newPackageId) {
+    if (!currentPkgId) return;
+    var trimmed = String(newPackageId || '').trim();
+    if (!trimmed) { alert('Package ID cannot be empty.'); return; }
+    if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
+    if (trimmed === currentPkgId) return;
+    var pkg = packages.find(function(p){ return p.id === currentPkgId; });
+    if (!pkg) { alert('Package not found.'); return; }
+    if (packages.some(function(p){ return p.id !== currentPkgId && p.id === trimmed; })) {
+      alert('Package ID "' + trimmed + '" is already in use by another package.');
+      return;
+    }
+    var renamedMap = (reportManualMoves && reportManualMoves.renamedPackages) || {};
+    var collide = Object.keys(renamedMap).find(function(k){ return renamedMap[k] === trimmed && k !== currentPkgId; });
+    if (collide) {
+      alert('Package ID "' + trimmed + '" is already reserved by another locked package.');
+      return;
+    }
+    ensureReportLocks();
+    if (!reportManualMoves.renamedPackages) reportManualMoves.renamedPackages = {};
+    // Cascade rename through pipes
+    pipes.forEach(function(p){ if (p.package_id === currentPkgId) p.package_id = trimmed; });
+    // Carry lock metadata to the new key
+    var locks = reportManualMoves.locks;
+    if (locks && locks.packages && locks.packages[currentPkgId]) {
+      locks.packages[trimmed] = true;
+      delete locks.packages[currentPkgId];
+    }
+    // Same for any persisted assignments / c6Included targeting the old id
+    Object.keys(reportManualMoves.assignments || {}).forEach(function(uid) {
+      if (reportManualMoves.assignments[uid] === currentPkgId) reportManualMoves.assignments[uid] = trimmed;
+    });
+    Object.keys(reportManualMoves.c6Included || {}).forEach(function(uid) {
+      if (reportManualMoves.c6Included[uid] === currentPkgId) reportManualMoves.c6Included[uid] = trimmed;
+    });
+    pkg.original_package_id = pkg.original_package_id || currentPkgId;
+    pkg.id = trimmed;
+    pkgIndex = {};
+    packages.forEach(function(p, i){ pkgIndex[p.id] = i; });
+    // Record the rename for export. Key by anchor_id from the original
+    // build-time snapshot so it stays meaningful across regenerations.
+    var origSnap = (data.packages || []).find(function(p){ return p && (p.id === currentPkgId || p.id === trimmed || p.original_package_id === currentPkgId); });
+    var renameKey = (origSnap && origSnap.anchor_id) ? origSnap.anchor_id : currentPkgId;
+    // Tidy up: if user re-renames the same package, replace the old entry.
+    if (renameKey !== currentPkgId) {
+      Object.keys(reportManualMoves.renamedPackages).forEach(function(k){
+        if (reportManualMoves.renamedPackages[k] === currentPkgId) delete reportManualMoves.renamedPackages[k];
+      });
+    }
+    reportManualMoves.renamedPackages[renameKey] = trimmed;
+    saveReportMoves();
+    // Re-render (pure metadata + pipe.package_id rewrite — no engine work).
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
+    if (typeof renderPerPackageReports === 'function') renderPerPackageReports();
+  }
+  window.reportRenamePackage = reportRenamePackage;
+
   function reportTogglePipeLock(uid, pkgId) {
     ensureReportLocks();
     var u = String(uid);
@@ -9915,6 +10470,17 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (lockPipeBtn) { event.preventDefault(); reportTogglePipeLock(lockPipeBtn.getAttribute('data-asset-uid') || '', lockPipeBtn.getAttribute('data-pkg-id') || ''); return; }
       var lockPkgBtn = t.closest('button[data-report-lock-pkg]');
       if (lockPkgBtn) { event.preventDefault(); reportTogglePackageLock(lockPkgBtn.getAttribute('data-pkg-id') || ''); return; }
+      var renameBtn = t.closest('button[data-report-rename-pkg]');
+      if (renameBtn) {
+        event.preventDefault();
+        var oldId = renameBtn.getAttribute('data-pkg-id') || '';
+        if (!oldId) return;
+        var newName = prompt('New package ID for ' + oldId + ':\\n(Use letters, numbers, underscores. Max 50 chars.)', oldId);
+        if (newName && newName.trim() && newName.trim() !== oldId) {
+          reportRenamePackage(oldId, newName.trim());
+        }
+        return;
+      }
       var sortCell = t.closest('[data-report-edit-sort]');
       if (sortCell) { event.preventDefault(); reportToggleEditPipeSort(sortCell.getAttribute('data-pkg-id') || '', sortCell.getAttribute('data-report-edit-sort') || ''); return; }
     });
@@ -10003,6 +10569,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         : 'Package unlocked — click to lock all pipes';
       var totalCost = assets.reduce(function(s,a){ return s + (Number(a.pipe_cost)||0); }, 0);
       var totalLength = assets.reduce(function(s,a){ return s + (Number(a.length_m)||0); }, 0);
+      var renamedMap = (reportManualMoves && reportManualMoves.renamedPackages) || {};
+      var isRenamed = Object.keys(renamedMap).some(function(k){ return renamedMap[k] === pkg.id; });
+      var renameDisabled = pkgLockState !== 'all';
+      var renameTitle = renameDisabled
+        ? 'Lock the package first to rename it'
+        : (isRenamed ? 'Custom name — click to rename again' : 'Click to rename this locked package');
+      var renameBtnHtml = '<button class="export-btn" type="button" data-report-rename-pkg data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(renameTitle) + '" style="padding:2px 6px;font-size:11px;line-height:1' + (renameDisabled ? ';opacity:0.4;cursor:not-allowed' : '') + '"' + (renameDisabled ? ' disabled' : '') + '>✏️</button>';
 
       var headerHtml = '<div class="edit-pkg-header">'
         + '<div>'
@@ -10010,7 +10583,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         +     esc(pkg.id || '')
         +     (isManual ? '<span class="edit-pkg-tag manual">Manual</span>' : '')
         +     (assets.length === 0 ? '<span class="edit-pkg-tag empty">Empty</span>' : '')
+        +     (isRenamed ? '<span class="edit-pkg-tag" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a">Renamed</span>' : '')
         +     '<button class="pkg-lock-btn pkg-lock-btn-pkg ' + pkgLockCls + '" type="button" data-report-lock-pkg data-pkg-id="' + esc(pkg.id || '') + '" title="' + esc(pkgLockTitle) + '">' + pkgLockIcon + '</button>'
+        +     renameBtnHtml
         +   '</div>'
         +   '<div class="edit-pkg-meta">' + esc(suburbs) + ' · ' + assets.length + ' pipe' + (assets.length === 1 ? '' : 's') + ' · ' + esc(fmtCurrency(totalCost) || '—') + ' · ' + Number(totalLength).toFixed(1) + ' m</div>'
         + '</div>'
