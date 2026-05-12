@@ -9,7 +9,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
 <meta name="build-sha" content="__BUILD_SHA__">
-<meta name="build-time" content="__BUILD_TIME__">
+<meta name="build-time" content="2026-05-12T10:54:45.332Z">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -1045,6 +1045,10 @@ window.addEventListener('keydown', (event) => {
           <div id="pkgCostAdjustmentsRow" style="margin-top:10px">
             <div style="font-size:11px;font-weight:700;color:var(--navy);margin-bottom:6px">Cost Modifiers</div>
             <div style="display:flex;gap:24px;font-size:12px;align-items:center;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="pkgTrafficControl" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
+                Apply provisional traffic-control allowance (+$2,000/pipe)
+              </label>
               <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
                 <input type="checkbox" id="pkgInitiation" checked onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)"/>
                 Apply project initiation multiplier (×1.15)
@@ -4802,7 +4806,7 @@ function getReliningPackagingOptions() {
     pipesPerPackage: Math.max(Number.isFinite(pipesPerPackage) ? Math.round(pipesPerPackage) : 25, 1),
     costMode: 'median',
     contractor: null,
-    trafficControl: false,
+    trafficControl: document.getElementById('pkgTrafficControl')?.checked !== false,
     projectInitiation: document.getElementById('pkgInitiation')?.checked !== false,
     groupBySuburb: !proximityM && (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes',
     groupingMethod,
@@ -8835,6 +8839,7 @@ function exportReliningPackagesCsv() {
     'length_m',
     'rate_per_m',
     'pipe_cost',
+    'topup',
     'package_total_length_m',
     'package_total_cost',
     'package_max_span_m',
@@ -8861,6 +8866,7 @@ function exportReliningPackagesCsv() {
         Number(item.lengthM || 0).toFixed(1),
         Number.isFinite(item.ratePerM) ? Number(item.ratePerM).toFixed(2) : '',
         Number.isFinite(item.pipeCost) ? Number(item.pipeCost).toFixed(2) : '',
+        item.topup === true ? 'true' : 'false',
         Number(pkg.total_length_m || 0).toFixed(1),
         Number(pkg.total_cost || 0).toFixed(2),
         Number(pkg.max_span_m || 0).toFixed(0),

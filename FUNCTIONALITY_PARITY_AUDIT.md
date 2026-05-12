@@ -54,8 +54,8 @@
 | Reconstruction costing | **MISSING** | No SP7 lookup, no `_get_pipe_rate`, no `_get_tiered_rate`, no `calc_reconstruction_cost`. Only RLN flow exists. **Reference: `D:\Packaging\scripts\cost_engine.py:425`** (`calc_reconstruction_cost`). Impact: web tool cannot quote reconstruction works. Recommended fix: port `calc_reconstruction_cost` and the SP7 helpers from cost_engine.py. **Source: D:\Packaging only — never existed in any monolithic index.html.** |
 | Amplification costing | **MISSING** | Streamlit reuses `get_reconstruction_rate` for amplification (`ui.py:1201`). Web tool has neither. **Source: D:\Packaging.** |
 | SP6 / rate lookup behaviour | PRESENT | `getReliningRateInfoForRow` parses descriptors, length bands, supports `costMode = median \| lowest \| contractor`. Functional parity with `lookup_sp6_rate` (`cost_engine.py:205`). |
-| Provisional traffic control allowance | **BROKEN** | Code path exists at `nbc/index.html:4520` (`pipeCost += 2000`) but the option is hard-coded to `false` at line 4465 and there is **no UI control** to turn it on. Streamlit default is `True` (`ui.py:586`). Impact: the +$2,000/pipe allowance is never applied; relining cost totals are systematically under-quoted vs. the Streamlit tool. Recommended fix: add a `#pkgTrafficControl` checkbox (default checked) wired into `getReliningPackagingOptions`. **Source: `D:\Packaging\scripts\ui.py:585`.** |
-| Project initiation multiplier (×1.15) | **BROKEN** | Same pattern as above — code at line 4521 (`pipeCost *= 1.15`), option hard-coded `false` at line 4466, no UI. Streamlit default is `True` (`ui.py:591`). Impact: cost totals are systematically under-quoted by ~15%. Recommended fix: add a `#pkgInitiation` checkbox (default checked). **Source: `D:\Packaging\scripts\ui.py:591`.** |
+| Provisional traffic control allowance | PRESENT | `#pkgTrafficControl` checkbox (default checked) is wired into `getReliningPackagingOptions` and read as `trafficControl: document.getElementById('pkgTrafficControl')?.checked !== false`. The +$2,000/pipe allowance applies in `normaliseReliningCandidateRow` and in `_recostLockedPackages`. **Source for fix: `D:\Packaging\scripts\ui.py:585`.** |
+| Project initiation multiplier (×1.15) | PRESENT | `#pkgInitiation` checkbox (default checked) is wired into `getReliningPackagingOptions` and read as `projectInitiation: document.getElementById('pkgInitiation')?.checked !== false`. The ×1.15 multiplier applies in `normaliseReliningCandidateRow` and in `_recostLockedPackages`. **Source for fix: `D:\Packaging\scripts\ui.py:591`.** |
 | Cost mode selector (median / lowest / contractor) | **MISSING (UI)** | Algorithm supports all three modes (lines 4367–4385), but `getReliningPackagingOptions` hard-codes `costMode: 'median'` and `contractor: null` (lines 4463–4464). No `#pkgCostMode` or contractor dropdown. Impact: cannot generate vendor-specific or lowest-price quotes. Recommended fix: expose the three-way selector + contractor dropdown (mirroring `ui.py:486` and `get_contractors`). **Source: `D:\Packaging\scripts\ui.py:182, 486`.** |
 | Reconstruction breakdown columns | **MISSING** | Streamlit emits `_trench_vol`, `_waste_t`, `_exc_cost`, `_bkf_cost`, `_dem_cost`, `_waste_cost`, `_pipe_cost_only` per pipe and renames them to readable headers in REC zip output (`ui.py:262–273`). Web tool has no equivalent. **Source: `D:\Packaging\scripts\ui.py:631–636, 262`.** |
 
@@ -109,7 +109,7 @@ This block is the c81e55b proximity fix and is correctly implemented. **Do not m
 | Same-condition-first then lower-condition pool | PRESENT | Lines 6147–6155 — when mode is `Same condition first, lower condition if needed`, builds a second preview at the *opposite* condition and tops up again |
 | Same suburb / compatible diameter constraints | PRESENT | line 5130 (`pkgGroup` check) and 5131 (`pkgSizeGroups.has(getSizeGroup(...))`) |
 | Cheapest fitting pipes first | PRESENT | line 5132 sorts ascending by `pipeCost` |
-| `topup` flag preserved in outputs | PARTIAL | Flag is set on the in-memory candidate (line 5144 `topup: true`), but the ZIP CSV writer at line 6318 does NOT emit a `topup` column to the per-package CSV. Streamlit ZIP also drops `_`-prefix columns but DOES preserve `topup` (`ui.py:1080`). Impact: end-user can't see which pipes were top-ups in the downloaded CSVs. Recommended fix: add a `topup` column to `HEADERS` (line 6274) and emit it per row. **Source: `D:\Packaging\scripts\cost_engine.py:1070`.** |
+| `topup` flag preserved in outputs | PRESENT | Flag is set on the in-memory candidate in `topupReliningPackages` (`{ ...candidate, topup: true }`) and surfaced as a `topup` column in `exportReliningPackagesCsv` — emitting `'true'` for top-up rows and `'false'` otherwise. **Source for fix: `D:\Packaging\scripts\cost_engine.py:1070`.** |
 
 ---
 
@@ -232,9 +232,9 @@ The following items in current `nbc/index.html` are newer than every reference a
 
 If/when the user authorises edits, the highest-impact fixes (in order) are:
 
-1. **Wire traffic-control and project-initiation toggles into the UI** (§2). Currently the *cost code path is dead* — every relining package is silently under-quoted. This is a 4-line UI change plus reading two checkboxes in `getReliningPackagingOptions` (line 4451).
+1. ~~**Wire traffic-control and project-initiation toggles into the UI** (§2).~~ ✅ Done — both checkboxes default checked and feed `getReliningPackagingOptions`.
 2. **Expose cost-mode and contractor selectors** (§2). Same shape — algorithm already supports it; only the input + option wiring is missing.
 3. **Drop the date suffix from the ZIP filename** (§8) so the file drops straight into `populate_forward_works.py`.
-4. **Add a `topup` column to the per-package CSVs** (§5).
+4. ~~**Add a `topup` column to the per-package CSVs** (§5).~~ ✅ Done — `exportReliningPackagesCsv` now emits `topup` per row.
 5. **Reconstruction & amplification streams** — large port from `D:\Packaging\scripts\cost_engine.py` and `ui.py`, only worth doing if there's a real need to retire the Streamlit tool.
 6. **Edit Packages panel** — large port from `ui.py:943`, only if interactive redistribution is wanted on the web.
