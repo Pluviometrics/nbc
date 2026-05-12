@@ -6002,13 +6002,32 @@ function undoLastReliningMove() {
 }
 window.undoLastReliningMove = undoLastReliningMove;
 
-function translateLocksForExport(moves, packages) {
+function translateLocksForExport(moves, packages, options) {
   if (!moves) return {};
   var anchorToPkgId = {};
   (packages || []).forEach(function(p) {
     if (p && p.anchor_id && p.package_id) anchorToPkgId[p.anchor_id] = p.package_id;
   });
   var translated = JSON.parse(JSON.stringify(moves));
+  // Stamp the packaging options that were active when this state was built.
+  // Import side rejects mismatch so users can't silently apply locks across
+  // different method/grouping settings (which produces wrong packages).
+  if (options) {
+    translated.meta = {
+      schema: 1,
+      generated_at: new Date().toISOString(),
+      options: {
+        method: options.method || 'value',
+        reliningMode: options.reliningMode || 'Condition 7 and 8',
+        maxPackageValue: Number(options.maxPackageValue) || 500000,
+        pipesPerPackage: Number(options.pipesPerPackage) || 25,
+        groupBySuburb: options.groupBySuburb === true,
+        groupingMethod: options.groupingMethod || 'suburb',
+        proximityM: Number(options.proximityM) || null,
+        topupMode: options.topupMode || 'No top up'
+      }
+    };
+  }
   if (translated.locks && translated.locks.packages) {
     var newPkgLocks = {};
     Object.keys(translated.locks.packages).forEach(function(k) {
@@ -6705,6 +6724,39 @@ async function loadReliningLocksFile(file) {
     }
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== 'object') throw new Error('Invalid locks file format.');
+    // Refuse imports where the lock file was generated under different
+    // packaging options (method / mode / grouping etc). Translating
+    // package_ids across mismatched methods produces silently wrong
+    // packages — locks land on the wrong pipes. User must align settings
+    // and re-generate before importing.
+    if (parsed.meta && parsed.meta.options) {
+      const fileOpts = parsed.meta.options;
+      const currentOpts = getReliningPackagingOptions();
+      const labels = {
+        method: 'Packaging Method',
+        reliningMode: 'Pipe Condition Selection',
+        groupingMethod: 'Grouping Method',
+        groupBySuburb: 'Group by Suburb',
+        proximityM: 'Proximity (m)',
+        maxPackageValue: 'Max Package Value',
+        pipesPerPackage: 'Pipes Per Package',
+        topupMode: 'Topup Mode'
+      };
+      const diffs = [];
+      Object.keys(labels).forEach(k => {
+        const a = String(fileOpts[k] ?? '');
+        const b = String(currentOpts[k] ?? '');
+        if (a !== b) diffs.push(`  • ${labels[k]}: file=${a || '(none)'} | current=${b || '(none)'}`);
+      });
+      if (diffs.length) {
+        alert(
+          'Lock file was generated with different packaging settings.\n\n' +
+          diffs.join('\n') +
+          '\n\nAlign these settings on the Pipe Relining tab, regenerate, then re-import.'
+        );
+        return;
+      }
+    }
     reliningManualMoves = {
       assignments:   parsed.assignments   && typeof parsed.assignments   === 'object' ? parsed.assignments   : {},
       anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {},
@@ -14201,7 +14253,7 @@ async function downloadReliningPackagesZip() {
 
     // locks.json — only included if the user opted in (not for contractor ZIPs)
     if (document.getElementById('pkgIncludeLocks')?.checked) {
-      zip.file('locks.json', JSON.stringify(translateLocksForExport(reliningManualMoves, packages), null, 2));
+      zip.file('locks.json', JSON.stringify(translateLocksForExport(reliningManualMoves, packages, lastPackagingGeneration?.options), null, 2));
     }
 
     // file_list.txt
