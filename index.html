@@ -6121,7 +6121,11 @@ function translateLocksForExport(moves, packages, options) {
   // explicitly package-locked OR every-pipe-locked (auto-promote).
   // Carries asset_ids verbatim so import side can carve out the exact
   // pipes regardless of how the new session reorders / regenerates.
+  // Empty packages (zero asset_ids) are skipped — they'd round-trip as
+  // phantom shells that the engine has no way to recreate.
   var lockedPackagesOut = [];
+  var keptLockedPkgIds = new Set();
+  var keptLockedAnchors = new Set();
   var renamedMap = (moves && moves.renamedPackages) || {};
   (packages || []).forEach(function(pkg) {
     if (!pkg) return;
@@ -6132,7 +6136,10 @@ function translateLocksForExport(moves, packages, options) {
       : assets.map(function(a) { return a && a.assetId; }))
       .map(function(v) { return String(v == null ? '' : v); })
       .filter(Boolean);
+    if (!assetIds.length) return;
     var renamed = !!(pkg.anchor_id && renamedMap[pkg.anchor_id]);
+    if (pkg.package_id) keptLockedPkgIds.add(pkg.package_id);
+    if (pkg.anchor_id) keptLockedAnchors.add(pkg.anchor_id);
     lockedPackagesOut.push({
       anchor_id: pkg.anchor_id || '',
       package_id: pkg.package_id || '',
@@ -6147,10 +6154,14 @@ function translateLocksForExport(moves, packages, options) {
   translated.lockedPackages = lockedPackagesOut;
   // Legacy v1 fields below: translate anchor_id → package_id for portability
   // across sessions (kept so v1 importers / older code paths still work).
+  // Drop entries that don't correspond to a kept (non-empty) locked package
+  // so v1 importers don't resurrect empty shells we filtered above.
   if (translated.locks && translated.locks.packages) {
     var newPkgLocks = {};
     Object.keys(translated.locks.packages).forEach(function(k) {
-      newPkgLocks[anchorToPkgId[k] || k] = translated.locks.packages[k];
+      var pkgIdKey = anchorToPkgId[k] || k;
+      if (!keptLockedPkgIds.has(pkgIdKey) && !keptLockedAnchors.has(k)) return;
+      newPkgLocks[pkgIdKey] = translated.locks.packages[k];
     });
     translated.locks.packages = newPkgLocks;
   }
@@ -10174,8 +10185,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       byPkg[p.package_id].push(p);
     });
     var lockedPackagesOut = [];
+    var keptLockedPkgIds = {};
     Object.keys(byPkg).forEach(function(pkgId) {
       var items = byPkg[pkgId];
+      if (!items.length) return;
       if (!reportIsPackageFullyLockedSave(pkgId, items)) return;
       var pkgSnap = packages.find(function(p){ return p.id === pkgId; }) || {};
       var anchorId = pkgSnap.anchor_id || pkgId;
@@ -10186,10 +10199,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var totalLength = items.reduce(function(s,i){ return s + (Number(i.length_m)||0); }, 0);
       var totalCost   = items.reduce(function(s,i){ return s + (Number(i.pipe_cost)||0); }, 0);
       var suburbs = Array.from(new Set(items.map(function(i){ return i.suburb; }).filter(Boolean)));
+      var assetIdsOut = items.map(function(i){ return String(i.asset_id == null ? '' : i.asset_id); }).filter(Boolean);
+      if (!assetIdsOut.length) return;
+      keptLockedPkgIds[pkgId] = true;
       lockedPackagesOut.push({
         anchor_id: anchorId,
         package_id: pkgId,
-        asset_ids: items.map(function(i){ return String(i.asset_id == null ? '' : i.asset_id); }).filter(Boolean),
+        asset_ids: assetIdsOut,
         manual_origin: !!pkgSnap.manual_origin,
         renamed: renamed,
         suburbs: suburbs,
@@ -10197,20 +10213,13 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         total_cost: totalCost
       });
     });
-    // Also surface empty-but-locked packages (PM created a placeholder).
-    Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).forEach(function(pkgId) {
-      if (byPkg[pkgId]) return;
-      var pkgSnap = packages.find(function(p){ return p.id === pkgId; }) || {};
-      lockedPackagesOut.push({
-        anchor_id: pkgSnap.anchor_id || pkgId,
-        package_id: pkgId,
-        asset_ids: [],
-        manual_origin: !!pkgSnap.manual_origin,
-        renamed: false,
-        suburbs: [],
-        total_length_m: 0,
-        total_cost: 0
-      });
+    // Strip empty-but-locked entries from the v1-compat locks.packages dict
+    // so legacy importers don't resurrect phantom RLN_NNN shells.
+    var prunedV1Locks = { pipes: {}, packages: {} };
+    var rawLocks = (reportManualMoves && reportManualMoves.locks) || {};
+    if (rawLocks.pipes) prunedV1Locks.pipes = rawLocks.pipes;
+    Object.keys(rawLocks.packages || {}).forEach(function(pkgId) {
+      if (keptLockedPkgIds[pkgId]) prunedV1Locks.packages[pkgId] = rawLocks.packages[pkgId];
     });
     // Build the export envelope. Keep all v1 fields for backward compat
     // (legacy importers still read locks.packages / assignments / etc.).
@@ -10224,7 +10233,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       lockedPackages: lockedPackagesOut,
       assignments: reportManualMoves.assignments || {},
       anchorOrigins: reportManualMoves.anchorOrigins || {},
-      locks: reportManualMoves.locks || { pipes: {}, packages: {} },
+      locks: prunedV1Locks,
       moveOrigins: reportManualMoves.moveOrigins || {},
       c6Excluded: reportManualMoves.c6Excluded || {},
       c6Included: reportManualMoves.c6Included || {},
