@@ -5456,8 +5456,76 @@ function splitIntoValuePackagesTwoPass(items, options) {
   return packaged;
 }
 
+// Tolerance band (±10%) used when sanity-checking generated package sizes
+// against their target (maxPackageValue for value/location, pipesPerPackage
+// for count). A package whose actual is outside [target*(1-T), target*(1+T)]
+// is flagged as undersized or oversized in the post-generation modal.
+const RELINING_VALUE_TOLERANCE = 0.10;
+
 function splitReliningItemsByValue(items, options) {
   return splitIntoValuePackagesTwoPass(items, options);
+}
+
+// Validate every FRESH (non-locked) package against its sizing target.
+// Locked packages are skipped — they're sealed by definition and the PM
+// has already accepted them. Returns { issues, summary } so the caller
+// can display a blocking modal of offenders without coupling validation
+// to UI rendering.
+function validateReliningPackageTargets(packages, options) {
+  const issues = [];
+  const list = Array.isArray(packages) ? packages : [];
+  const opts = options || {};
+  const method = opts.method || 'value';
+  const tol = RELINING_VALUE_TOLERANCE;
+  const isCount = method === 'count';
+  const target = isCount
+    ? Math.max(Number(opts.pipesPerPackage) || 0, 0)
+    : Math.max(Number(opts.maxPackageValue) || 0, 0);
+  let totalChecked = 0;
+  let undersized = 0;
+  let oversized = 0;
+  if (target > 0) {
+    list.forEach(pkg => {
+      if (!pkg) return;
+      // Skip locked packages — they're carved out of the engine and
+      // re-merged untouched, so flagging them would surface noise the
+      // PM has explicitly already approved.
+      const locked = (typeof isReliningPackageFullyLocked === 'function' && isReliningPackageFullyLocked(pkg))
+        || (typeof isReliningPackageLocked === 'function' && isReliningPackageLocked(pkg.anchor_id));
+      if (locked) return;
+      const actual = isCount
+        ? ((pkg.assets && pkg.assets.length) || Number(pkg.pipe_count) || 0)
+        : (Number(pkg.total_cost) || 0);
+      totalChecked += 1;
+      const lower = target * (1 - tol);
+      const upper = target * (1 + tol);
+      let status = null;
+      if (actual < lower) status = 'undersized';
+      else if (actual > upper) status = 'oversized';
+      if (!status) return;
+      if (status === 'undersized') undersized += 1;
+      else oversized += 1;
+      issues.push({
+        package_id: pkg.package_id || '',
+        anchor_id: pkg.anchor_id || '',
+        status,
+        actual,
+        target,
+        percent: target > 0 ? actual / target : 0
+      });
+    });
+  }
+  return {
+    issues,
+    summary: {
+      totalChecked,
+      totalIssues: issues.length,
+      undersized,
+      oversized,
+      method,
+      target
+    }
+  };
 }
 
 function splitReliningItemsByLocation(items, options) {
@@ -9047,6 +9115,12 @@ async function generateReliningPackages() {
     logReliningPackageDebug(packages, options);
     const totalLength = packages.reduce((sum, pkg) => sum + (Number(pkg.total_length_m) || 0), 0);
     const totalCost = packages.reduce((sum, pkg) => sum + (Number(pkg.total_cost) || 0), 0);
+    // Run the post-generation sanity check before committing the result
+    // to lastPackagingGeneration so the modal can read the same snapshot
+    // the renderer sees.
+    const sanity = (typeof validateReliningPackageTargets === 'function')
+      ? validateReliningPackageTargets(packages, options)
+      : { issues: [], summary: { totalChecked: 0, totalIssues: 0, undersized: 0, oversized: 0 } };
     const data = {
       options,
       preview,
@@ -9057,7 +9131,8 @@ async function generateReliningPackages() {
       total_cost: Number(totalCost.toFixed(2)),
       rate_stale_count: rateStaleCount,
       packages,
-      uncosted_assets: preview.uncosted
+      uncosted_assets: preview.uncosted,
+      _sanityIssues: sanity
     };
     lastPackagingGeneration = data;
     setPackagingStatus(true, `${data.package_count.toLocaleString()} packages generated`);
@@ -9073,6 +9148,13 @@ async function generateReliningPackages() {
     renderGeneratedPackages(data);
     renderReliningPackagesMap();
     renderEditPackagesPanel();
+    // Show the blocking sanity-check modal AFTER the table/map have
+    // rendered so the user sees the offenders in context. The helper is
+    // debounced internally so back-to-back regens (import → render →
+    // regen) don't double-fire.
+    if (sanity.issues.length && typeof showReliningPackageSanityModal === 'function') {
+      showReliningPackageSanityModal(sanity, options);
+    }
   } catch (e) {
     setPackagingStatus(false, 'Package generation failed');
     const area = document.getElementById('pkgPackagesArea');
@@ -9085,6 +9167,128 @@ async function generateReliningPackages() {
     if (previewBtn) previewBtn.disabled = false;
     if (generateBtn) generateBtn.disabled = false;
   }
+}
+
+// ── Sanity-check modal ────────────────────────────────────────────────
+// Blocking modal shown when validateReliningPackageTargets returns issues.
+// Two actions: Proceed (acknowledge as-is) or Fix (jump to Edit Packages
+// and highlight the first offender). Click-outside is disabled — the user
+// explicitly requested forced acknowledgement.
+let _reliningSanityModalOpen = false;
+function showReliningPackageSanityModal(sanity, options) {
+  if (_reliningSanityModalOpen) return; // debounce against back-to-back regens
+  if (!sanity || !Array.isArray(sanity.issues) || !sanity.issues.length) return;
+  _reliningSanityModalOpen = true;
+  // Tear down any stale instance defensively (e.g. left over from an
+  // earlier failed render).
+  const existing = document.getElementById('reliningSanityModal');
+  if (existing) existing.remove();
+
+  const opts = options || {};
+  const method = (opts.method || sanity.summary?.method || 'value');
+  const isCount = method === 'count';
+  const targetLabel = isCount ? 'pipes' : 'AUD';
+  const fmtActual = (val) => isCount
+    ? `${Number(val || 0).toLocaleString()} pipes`
+    : `$${Math.round(Number(val || 0)).toLocaleString()}`;
+  const fmtTarget = isCount
+    ? `${Number(sanity.summary.target || 0).toLocaleString()} pipes`
+    : `$${Math.round(Number(sanity.summary.target || 0)).toLocaleString()}`;
+
+  const rows = sanity.issues.map(iss => {
+    const pct = Math.round((Number(iss.percent) || 0) * 100);
+    const statusColor = iss.status === 'undersized' ? '#7B2D26' : '#7A5A00';
+    const statusBg = iss.status === 'undersized' ? '#FAD2CF' : '#FFE9A8';
+    return `<tr>
+      <td style="padding:6px 10px;font-weight:700;color:#1A2B3C">${escapeHtml(iss.package_id || '(unknown)')}</td>
+      <td style="padding:6px 10px"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;background:${statusBg};color:${statusColor}">${escapeHtml(iss.status)}</span></td>
+      <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${escapeHtml(fmtActual(iss.actual))}</td>
+      <td style="padding:6px 10px;text-align:right;color:#5b6b7a;font-variant-numeric:tabular-nums">${escapeHtml(fmtTarget)}</td>
+      <td style="padding:6px 10px;text-align:right;font-weight:700;color:${pct < 90 || pct > 110 ? '#b91c1c' : '#1A2B3C'};font-variant-numeric:tabular-nums">${pct}%</td>
+    </tr>`;
+  }).join('');
+
+  const summary = sanity.summary || {};
+  const undersized = summary.undersized || 0;
+  const oversized = summary.oversized || 0;
+  const checked = summary.totalChecked || 0;
+  const total = summary.totalIssues || sanity.issues.length;
+  const methodLabel = isCount
+    ? `count method — target ${fmtTarget} (±${Math.round(RELINING_VALUE_TOLERANCE * 100)}%)`
+    : `${method} method — target ${fmtTarget} (±${Math.round(RELINING_VALUE_TOLERANCE * 100)}%)`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'reliningSanityModal';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.62);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;font-family:Segoe UI,system-ui,sans-serif';
+  overlay.innerHTML = `
+    <div style="background:#fff;max-width:760px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.35)">
+      <div style="padding:16px 22px;border-bottom:1px solid #e5e7eb;background:#FEF3C7">
+        <div style="font-size:16px;font-weight:800;color:#1A2B3C">Package value sanity check — ${total} issue${total === 1 ? '' : 's'}</div>
+        <div style="font-size:12px;color:#5b6b7a;margin-top:4px">${escapeHtml(methodLabel)} · checked ${checked} fresh package${checked === 1 ? '' : 's'} · ${undersized} undersized · ${oversized} oversized</div>
+      </div>
+      <div style="padding:16px 22px;overflow:auto;flex:1">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead>
+            <tr style="text-align:left;background:#f1f5f9;color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.05em">
+              <th style="padding:8px 10px">Package</th>
+              <th style="padding:8px 10px">Status</th>
+              <th style="padding:8px 10px;text-align:right">Actual</th>
+              <th style="padding:8px 10px;text-align:right">Target</th>
+              <th style="padding:8px 10px;text-align:right">% of target</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:14px;font-size:11px;color:#5b6b7a;line-height:1.5">
+          <strong>Proceed</strong> — close this dialog and view the results as-is.<br>
+          <strong>Fix</strong> — open the Edit Packages tab and jump to the first offending package.
+        </div>
+      </div>
+      <div style="padding:14px 22px;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;gap:10px;background:#fafafa">
+        <button type="button" id="reliningSanityProceed" style="padding:8px 18px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;color:#1A2B3C;font-weight:600;cursor:pointer">Proceed</button>
+        <button type="button" id="reliningSanityFix" style="padding:8px 18px;border-radius:6px;border:1px solid #00847F;background:#00847F;color:#fff;font-weight:700;cursor:pointer">Fix</button>
+      </div>
+    </div>`;
+  // Block click-outside dismissal explicitly: the user must click one
+  // of the two buttons. Stop propagation on the overlay itself so other
+  // global click listeners don't fire while the modal is open.
+  overlay.addEventListener('click', (ev) => { ev.stopPropagation(); });
+
+  const close = () => {
+    overlay.remove();
+    _reliningSanityModalOpen = false;
+  };
+  document.body.appendChild(overlay);
+  const proceedBtn = overlay.querySelector('#reliningSanityProceed');
+  const fixBtn = overlay.querySelector('#reliningSanityFix');
+  if (proceedBtn) proceedBtn.addEventListener('click', () => { close(); });
+  if (fixBtn) fixBtn.addEventListener('click', () => {
+    const firstAnchor = (sanity.issues[0] && sanity.issues[0].anchor_id) || '';
+    close();
+    // Navigate to the Edit Packages subtab on the relining page.
+    // switchReliningSubtab('edit') unhides #relining-subpage-edit and
+    // re-renders the cards via renderEditPackagesPanel().
+    try { if (typeof switchReliningSubtab === 'function') switchReliningSubtab('edit'); } catch (e) {}
+    // Highlight runs after the tab is visible AND the panel has rendered.
+    // 80ms is enough for the synchronous renderEditPackagesPanel() call
+    // inside switchReliningSubtab to have flushed the new DOM nodes.
+    setTimeout(() => {
+      if (!firstAnchor) return;
+      const card = document.querySelector(`#editPackagesArea [data-anchor-id="${CSS && CSS.escape ? CSS.escape(firstAnchor) : firstAnchor.replace(/"/g, '\\"')}"]`);
+      if (!card) return;
+      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+      const prev = card.style.boxShadow;
+      const prevTrans = card.style.transition;
+      card.style.transition = 'box-shadow 0.3s ease';
+      card.style.boxShadow = '0 0 0 3px gold';
+      setTimeout(() => {
+        card.style.boxShadow = prev || '';
+        card.style.transition = prevTrans || '';
+      }, 3000);
+    }, 80);
+  });
 }
 
 function renderReliningPackageIdLink(packageId) {
