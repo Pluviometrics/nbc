@@ -5993,16 +5993,18 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
 }
 
 // Manual package editing: each generated package gets an opaque anchor_id;
-// the user's per-asset move log is persisted to localStorage and replayed on
-// every regeneration. Stubs are created for anchors that no longer correspond
-// to any auto package so manual moves stay in their new home across re-runs.
+// the user's per-asset move log is persisted to sessionStorage and replayed
+// on every regeneration. Locks/moves/renames clear when the browser tab is
+// closed but survive page refreshes (sessionStorage semantics). Any legacy
+// localStorage entry from prior versions is purged on first load.
 const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
+try { localStorage.removeItem(RELINING_MANUAL_MOVES_KEY); } catch (_) {}
 let reliningManualMoves = loadReliningManualMoves();
 
 function loadReliningManualMoves() {
   const empty = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   try {
-    const raw = localStorage.getItem(RELINING_MANUAL_MOVES_KEY);
+    const raw = sessionStorage.getItem(RELINING_MANUAL_MOVES_KEY);
     if (!raw) return empty;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return empty;
@@ -6029,7 +6031,7 @@ function loadReliningManualMoves() {
 
 function persistReliningManualMoves() {
   try {
-    localStorage.setItem(RELINING_MANUAL_MOVES_KEY, JSON.stringify(reliningManualMoves));
+    sessionStorage.setItem(RELINING_MANUAL_MOVES_KEY, JSON.stringify(reliningManualMoves));
   } catch (err) {
     console.warn('[Relining manual edit] persist failed', err);
   }
