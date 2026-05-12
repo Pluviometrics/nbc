@@ -11786,6 +11786,24 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
   const runtimeJs = `
 (function(){
   'use strict';
+  // Inflate inlined libraries (base64 → text → eval/insert). Uses new Function (NOT eval)
+  // so the standalone is reproducible offline without any CDN dependency.
+  // Mirrors buildReliningPackageReportHtml's IIFE — uses the same shared
+  // LEAFLET_CSS_B64 / LEAFLET_JS_B64 / JSZIP_JS_B64 constants from the outer
+  // scope so the index doesn't grow.
+  function injectStyle(b64, id) {
+    if (document.getElementById(id)) return;
+    var style = document.createElement('style');
+    style.id = id;
+    style.textContent = atob(b64);
+    document.head.appendChild(style);
+  }
+  function injectScript(b64) {
+    new Function(atob(b64))();
+  }
+  injectStyle('${LEAFLET_CSS_B64}', 'leaflet-css');
+  injectScript('${LEAFLET_JS_B64}');
+  injectScript('${JSZIP_JS_B64}');
   var data;
   try { data = JSON.parse(document.getElementById('report-data').textContent); }
   catch (err) {
@@ -12516,6 +12534,8 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
   var cctvReportMap = null;
   var cctvReportMapLayer = null;
   var selectedCctvReportAnchor = null;
+  var cctvReportSelectedOverlayCard = null;
+  var cctvReportSelectedLeaderSvg = null;
 
   function ensureCctvReportMap() {
     if (cctvReportMap) { setTimeout(function(){ cctvReportMap.invalidateSize(); }, 50); return; }
@@ -12530,8 +12550,108 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     sixAerial.addTo(cctvReportMap);
     L.control.layers({ 'Aerial (NSW SIX Maps)': sixAerial, 'Streets (CARTO)': cartoStreets }, null, { position: 'topright', collapsed: true }).addTo(cctvReportMap);
     cctvReportMapLayer = L.layerGroup().addTo(cctvReportMap);
+    cctvReportMap.on('move zoom resize', updateCctvReportSelectedOverlay);
     window._cctvReportMap = cctvReportMap;
   }
+
+  // FLOATING OVERLAY CARD + LEADER SVG — mirror of Relining's renderReportSelectedOverlay.
+  // Leader SVG goes inside the custom 'cctvLeaderPane' (z-index 350) so it stacks BEHIND
+  // overlayPane (400 — pipes) and markerPane (600 — markers) but ABOVE tilePane (200).
+  function ensureCctvReportSelectedOverlay() {
+    var mapEl = document.getElementById('cctvReportPackagesMap');
+    if (!mapEl) return false;
+    if (!cctvReportSelectedLeaderSvg) {
+      cctvReportSelectedLeaderSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      cctvReportSelectedLeaderSvg.classList.add('cctv-selected-leader');
+      cctvReportSelectedLeaderSvg.innerHTML = '<line></line><circle r="6"></circle>';
+      var leaderPane = cctvReportMap && cctvReportMap.getPane && cctvReportMap.getPane('cctvLeaderPane');
+      (leaderPane || mapEl).appendChild(cctvReportSelectedLeaderSvg);
+    }
+    if (!cctvReportSelectedOverlayCard) {
+      cctvReportSelectedOverlayCard = document.createElement('div');
+      cctvReportSelectedOverlayCard.className = 'cctv-selected-map-card';
+      mapEl.appendChild(cctvReportSelectedOverlayCard);
+    }
+    return true;
+  }
+
+  function getCctvReportSelectedPackageObj() {
+    if (!selectedCctvReportAnchor) return null;
+    return packages.find(function(p){ return p.anchor_id === selectedCctvReportAnchor; }) || null;
+  }
+
+  function getCctvReportPackageAnchorLatLng(pkg) {
+    if (!pkg) return null;
+    if (Array.isArray(pkg.centroid) && Number.isFinite(pkg.centroid[0]) && Number.isFinite(pkg.centroid[1])) {
+      return L.latLng(pkg.centroid[0], pkg.centroid[1]);
+    }
+    var pkgPipes = pipes.filter(function(p){ return p.anchor_id === pkg.anchor_id && Number.isFinite(p.lat) && Number.isFinite(p.lon); });
+    if (!pkgPipes.length) return null;
+    var lat = 0, lon = 0;
+    pkgPipes.forEach(function(p){ lat += p.lat; lon += p.lon; });
+    return L.latLng(lat / pkgPipes.length, lon / pkgPipes.length);
+  }
+
+  function renderCctvReportSelectedOverlay() {
+    if (!ensureCctvReportSelectedOverlay()) return;
+    var pkg = getCctvReportSelectedPackageObj();
+    if (!pkg) {
+      cctvReportSelectedOverlayCard.style.display = 'none';
+      cctvReportSelectedLeaderSvg.style.display = 'none';
+      return;
+    }
+    var suburbs = (pkg.suburbs || []).filter(Boolean).join(', ') || '—';
+    var diam = (pkg.diameters_mm || []).map(function(d){ return d + 'mm'; }).join(', ') || '—';
+    cctvReportSelectedOverlayCard.innerHTML =
+      '<div class="title">' + esc(pkg.id) + '</div>' +
+      '<div class="meta">' +
+        '<div><strong>Suburbs:</strong> ' + esc(suburbs) + '</div>' +
+        '<div><strong>Pipes:</strong> ' + (pkg.pipe_count || 0) + ' · <strong>Spread:</strong> ' + Number(pkg.max_span_m || 0).toFixed(0) + ' m</div>' +
+        '<div><strong>Length:</strong> ' + Number(pkg.total_length_m || 0).toFixed(1) + ' m · <strong>CCTV hrs:</strong> ' + Number(pkg.cctv_hours || 0).toFixed(1) + '</div>' +
+        '<div><strong>Cost:</strong> ' + (fmtCurrency(pkg.total_cost) || '—') + '</div>' +
+        '<div><strong>Diameters:</strong> ' + esc(diam) + '</div>' +
+      '</div>';
+    cctvReportSelectedOverlayCard.style.display = 'block';
+    cctvReportSelectedLeaderSvg.style.display = 'block';
+    updateCctvReportSelectedOverlay();
+  }
+
+  function updateCctvReportSelectedOverlay() {
+    if (!cctvReportMap || !cctvReportSelectedOverlayCard || !cctvReportSelectedLeaderSvg || cctvReportSelectedOverlayCard.style.display === 'none') return;
+    var anchor = getCctvReportPackageAnchorLatLng(getCctvReportSelectedPackageObj());
+    if (!anchor) { cctvReportSelectedLeaderSvg.style.display = 'none'; return; }
+    // SVG is parented to the cctvLeaderPane (Leaflet pane with its own translate3d transform).
+    // Use layer-point coords so they cancel the pane transform out (== correct geographic position).
+    var anchorPt = cctvReportMap.latLngToLayerPoint(anchor);
+    var cardRect = cctvReportSelectedOverlayCard.getBoundingClientRect();
+    var mapRect = cctvReportMap.getContainer().getBoundingClientRect();
+    var cardContainerX = cardRect.left - mapRect.left;
+    var cardContainerY = cardRect.top - mapRect.top + cardRect.height;
+    var cardContainerStartX = anchorPt.x < cardContainerX
+      ? cardContainerX
+      : cardContainerX + cardRect.width / 2;
+    var cardLayerStart = cctvReportMap.containerPointToLayerPoint(L.point(cardContainerStartX, cardContainerY));
+    cctvReportSelectedLeaderSvg.setAttribute('width', String(mapRect.width));
+    cctvReportSelectedLeaderSvg.setAttribute('height', String(mapRect.height));
+    var svgOriginLayer = cctvReportMap.containerPointToLayerPoint(L.point(0, 0));
+    cctvReportSelectedLeaderSvg.style.left = svgOriginLayer.x + 'px';
+    cctvReportSelectedLeaderSvg.style.top = svgOriginLayer.y + 'px';
+    var line = cctvReportSelectedLeaderSvg.querySelector('line');
+    var circle = cctvReportSelectedLeaderSvg.querySelector('circle');
+    line.setAttribute('x1', String(cardLayerStart.x - svgOriginLayer.x));
+    line.setAttribute('y1', String(cardLayerStart.y - svgOriginLayer.y));
+    line.setAttribute('x2', String(anchorPt.x - svgOriginLayer.x));
+    line.setAttribute('y2', String(anchorPt.y - svgOriginLayer.y));
+    circle.setAttribute('cx', String(anchorPt.x - svgOriginLayer.x));
+    circle.setAttribute('cy', String(anchorPt.y - svgOriginLayer.y));
+    cctvReportSelectedLeaderSvg.style.display = 'block';
+  }
+
+  function selectCctvReportPackage(anchorId) {
+    selectedCctvReportAnchor = anchorId;
+    renderCctvReportPackagesMap({ fit: false });
+  }
+  window.selectCctvReportPackage = selectCctvReportPackage;
 
   function cctvPipeWeight(d) {
     var v = Number(d);
@@ -12589,11 +12709,13 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
                 .setLatLng(e.latlng)
                 .setContent(buildCctvReportPipePopup(pipeRef, pkgRef))
                 .openOn(cctvReportMap);
+              setTimeout(function(){ selectCctvReportPackage(pkgRef.anchor_id); }, 0);
             };
           })(p, pkg)).addTo(cctvReportMapLayer);
         } else if (Number.isFinite(p.lat) && Number.isFinite(p.lon)) {
           L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: opacity })
             .bindPopup(buildCctvReportPipePopup(p, pkg))
+            .on('click', (function(pkgRef){ return function(){ setTimeout(function(){ selectCctvReportPackage(pkgRef.anchor_id); }, 0); }; })(pkg))
             .addTo(cctvReportMapLayer);
         }
       });
@@ -12601,6 +12723,7 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     if (allPoints.length && opts.fit !== false) {
       try { cctvReportMap.fitBounds(L.latLngBounds(allPoints).pad(0.1)); } catch (e) {}
     }
+    renderCctvReportSelectedOverlay();
   }
   window.renderCctvReportPackagesMap = renderCctvReportPackagesMap;
 
@@ -12613,6 +12736,118 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
   window.refreshCctvReportMap = refreshCctvReportMap;
   function clearCctvReportSelection() { selectedCctvReportAnchor = null; renderCctvReportPackagesMap({ fit: false }); }
   window.clearCctvReportSelection = clearCctvReportSelection;
+
+  // ---------- Lock file save / load (mirrors Relining's saveReportLockFile/loadReportLockFile) ----------
+  function setCctvLocksStatus(text, isError) {
+    var el = document.getElementById('cctvReportLocksStatus');
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? '#9A6B00' : '#5A6B7A';
+  }
+
+  window.saveCctvReportLockFile = function() {
+    var blob = new Blob([JSON.stringify(cctvReportManualMoves, null, 2)], { type: 'application/json' });
+    var generated = (data.generated_at || '').replace(/[:T]/g, '-').replace(/\\..*$/, '') || 'unknown';
+    var filename = 'cctv_locks_' + generated + '.json';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 1000);
+    setCctvLocksStatus('Locks: saved to ' + filename);
+  };
+
+  function mergeCctvLocksData(parsed) {
+    if (!parsed || typeof parsed !== 'object') throw new Error('Invalid lock file format.');
+    // CCTV uses anchor_id as the key throughout — no translation needed.
+    // Drop entries whose anchor_id no longer exists in this report (stale targets
+    // would silently break later applyCctvMovesAndRender passes).
+    var validAnchors = {};
+    (data.packages || []).forEach(function(p) { if (p && p.anchor_id) validAnchors[p.anchor_id] = true; });
+    var validAssetIds = {};
+    pipes.forEach(function(p) { if (p && p.asset_id) validAssetIds[String(p.asset_id)] = true; });
+
+    var assignments = {};
+    Object.keys((parsed.assignments) || {}).forEach(function(uid) {
+      var target = parsed.assignments[uid];
+      if (validAssetIds[uid] && (validAnchors[target] || true)) {
+        // Allow new (manually-created) anchors to flow through; renumber will pick them up.
+        assignments[uid] = target;
+      }
+    });
+    var pipeLocks = {};
+    Object.keys((parsed.locks && parsed.locks.pipes) || {}).forEach(function(uid) {
+      if (validAssetIds[uid]) pipeLocks[uid] = parsed.locks.pipes[uid];
+    });
+    var pkgLocks = {};
+    Object.keys((parsed.locks && parsed.locks.packages) || {}).forEach(function(anchorId) {
+      // Keep package locks even if the anchor isn't in the current packages list — the
+      // assignments above may revive the anchor as a manual package.
+      pkgLocks[anchorId] = parsed.locks.packages[anchorId];
+    });
+    var moveOrigins = {};
+    Object.keys(parsed.moveOrigins || {}).forEach(function(uid) {
+      if (validAssetIds[uid]) moveOrigins[uid] = parsed.moveOrigins[uid];
+    });
+
+    cctvReportManualMoves = {
+      assignments: assignments,
+      locks: { pipes: pipeLocks, packages: pkgLocks },
+      moveOrigins: moveOrigins
+    };
+    saveCctvReportMoves();
+    if (typeof applyCctvMovesAndRender === 'function') applyCctvMovesAndRender();
+  }
+
+  window.loadCctvReportLockFile = async function(event) {
+    var file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      var json;
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        if (typeof JSZip === 'undefined') { alert('JSZip not loaded — refresh and try again.'); return; }
+        var zip = await JSZip.loadAsync(file);
+        var entry = zip.file('locks.json');
+        if (!entry) { alert('No locks.json found in that ZIP.'); return; }
+        json = await entry.async('string');
+      } else {
+        json = await file.text();
+      }
+      var parsed = JSON.parse(json);
+      mergeCctvLocksData(parsed);
+      setCctvLocksStatus('Locks: loaded from ' + file.name);
+    } catch (err) {
+      alert('Failed to load lock file: ' + (err && err.message || err));
+      setCctvLocksStatus('Locks: load failed', true);
+    }
+  };
+
+  // Auto-fetch ./locks.json when served over http (silently skipped on file://).
+  // Mirror of Relining's tryAutoLoadLocks IIFE — same name 'locks.json' is fine
+  // because each report ships in its own ZIP.
+  (async function tryAutoLoadCctvLocks() {
+    try {
+      // If the user has already edited in this browser, keep their state.
+      if (cctvReportManualMoves && (
+        Object.keys(cctvReportManualMoves.assignments || {}).length ||
+        Object.keys((cctvReportManualMoves.locks && cctvReportManualMoves.locks.packages) || {}).length ||
+        Object.keys((cctvReportManualMoves.locks && cctvReportManualMoves.locks.pipes) || {}).length
+      )) {
+        setCctvLocksStatus('Locks: restored from this browser');
+        return;
+      }
+      var res = await fetch('./locks.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var json = await res.text();
+      var parsed = JSON.parse(json);
+      mergeCctvLocksData(parsed);
+      setCctvLocksStatus('Locks: auto-loaded from ./locks.json');
+    } catch (err) {
+      setCctvLocksStatus('Locks: stored locally only (auto-load needs http server or use Load Lock File button)');
+    }
+  })();
 
   // ---------- Subtab switcher ----------
   window.switchCctvReportSubtab = function(name) {
@@ -12645,8 +12880,7 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
     '<title>NBC CCTV Work Order Package Report</title>',
-    '<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">',
-    '<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"><\/script>',
+    '<!-- Leaflet + JSZip are inflated from base64 in the runtime IIFE — fully offline. -->',
     '<style>',
     ':root{--teal:#00847F;--teal-l:#00A89D;--teal-d:#005F5B;--navy:#1A2B3C;--navy-l:#243447;--panel:#F4F0E8;--border:#DDE3E8;--text:#1A2B3C;--text-l:#5A6B7A;--r:8px}',
     'body{margin:0;font-family:Segoe UI,system-ui,sans-serif;color:#1A2B3C;background:#F4F0E8}',
@@ -12722,6 +12956,17 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '.pkg-lock-btn.partial{color:#d97706}',
     '.pkg-lock-btn-pkg{font-size:16px;padding:3px 7px;margin-left:6px}',
     '.edit-pkg-asset-row a{color:inherit}',
+    // ----- Selected-package floating overlay card + leader SVG (mirrors Relining) -----
+    '.cctv-selected-map-card{position:absolute;top:60px;right:12px;z-index:650;max-width:min(300px,calc(100% - 78px));background:rgba(255,255,255,.96);border:2px solid #111827;border-radius:12px;box-shadow:0 12px 28px rgba(17,24,39,.22);padding:10px 12px;color:#1A2B3C;font-size:11px;line-height:1.45;pointer-events:auto;user-select:text;-webkit-user-select:text}',
+    '.cctv-selected-map-card .title{font-weight:900;color:#111827;margin-bottom:4px;letter-spacing:.03em}',
+    '.cctv-selected-map-card .meta{color:#5A6B7A}',
+    '.cctv-selected-map-card .meta div{margin:2px 0}',
+    '.cctv-selected-leader{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}',
+    '.cctv-selected-leader line{stroke:#111827;stroke-width:4;stroke-linecap:round}',
+    '.cctv-selected-leader circle{fill:#FFD166;stroke:#111827;stroke-width:3}',
+    // ----- Lock-file toolbar (mirrors Relining hero buttons) -----
+    '.cctv-lock-toolbar{display:flex;align-items:center;gap:8px;margin:0 0 12px 0;padding:10px 14px;background:#fff;border:1px solid #DDE3E8;border-radius:8px;flex-wrap:wrap;font-size:12px;color:#5A6B7A}',
+    '.cctv-lock-toolbar .lock-status{flex:1 1 220px;font-size:11px}',
     '</style>',
     '</head>',
     '<body>',
@@ -12731,6 +12976,11 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     '<div class="h-status" id="reportStatusText">—</div>',
     '</header>',
     '<div class="shell">',
+    '<div class="cctv-lock-toolbar">',
+    '<div class="lock-status" id="cctvReportLocksStatus">Locks: stored locally only.</div>',
+    '<label class="export-btn" style="cursor:pointer;background:rgba(0,132,127,0.12);color:#005F5B" title="Load a locks.json or report ZIP to restore a previous editing session">Load Lock File<input type="file" accept=".json,.zip" style="display:none" onchange="loadCctvReportLockFile(event)"/></label>',
+    '<button class="export-btn" type="button" onclick="saveCctvReportLockFile()" title="Save manual edits + locks to a JSON file you can re-load later">Save Lock File</button>',
+    '</div>',
     '<div class="subtab-bar">',
     '<button type="button" class="subtab active" data-subtab="main" onclick="switchCctvReportSubtab(\'main\')">CCTV Inspections</button>',
     '<button type="button" class="subtab" data-subtab="edit" onclick="switchCctvReportSubtab(\'edit\')">Edit Packages</button>',
