@@ -5493,18 +5493,23 @@ function validateReliningPackageTargets(packages, options) {
       const locked = (typeof isReliningPackageFullyLocked === 'function' && isReliningPackageFullyLocked(pkg))
         || (typeof isReliningPackageLocked === 'function' && isReliningPackageLocked(pkg.anchor_id));
       if (locked) return;
+      // Exclude C6 add-on pipes from the value check — they intentionally
+      // push packages over target (they're cheap-to-add neighbouring C6
+      // pipes that piggy-back on the package's setup costs). Including
+      // them would flag every package that has any C6 add-on as oversized.
+      const assets = (pkg.assets || []);
+      const c6Cost = assets.reduce((s, a) => s + (a && a.is_c6_addon ? (Number(a.pipe_cost) || 0) : 0), 0);
       const actual = isCount
-        ? ((pkg.assets && pkg.assets.length) || Number(pkg.pipe_count) || 0)
-        : (Number(pkg.total_cost) || 0);
+        ? assets.filter(a => !(a && a.is_c6_addon)).length
+        : Math.max(0, (Number(pkg.total_cost) || 0) - c6Cost);
       totalChecked += 1;
-      const lower = target * (1 - tol);
       const upper = target * (1 + tol);
-      let status = null;
-      if (actual < lower) status = 'undersized';
-      else if (actual > upper) status = 'oversized';
-      if (!status) return;
-      if (status === 'undersized') undersized += 1;
-      else oversized += 1;
+      // Only flag oversized — undersized packages are expected (e.g. last
+      // package in a method run, single-island pipes) and the user is not
+      // worried about them.
+      if (actual <= upper) return;
+      oversized += 1;
+      const status = 'oversized';
       issues.push({
         package_id: pkg.package_id || '',
         anchor_id: pkg.anchor_id || '',
@@ -9209,13 +9214,12 @@ function showReliningPackageSanityModal(sanity, options) {
   }).join('');
 
   const summary = sanity.summary || {};
-  const undersized = summary.undersized || 0;
   const oversized = summary.oversized || 0;
   const checked = summary.totalChecked || 0;
   const total = summary.totalIssues || sanity.issues.length;
   const methodLabel = isCount
-    ? `count method — target ${fmtTarget} (±${Math.round(RELINING_VALUE_TOLERANCE * 100)}%)`
-    : `${method} method — target ${fmtTarget} (±${Math.round(RELINING_VALUE_TOLERANCE * 100)}%)`;
+    ? `count method — target ${fmtTarget} (+${Math.round(RELINING_VALUE_TOLERANCE * 100)}%, C6 add-ons excluded)`
+    : `${method} method — target ${fmtTarget} (+${Math.round(RELINING_VALUE_TOLERANCE * 100)}%, C6 add-ons excluded)`;
 
   const overlay = document.createElement('div');
   overlay.id = 'reliningSanityModal';
@@ -9226,7 +9230,7 @@ function showReliningPackageSanityModal(sanity, options) {
     <div style="background:#fff;max-width:760px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.35)">
       <div style="padding:16px 22px;border-bottom:1px solid #e5e7eb;background:#FEF3C7">
         <div style="font-size:16px;font-weight:800;color:#1A2B3C">Package value sanity check — ${total} issue${total === 1 ? '' : 's'}</div>
-        <div style="font-size:12px;color:#5b6b7a;margin-top:4px">${escapeHtml(methodLabel)} · checked ${checked} fresh package${checked === 1 ? '' : 's'} · ${undersized} undersized · ${oversized} oversized</div>
+        <div style="font-size:12px;color:#5b6b7a;margin-top:4px">${escapeHtml(methodLabel)} · checked ${checked} fresh package${checked === 1 ? '' : 's'} · ${oversized} oversized</div>
       </div>
       <div style="padding:16px 22px;overflow:auto;flex:1">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
