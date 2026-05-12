@@ -6026,6 +6026,18 @@ function translateLocksForExport(moves, packages) {
       translated.c6Included[uid] = anchorToPkgId[translated.c6Included[uid]] || translated.c6Included[uid];
     });
   }
+  // anchorOrigins is keyed by anchor_id internally; translate keys to
+  // package_id for portability across sessions (anchor_ids are random
+  // per-session). Without this, on import the loader can't match the
+  // entries to current packages and resurrects phantom packages that
+  // pollute the generation. See loadReliningLocksFile for the import-side mirror.
+  if (translated.anchorOrigins) {
+    var newAnchorOrigins = {};
+    Object.keys(translated.anchorOrigins).forEach(function(k) {
+      newAnchorOrigins[anchorToPkgId[k] || k] = translated.anchorOrigins[k];
+    });
+    translated.anchorOrigins = newAnchorOrigins;
+  }
   return translated;
 }
 
@@ -6702,19 +6714,34 @@ async function loadReliningLocksFile(file) {
       },
       moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {}
     };
-    // Normalise lock keys: standalone-saved locks use package_id, live tool uses anchor_id.
-    // Translate package_id → anchor_id where the current generation provides a mapping.
+    // Normalise lock keys: saved files use package_id everywhere, live tool uses anchor_id.
+    // Translate package_id → anchor_id for ALL fields (locks.packages keys,
+    // assignments values, anchorOrigins keys, c6Included values) so every
+    // reference points at the current session's anchors. Without translating
+    // anchorOrigins specifically, applyReliningManualMoves resurrects phantom
+    // packages from stale session-A anchor_ids and pulls pipes into them.
     if (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages)) {
       const pkgIdToAnchor = {};
       lastPackagingGeneration.packages.forEach(p => {
         if (p && p.package_id && p.anchor_id) pkgIdToAnchor[p.package_id] = p.anchor_id;
       });
+      const translateTarget = (t) => pkgIdToAnchor[t] || t;
       const translatedPkgLocks = {};
       Object.keys(reliningManualMoves.locks.packages).forEach(key => {
-        const target = pkgIdToAnchor[key] || key;
-        translatedPkgLocks[target] = reliningManualMoves.locks.packages[key];
+        translatedPkgLocks[translateTarget(key)] = reliningManualMoves.locks.packages[key];
       });
       reliningManualMoves.locks.packages = translatedPkgLocks;
+      Object.keys(reliningManualMoves.assignments || {}).forEach(uid => {
+        reliningManualMoves.assignments[uid] = translateTarget(reliningManualMoves.assignments[uid]);
+      });
+      const translatedAnchorOrigins = {};
+      Object.keys(reliningManualMoves.anchorOrigins || {}).forEach(key => {
+        translatedAnchorOrigins[translateTarget(key)] = reliningManualMoves.anchorOrigins[key];
+      });
+      reliningManualMoves.anchorOrigins = translatedAnchorOrigins;
+      Object.keys(reliningManualMoves.c6Included || {}).forEach(uid => {
+        reliningManualMoves.c6Included[uid] = translateTarget(reliningManualMoves.c6Included[uid]);
+      });
       // Drop dangling targets — a loaded locks file may reference packages that
       // no longer exist in the current generation. Without this, stale targets
       // accumulate and silently break later applyReliningManualMoves passes.
@@ -6734,6 +6761,9 @@ async function loadReliningLocksFile(file) {
       });
       Object.keys(reliningManualMoves.locks.packages || {}).forEach(key => {
         if (!knownPkg(key)) delete reliningManualMoves.locks.packages[key];
+      });
+      Object.keys(reliningManualMoves.anchorOrigins || {}).forEach(key => {
+        if (!knownPkg(key)) delete reliningManualMoves.anchorOrigins[key];
       });
       Object.keys(reliningManualMoves.c6Included || {}).forEach(uid => {
         const target = reliningManualMoves.c6Included[uid];
