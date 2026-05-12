@@ -6887,6 +6887,85 @@ function resetAllCctvManualMoves() {
   }
 }
 
+// Layer captured pre-import locks back on top of the freshly-imported state.
+// File wins on key conflicts (anchor_id, uid). For v2 imports we also augment
+// the lockedPackages handoff with snapshots for any existing locked anchor not
+// covered by the file, so the engine materialises both sets on regen.
+function _mergeOldMovesIntoCurrent(oldMoves, isSchemaV2, fileResolvedHandoff) {
+  if (!oldMoves || typeof oldMoves !== 'object') return;
+  const cur = reliningManualMoves;
+  if (!cur || typeof cur !== 'object') return;
+  cur.locks = cur.locks || { pipes: {}, packages: {} };
+  cur.locks.pipes    = cur.locks.pipes    || {};
+  cur.locks.packages = cur.locks.packages || {};
+  cur.assignments     = cur.assignments     || {};
+  cur.anchorOrigins   = cur.anchorOrigins   || {};
+  cur.renamedPackages = cur.renamedPackages || {};
+  cur.c6Excluded      = cur.c6Excluded      || {};
+  cur.c6Included      = cur.c6Included      || {};
+  cur.moveOrigins     = cur.moveOrigins     || {};
+  const oldLocks = oldMoves.locks || {};
+  // Union dict-style fields. Existing entries kept where the file (already in
+  // cur) doesn't have a value for the same key — i.e. file wins on conflict.
+  const layer = (target, source) => {
+    if (!source || typeof source !== 'object') return;
+    Object.keys(source).forEach(k => {
+      if (!Object.prototype.hasOwnProperty.call(target, k)) target[k] = source[k];
+    });
+  };
+  layer(cur.locks.packages,  oldLocks.packages);
+  layer(cur.locks.pipes,     oldLocks.pipes);
+  layer(cur.assignments,     oldMoves.assignments);
+  layer(cur.anchorOrigins,   oldMoves.anchorOrigins);
+  layer(cur.renamedPackages, oldMoves.renamedPackages);
+  layer(cur.c6Excluded,      oldMoves.c6Excluded);
+  layer(cur.c6Included,      oldMoves.c6Included);
+  layer(cur.moveOrigins,     oldMoves.moveOrigins);
+  // For v2: augment the lockedPackages handoff so the engine's
+  // _buildLockedSnapshotsFromHandoff materialises ALL locked packages on
+  // regen — not just the file's. Each pre-existing locked anchor that the
+  // file didn't ship gets a handoff entry built from lastPackagingGeneration.
+  if (isSchemaV2 && Array.isArray(fileResolvedHandoff)) {
+    const fileAnchors = new Set(fileResolvedHandoff.map(e => String(e.anchor_id || '')).filter(Boolean));
+    const oldPkgLocks = (oldLocks.packages && typeof oldLocks.packages === 'object') ? oldLocks.packages : {};
+    const oldRenamed  = oldMoves.renamedPackages || {};
+    const oldOrigins  = oldMoves.anchorOrigins   || {};
+    const prevPkgs = (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages))
+      ? lastPackagingGeneration.packages
+      : [];
+    if (prevPkgs.length) {
+      const anchorToPkg = new Map();
+      prevPkgs.forEach(pkg => {
+        if (pkg && pkg.anchor_id) anchorToPkg.set(String(pkg.anchor_id), pkg);
+      });
+      Object.keys(oldPkgLocks).forEach(anchorId => {
+        if (!oldPkgLocks[anchorId]) return;
+        const key = String(anchorId);
+        if (fileAnchors.has(key)) return; // file already ships this anchor
+        const pkg = anchorToPkg.get(key);
+        if (!pkg || !Array.isArray(pkg.assets) || !pkg.assets.length) return;
+        const assetIds = pkg.assets
+          .map(a => (a && a.assetId != null ? String(a.assetId) : ''))
+          .filter(Boolean);
+        if (!assetIds.length) return;
+        const originKind = oldOrigins[key]?.kind;
+        cur.lockedPackages.push({
+          anchor_id: key,
+          package_id: String(pkg.package_id || oldOrigins[key]?.last_package_id || key),
+          asset_ids: assetIds,
+          manual_origin: originKind === 'manual',
+          renamed: !!oldRenamed[key],
+          suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
+        });
+        // Also re-assert pipe locks for these assets so the engine's carve-out
+        // sees them as locked even if the file's pipe-lock dict didn't list
+        // them. (Defensive — layer() above already merged oldLocks.pipes.)
+        assetIds.forEach(id => { cur.locks.pipes[id] = true; });
+      });
+    }
+  }
+}
+
 async function loadReliningLocksFile(file) {
   if (!file) return;
   try {
@@ -6934,6 +7013,28 @@ async function loadReliningLocksFile(file) {
         );
         return;
       }
+    }
+    // ── Merge vs Replace prompt ──
+    // If the live tool already has locks (engineer mid-session), don't silently
+    // wipe them when importing a PM's lock file. Capture existing state, then
+    // ask: OK = merge (file wins on key conflicts), Cancel = replace (legacy
+    // overwrite behaviour).
+    let mergeMode = false;
+    let oldMoves = null;
+    const existingMoves = reliningManualMoves || {};
+    const hasExistingLocks =
+      (existingMoves.locks?.packages && Object.keys(existingMoves.locks.packages).length) ||
+      (existingMoves.locks?.pipes    && Object.keys(existingMoves.locks.pipes).length) ||
+      (existingMoves.assignments     && Object.keys(existingMoves.assignments).length) ||
+      (existingMoves.renamedPackages && Object.keys(existingMoves.renamedPackages).length);
+    if (hasExistingLocks) {
+      try { oldMoves = structuredClone(existingMoves); }
+      catch (_e) { oldMoves = JSON.parse(JSON.stringify(existingMoves)); }
+      mergeMode = confirm(
+        'Existing locked packages detected in this session.\n' +
+        '  • OK = MERGE imported locks with existing (file wins on key conflicts).\n' +
+        '  • Cancel = REPLACE existing locks with imported file.'
+      );
     }
     reliningManualMoves = {
       assignments:   parsed.assignments   && typeof parsed.assignments   === 'object' ? parsed.assignments   : {},
@@ -7011,6 +7112,9 @@ async function loadReliningLocksFile(file) {
       reliningManualMoves.anchorOrigins  = newAnchorOrigins;
       reliningManualMoves.renamedPackages = newRenamed;
       reliningManualMoves.lockedPackages = resolvedHandoff;
+      if (mergeMode && oldMoves) {
+        _mergeOldMovesIntoCurrent(oldMoves, /*v2*/ true, resolvedHandoff);
+      }
       persistReliningManualMoves();
       if (typeof generateReliningPackages === 'function' && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
         generateReliningPackages();
@@ -7076,6 +7180,9 @@ async function loadReliningLocksFile(file) {
         const target = reliningManualMoves.c6Included[uid];
         if (!knownPkg(target)) delete reliningManualMoves.c6Included[uid];
       });
+    }
+    if (mergeMode && oldMoves) {
+      _mergeOldMovesIntoCurrent(oldMoves, /*v2*/ false, null);
     }
     persistReliningManualMoves();
     if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
