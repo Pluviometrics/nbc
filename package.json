@@ -5,10 +5,12 @@
   "description": "NBC Stormwater packaging + relining tool — single-page web app",
   "type": "module",
   "scripts": {
-    "build": "node prebuild.mjs",
-    "lint": "eslint --ext .js,.html .",
+    "build": "node scripts/prebuild.mjs",
+    "lint": "eslint .",
     "serve": "npx http-server -p 5173 -c-1 .",
-    "test:smoke": "playwright test smoke.spec.js"
+    "test": "npm run validate",
+    "test:smoke": "playwright test tests/smoke.spec.js",
+    "validate": "node scripts/validate-repo.mjs"
   },
   "devDependencies": {
     "eslint": "^9.0.0",

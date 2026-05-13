@@ -51,12 +51,7 @@ The packaging engine joins on `Diameter_mm` + `Liner_Type`.
 
 ## 3. Sample fixtures
 
-Reference files for testing live in `docs/fixtures/`:
-
-- `docs/fixtures/asset-register-sample.csv` — small synthetic asset register
-- `docs/fixtures/panel-rates-sample.xlsx` — synthetic rate card
-
-(Fixtures not committed yet — populate when first regression bug is hit so the test set captures the failure.)
+No sample fixtures are currently committed. When adding regression coverage, place synthetic fixtures under `docs/fixtures/` and keep real council exports out of Git unless they have been approved and scrubbed.
 
 ## 4. Common gotchas
 

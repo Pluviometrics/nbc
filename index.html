@@ -1465,9 +1465,9 @@ window.addEventListener('keydown', (event) => {
             Upload inspection file
             <input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="loadCriticalAssetsInput(event, 'inspection')"/>
           </label>
-          <button class="export-btn" onclick="loadCriticalAssetsDefaults()">Show source paths</button>
+          <button class="export-btn" onclick="loadCriticalAssetsDefaults()">Show required files</button>
         </div>
-        <div class="ca-note" style="margin-top:12px">Source files are loaded by upload because this static site cannot read local folders. The legacy <code>D:\Packaging</code> prototype is stale; this page is the packaging source of truth.</div>
+        <div class="ca-note" style="margin-top:12px">Source files are loaded by upload because this static site cannot read local folders. This page is the packaging source of truth.</div>
       </div>
 
       <div>
@@ -19733,9 +19733,9 @@ const CRITICAL_STATUS_META = {
   green: { label: 'Up to date', color: '#1E8449', className: 'green' },
   unknown: { label: 'Awaiting schedule', color: '#60717D', className: 'unknown' }
 };
-const CRITICAL_DEFAULT_SOURCE_PATH = 'D:\\Packaging\\data\\assets_with_coords.csv';
-const CRITICAL_DEFAULT_COMBINED_PATH = 'D:\\Packaging\\data\\combined_assets.csv';
-const CRITICAL_DEFAULT_INSPECTION_PATH = 'D:\\Packaging\\data\\critical_asset_inspections.xlsx';
+const CRITICAL_DEFAULT_SOURCE_PATH = 'assets_with_coords.csv';
+const CRITICAL_DEFAULT_COMBINED_PATH = 'combined_assets.csv';
+const CRITICAL_DEFAULT_INSPECTION_PATH = 'critical_asset_inspections.xlsx';
 let criticalAssetsMap = null;
 let criticalAssetsLayer = null;
 let criticalAssetsAll = [];
@@ -20209,7 +20209,7 @@ async function loadCriticalAssetsInput(event, kind) {
 function loadCriticalAssetsDefaults() {
   updateCriticalAssetsStatusLabels();
   renderCriticalAssetsView();
-  alert(`Use the upload buttons to load source files from ${CRITICAL_DEFAULT_SOURCE_PATH}, ${CRITICAL_DEFAULT_COMBINED_PATH}, and ${CRITICAL_DEFAULT_INSPECTION_PATH} once available.`);
+  alert(`Use the upload buttons to load ${CRITICAL_DEFAULT_SOURCE_PATH}, ${CRITICAL_DEFAULT_COMBINED_PATH}, and ${CRITICAL_DEFAULT_INSPECTION_PATH} once available.`);
 }
 
 // BOM Gauges

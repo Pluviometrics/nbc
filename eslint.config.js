@@ -15,6 +15,6 @@ export default [
     }
   },
   {
-    ignores: ['vendor/**', 'node_modules/**', '_libs/**', 'Superseeded/**', 'docs/archive/**', 'templates/**']
+    ignores: ['index.html', 'vendor/**', 'node_modules/**', '_libs/**', 'Superseeded/**', 'docs/archive/**', 'templates/**']
   }
 ];
