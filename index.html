@@ -10695,7 +10695,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     }
   };
 
-  // Auto-fetch ./locks.json when served over http (silently skipped on file://)
+  // Try fetch ./locks.json when served over http; on file:// or 404 fall
+  // through to a prompt that lets the user pick a lock file (the package
+  // report\'s embedded snapshot may not reflect the live tool\'s final
+  // locked state — applying the lock file fixes any drift).
   (async function tryAutoLoadLocks() {
     try {
       // If the user has already edited in this browser, keep their state
@@ -10713,9 +10716,35 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var parsed = JSON.parse(json);
       mergeLocksData(parsed);
       setLocksStatus(\'Locks: auto-loaded from ./locks.json\');
+      return;
     } catch (err) {
-      setLocksStatus(\'Locks: stored locally only (auto-load needs http server or use Load Lock File button)\');
+      setLocksStatus(\'Locks: stored locally only — load a lock file to sync with the live tool\');
     }
+    // Prompt the user to load a lock file or continue without.
+    var overlay = document.createElement(\'div\');
+    overlay.id = \'reportLockLoadPrompt\';
+    overlay.style.cssText = \'position:fixed;inset:0;background:rgba(15,23,42,0.62);display:flex;align-items:center;justify-content:center;z-index:99998;font-family:Segoe UI,system-ui,sans-serif;padding:20px\';
+    var card = document.createElement(\'div\');
+    card.style.cssText = \'background:#fff;max-width:540px;width:100%;padding:24px 26px;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.35)\';
+    card.innerHTML =
+      \'<h2 style="margin:0 0 10px;font-size:16px;color:#1A2B3C">Load a lock file?</h2>\' +
+      \'<p style="margin:0 0 18px;font-size:13px;color:#475569;line-height:1.55">\' +
+        \'No locks.json was auto-loaded from this folder. The package report shows the snapshot from when the ZIP was generated, which may not reflect the latest locked state in the live tool. Load the lock file from the same output folder to sync, or continue without.\' +
+      \'</p>\' +
+      \'<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center">\' +
+        \'<button type="button" id="reportLockPromptCancel" style="padding:8px 14px;font-size:12px;background:#fff;color:#475569;border:1px solid #cbd5e1;border-radius:6px;cursor:pointer">Continue without</button>\' +
+        \'<button type="button" id="reportLockPromptLoad" style="padding:8px 14px;font-size:12px;background:#00847F;color:#fff;border:1px solid #00847F;border-radius:6px;cursor:pointer;font-weight:600">Load Lock File…</button>\' +
+        \'<input type="file" id="reportLockPromptFile" accept=".json,.zip" style="display:none">\' +
+      \'</div>\';
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    var fileInput = card.querySelector(\'#reportLockPromptFile\');
+    card.querySelector(\'#reportLockPromptCancel\').addEventListener(\'click\', function() { overlay.remove(); });
+    card.querySelector(\'#reportLockPromptLoad\').addEventListener(\'click\', function() { fileInput.click(); });
+    fileInput.addEventListener(\'change\', function(ev) {
+      overlay.remove();
+      if (typeof window.loadReportLockFile === \'function\') window.loadReportLockFile(ev);
+    });
   })();
 
   // ---------- Edit Packages panel — full parity with live tool's renderEditPackagesPanel ----------
