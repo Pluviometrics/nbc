@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="edaabe4">
-<meta name="build-time" content="2026-05-13T12:33:16+10:00">
+<meta name="build-sha" content="df76823">
+<meta name="build-time" content="2026-05-13T12:44:13+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -6624,6 +6624,9 @@ function renameReliningPackage(anchorId, newPackageId) {
   // Mutate the live package so the UI reflects the rename without a full regen.
   target.package_id = trimmed;
   (target.assets || []).forEach(asset => { asset.package_id = trimmed; });
+  if (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages)) {
+    lastPackagingGeneration.packages = lastPackagingGeneration.packages.slice().sort(comparePackageIds);
+  }
   // Make sure the lock metadata sees the new id too (some helpers index by package_id).
   _ensureLocks();
   if (reliningManualMoves.locks.packages[anchorId] || isReliningPackageFullyLocked(target)) {
@@ -7834,7 +7837,7 @@ function renderEditPackagesPanel() {
   if (data.packages.some(p => !p.anchor_id)) {
     data.packages = ensurePackageAnchors(data.packages);
   }
-  const packages = data.packages;
+  const packages = (data.packages || []).slice().sort(comparePackageIds);
   const moveCount = manualReliningAssignmentCount();
   const affectedAnchors = new Set(Object.values(reliningManualMoves?.assignments || {}));
 
@@ -11152,6 +11155,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
     pkg.original_package_id = pkg.original_package_id || currentPkgId;
     pkg.id = trimmed;
+    packages.sort(compareReportPackageIds);
     pkgIndex = {};
     packages.forEach(function(p, i){ pkgIndex[p.id] = i; });
     // Record the rename for export. Key by anchor_id from the original
@@ -11382,7 +11386,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
     var c6Active = (data.options || {}).reliningMode === 'Condition 6, 7 and 8';
 
-    var cardsHtml = packages.map(function(pkg) {
+    var editPackages = packages.slice().sort(compareReportPackageIds);
+    var cardsHtml = editPackages.map(function(pkg) {
       var assets = pipes.filter(function(p){ return p.package_id === pkg.id; });
       var isManual = !!pkg.manual_origin;
       var suburbs = (pkg.suburbs || []).filter(Boolean).join(', ') || 'No suburb';
