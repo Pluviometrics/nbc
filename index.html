@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="df76823">
-<meta name="build-time" content="2026-05-13T12:44:13+10:00">
+<meta name="build-sha" content="5d5f923">
+<meta name="build-time" content="2026-05-13T13:12:01+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -6598,32 +6598,48 @@ function getReliningGlobalLockState() {
 // because the renumber pass will overwrite it on the next regen.
 function renameReliningPackage(anchorId, newPackageId) {
   if (!anchorId) return;
-  const trimmed = String(newPackageId || '').trim();
-  if (!trimmed) { alert('Package ID cannot be empty.'); return; }
-  if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
-  if (/\s/.test(trimmed) && trimmed !== trimmed.trim()) { alert('Package ID cannot start or end with whitespace.'); return; }
   const packages = (lastPackagingGeneration?.packages || []);
   const target = packages.find(p => p.anchor_id === anchorId);
   if (!target) { alert('Package not found in the current generation.'); return; }
-  // Collision check: any other current package using this id?
-  if (packages.some(p => p.anchor_id !== anchorId && String(p.package_id) === trimmed)) {
-    alert('Package ID "' + trimmed + '" is already in use by another package.');
-    return;
-  }
-  // Collision check: any other anchor's stored rename targeting this id?
-  const renamed = (reliningManualMoves && reliningManualMoves.renamedPackages) || {};
-  const collidingAnchor = Object.keys(renamed).find(a => a !== anchorId && renamed[a] === trimmed);
-  if (collidingAnchor) {
-    alert('Package ID "' + trimmed + '" is already reserved by another locked package.');
-    return;
+  let trimmed = String(newPackageId || '').trim();
+  let swapWith = null;
+  while (true) {
+    if (!trimmed) { alert('Package ID cannot be empty.'); return; }
+    if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
+    if (trimmed === String(target.package_id || '')) return;
+    swapWith = packages.find(p => p.anchor_id !== anchorId && String(p.package_id) === trimmed) || null;
+    if (swapWith) {
+      const shouldSwap = confirm('Package ID "' + trimmed + '" is already in use by ' + (swapWith.package_id || 'another package') + '.\n\nOK = swap package numbers.\nCancel = try another package number.');
+      if (shouldSwap) break;
+      const retry = prompt('New package ID for ' + target.package_id + ':\n(Use letters, numbers, underscores. Max 50 chars.)', trimmed);
+      if (retry == null) return;
+      trimmed = String(retry || '').trim();
+      continue;
+    }
+    // Collision check: any other anchor's stored rename targeting this id?
+    const renamed = (reliningManualMoves && reliningManualMoves.renamedPackages) || {};
+    const collidingAnchor = Object.keys(renamed).find(a => a !== anchorId && renamed[a] === trimmed);
+    if (collidingAnchor) {
+      const retry = prompt('Package ID "' + trimmed + '" is already reserved by another locked package.\n\nTry another package ID:', trimmed);
+      if (retry == null) return;
+      trimmed = String(retry || '').trim();
+      continue;
+    }
+    break;
   }
   pushReliningMoveHistory('Rename package');
   if (!reliningManualMoves) reliningManualMoves = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   if (!reliningManualMoves.renamedPackages) reliningManualMoves.renamedPackages = {};
+  const previousId = String(target.package_id || '');
   reliningManualMoves.renamedPackages[anchorId] = trimmed;
   // Mutate the live package so the UI reflects the rename without a full regen.
   target.package_id = trimmed;
   (target.assets || []).forEach(asset => { asset.package_id = trimmed; });
+  if (swapWith) {
+    swapWith.package_id = previousId;
+    (swapWith.assets || []).forEach(asset => { asset.package_id = previousId; });
+    if (swapWith.anchor_id) reliningManualMoves.renamedPackages[swapWith.anchor_id] = previousId;
+  }
   if (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages)) {
     lastPackagingGeneration.packages = lastPackagingGeneration.packages.slice().sort(comparePackageIds);
   }
@@ -6634,6 +6650,9 @@ function renameReliningPackage(anchorId, newPackageId) {
   }
   if (reliningManualMoves.anchorOrigins[anchorId]) {
     reliningManualMoves.anchorOrigins[anchorId].last_package_id = trimmed;
+  }
+  if (swapWith && swapWith.anchor_id && reliningManualMoves.anchorOrigins[swapWith.anchor_id]) {
+    reliningManualMoves.anchorOrigins[swapWith.anchor_id].last_package_id = previousId;
   }
   persistReliningManualMoves();
   renderGeneratedPackages(lastPackagingGeneration);
@@ -11121,54 +11140,106 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function reportRenamePackage(currentPkgId, newPackageId) {
     if (!currentPkgId) return;
     var trimmed = String(newPackageId || '').trim();
-    if (!trimmed) { alert('Package ID cannot be empty.'); return; }
-    if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
-    if (trimmed === currentPkgId) return;
     var pkg = packages.find(function(p){ return p.id === currentPkgId; });
     if (!pkg) { alert('Package not found.'); return; }
-    if (packages.some(function(p){ return p.id !== currentPkgId && p.id === trimmed; })) {
-      alert('Package ID "' + trimmed + '" is already in use by another package.');
-      return;
-    }
-    var renamedMap = (reportManualMoves && reportManualMoves.renamedPackages) || {};
-    var collide = Object.keys(renamedMap).find(function(k){ return renamedMap[k] === trimmed && k !== currentPkgId; });
-    if (collide) {
-      alert('Package ID "' + trimmed + '" is already reserved by another locked package.');
-      return;
+    var swapWith = null;
+    while (true) {
+      if (!trimmed) { alert('Package ID cannot be empty.'); return; }
+      if (trimmed.length > 50) { alert('Package ID must be 50 characters or fewer.'); return; }
+      if (trimmed === currentPkgId) return;
+      swapWith = packages.find(function(p){ return p.id !== currentPkgId && p.id === trimmed; }) || null;
+      if (swapWith) {
+        var shouldSwap = confirm('Package ID "' + trimmed + '" is already in use.\n\nOK = swap package numbers.\nCancel = try another package number.');
+        if (shouldSwap) break;
+        var retry = prompt('New package ID for ' + currentPkgId + ':\\n(Use letters, numbers, underscores. Max 50 chars.)', trimmed);
+        if (retry == null) return;
+        trimmed = String(retry || '').trim();
+        continue;
+      }
+      var renamedMap = (reportManualMoves && reportManualMoves.renamedPackages) || {};
+      var collide = Object.keys(renamedMap).find(function(k){ return renamedMap[k] === trimmed && k !== currentPkgId; });
+      if (collide) {
+        var retryReserved = prompt('Package ID "' + trimmed + '" is already reserved by another locked package.\\n\\nTry another package ID:', trimmed);
+        if (retryReserved == null) return;
+        trimmed = String(retryReserved || '').trim();
+        continue;
+      }
+      break;
     }
     ensureReportLocks();
     if (!reportManualMoves.renamedPackages) reportManualMoves.renamedPackages = {};
+    function swapReportMoveTarget(map, a, b) {
+      Object.keys(map || {}).forEach(function(uid) {
+        if (map[uid] === a) map[uid] = b;
+        else if (map[uid] === b) map[uid] = a;
+      });
+    }
+    function reportRenameKey(pkgId, fallback) {
+      var snap = (data.packages || []).find(function(p){ return p && (p.id === pkgId || p.original_package_id === pkgId); });
+      return (snap && snap.anchor_id) ? snap.anchor_id : fallback;
+    }
     // Cascade rename through pipes
-    pipes.forEach(function(p){ if (p.package_id === currentPkgId) p.package_id = trimmed; });
+    if (swapWith) {
+      pipes.forEach(function(p){
+        if (p.package_id === currentPkgId) p.package_id = '__REPORT_SWAP__';
+        else if (p.package_id === trimmed) p.package_id = currentPkgId;
+      });
+      pipes.forEach(function(p){ if (p.package_id === '__REPORT_SWAP__') p.package_id = trimmed; });
+    } else {
+      pipes.forEach(function(p){ if (p.package_id === currentPkgId) p.package_id = trimmed; });
+    }
     // Carry lock metadata to the new key
     var locks = reportManualMoves.locks;
-    if (locks && locks.packages && locks.packages[currentPkgId]) {
-      locks.packages[trimmed] = true;
-      delete locks.packages[currentPkgId];
+    if (locks && locks.packages) {
+      if (swapWith) {
+        var aLock = !!locks.packages[currentPkgId];
+        var bLock = !!locks.packages[trimmed];
+        delete locks.packages[currentPkgId];
+        delete locks.packages[trimmed];
+        if (aLock) locks.packages[trimmed] = true;
+        if (bLock) locks.packages[currentPkgId] = true;
+      } else if (locks.packages[currentPkgId]) {
+        locks.packages[trimmed] = true;
+        delete locks.packages[currentPkgId];
+      }
     }
     // Same for any persisted assignments / c6Included targeting the old id
-    Object.keys(reportManualMoves.assignments || {}).forEach(function(uid) {
-      if (reportManualMoves.assignments[uid] === currentPkgId) reportManualMoves.assignments[uid] = trimmed;
-    });
-    Object.keys(reportManualMoves.c6Included || {}).forEach(function(uid) {
-      if (reportManualMoves.c6Included[uid] === currentPkgId) reportManualMoves.c6Included[uid] = trimmed;
-    });
+    if (swapWith) {
+      swapReportMoveTarget(reportManualMoves.assignments, currentPkgId, trimmed);
+      swapReportMoveTarget(reportManualMoves.c6Included, currentPkgId, trimmed);
+      var sortA = _reportEditPipeSorts[currentPkgId];
+      var sortB = _reportEditPipeSorts[trimmed];
+      delete _reportEditPipeSorts[currentPkgId];
+      delete _reportEditPipeSorts[trimmed];
+      if (sortA) _reportEditPipeSorts[trimmed] = sortA;
+      if (sortB) _reportEditPipeSorts[currentPkgId] = sortB;
+    } else {
+      Object.keys(reportManualMoves.assignments || {}).forEach(function(uid) {
+        if (reportManualMoves.assignments[uid] === currentPkgId) reportManualMoves.assignments[uid] = trimmed;
+      });
+      Object.keys(reportManualMoves.c6Included || {}).forEach(function(uid) {
+        if (reportManualMoves.c6Included[uid] === currentPkgId) reportManualMoves.c6Included[uid] = trimmed;
+      });
+    }
     pkg.original_package_id = pkg.original_package_id || currentPkgId;
     pkg.id = trimmed;
+    if (swapWith) {
+      swapWith.original_package_id = swapWith.original_package_id || trimmed;
+      swapWith.id = currentPkgId;
+    }
     packages.sort(compareReportPackageIds);
     pkgIndex = {};
     packages.forEach(function(p, i){ pkgIndex[p.id] = i; });
     // Record the rename for export. Key by anchor_id from the original
     // build-time snapshot so it stays meaningful across regenerations.
-    var origSnap = (data.packages || []).find(function(p){ return p && (p.id === currentPkgId || p.id === trimmed || p.original_package_id === currentPkgId); });
-    var renameKey = (origSnap && origSnap.anchor_id) ? origSnap.anchor_id : currentPkgId;
+    var renameKey = reportRenameKey(currentPkgId, currentPkgId);
+    var swapRenameKey = swapWith ? reportRenameKey(trimmed, trimmed) : null;
     // Tidy up: if user re-renames the same package, replace the old entry.
-    if (renameKey !== currentPkgId) {
-      Object.keys(reportManualMoves.renamedPackages).forEach(function(k){
-        if (reportManualMoves.renamedPackages[k] === currentPkgId) delete reportManualMoves.renamedPackages[k];
-      });
-    }
+    Object.keys(reportManualMoves.renamedPackages).forEach(function(k){
+      if (reportManualMoves.renamedPackages[k] === currentPkgId || reportManualMoves.renamedPackages[k] === trimmed) delete reportManualMoves.renamedPackages[k];
+    });
     reportManualMoves.renamedPackages[renameKey] = trimmed;
+    if (swapWith && swapRenameKey) reportManualMoves.renamedPackages[swapRenameKey] = currentPkgId;
     saveReportMoves();
     // Re-render (pure metadata + pipe.package_id rewrite — no engine work).
     if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
@@ -11316,6 +11387,57 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   // ---------- Per-package pipe sort (Edit panel) ----------
+  var _reportEditPackageSort = { key: 'package', dir: 'asc' };
+  function _reportEditPackageSortIndicator(key) {
+    var s = _reportEditPackageSort;
+    if (!s || s.key !== key) return '<span style="opacity:0.28;font-size:9px;margin-left:4px;letter-spacing:-1px">▴▾</span>';
+    return s.dir === 'desc'
+      ? '<span style="font-size:11px;margin-left:4px;color:#00847F">▾</span>'
+      : '<span style="font-size:11px;margin-left:4px;color:#00847F">▴</span>';
+  }
+  function _reportEditPackageSortValue(pkg, key) {
+    var assets = pipes.filter(function(p){ return p.package_id === pkg.id; });
+    if (key === 'package') return String(pkg.id || '');
+    if (key === 'suburb') return (pkg.suburbs || []).filter(Boolean).join(', ');
+    if (key === 'pipes') return assets.length;
+    if (key === 'diam') {
+      return assets.reduce(function(max, p){ return Math.max(max, Number(p.diameter_mm) || 0); }, 0);
+    }
+    if (key === 'length') {
+      return assets.reduce(function(sum, p){ return sum + (Number(p.length_m) || 0); }, 0);
+    }
+    if (key === 'cost') {
+      return assets.reduce(function(sum, p){ return sum + (Number(p.pipe_cost) || 0); }, 0);
+    }
+    return '';
+  }
+  function _reportEditSortPackages(list) {
+    var state = _reportEditPackageSort || { key: 'package', dir: 'asc' };
+    var dir = state.dir === 'desc' ? -1 : 1;
+    if (!state.key || state.key === 'package') {
+      return list.slice().sort(compareReportPackageIds);
+    }
+    return list.slice().sort(function(a, b) {
+      var av = _reportEditPackageSortValue(a, state.key);
+      var bv = _reportEditPackageSortValue(b, state.key);
+      var cmp = (typeof av === 'number' && typeof bv === 'number')
+        ? av - bv
+        : String(av).localeCompare(String(bv), undefined, { numeric: true });
+      return cmp * dir || compareReportPackageIds(a, b);
+    });
+  }
+  function reportToggleEditPackageSort(key) {
+    if (!key) return;
+    if (_reportEditPackageSort.key === key) {
+      _reportEditPackageSort.dir = _reportEditPackageSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      var numeric = key === 'pipes' || key === 'diam' || key === 'length' || key === 'cost';
+      _reportEditPackageSort = { key: key, dir: numeric ? 'desc' : 'asc' };
+    }
+    renderReportEditPanel();
+  }
+  window.reportToggleEditPackageSort = reportToggleEditPackageSort;
+
   var _reportEditPipeSorts = {};
   function _reportEditPipeSortIndicator(pkgId, key) {
     var s = _reportEditPipeSorts[pkgId];
@@ -11385,8 +11507,16 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       + '</div>';
 
     var c6Active = (data.options || {}).reliningMode === 'Condition 6, 7 and 8';
+    var packageSortHeader = '<div class="edit-pkg-asset-row head" style="grid-template-columns:1fr 1.4fr .7fr .8fr .8fr .9fr;position:sticky;top:0;z-index:12;background:#1A2B3C;color:#fff;border-radius:6px;margin:8px 0 10px;padding:8px 10px">'
+      + '<div onclick="reportToggleEditPackageSort(\\'package\\')" style="cursor:pointer;user-select:none" title="Sort packages by package ID">Package' + _reportEditPackageSortIndicator('package') + '</div>'
+      + '<div onclick="reportToggleEditPackageSort(\\'suburb\\')" style="cursor:pointer;user-select:none" title="Sort packages by suburb">Suburb' + _reportEditPackageSortIndicator('suburb') + '</div>'
+      + '<div onclick="reportToggleEditPackageSort(\\'pipes\\')" style="cursor:pointer;user-select:none;text-align:right" title="Sort packages by pipe count">Pipes' + _reportEditPackageSortIndicator('pipes') + '</div>'
+      + '<div onclick="reportToggleEditPackageSort(\\'diam\\')" style="cursor:pointer;user-select:none;text-align:right" title="Sort packages by largest diameter">Max Diam' + _reportEditPackageSortIndicator('diam') + '</div>'
+      + '<div onclick="reportToggleEditPackageSort(\\'length\\')" style="cursor:pointer;user-select:none;text-align:right" title="Sort packages by total length">Length' + _reportEditPackageSortIndicator('length') + '</div>'
+      + '<div onclick="reportToggleEditPackageSort(\\'cost\\')" style="cursor:pointer;user-select:none;text-align:right" title="Sort packages by total cost">Cost' + _reportEditPackageSortIndicator('cost') + '</div>'
+      + '</div>';
 
-    var editPackages = packages.slice().sort(compareReportPackageIds);
+    var editPackages = _reportEditSortPackages(packages);
     var cardsHtml = editPackages.map(function(pkg) {
       var assets = pipes.filter(function(p){ return p.package_id === pkg.id; });
       var isManual = !!pkg.manual_origin;
@@ -11494,7 +11624,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       return '<div class="edit-pkg-card" data-pkg-id="' + esc(pkg.id || '') + '">' + headerHtml + headRow + rows + c6FooterHtml + '</div>';
     }).join('');
 
-    area.innerHTML = toolbarHtml + cardsHtml;
+    area.innerHTML = toolbarHtml + packageSortHeader + cardsHtml;
   }
 
   window.renderReportEditPanel = renderReportEditPanel;
