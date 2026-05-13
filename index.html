@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="276bea4">
-<meta name="build-time" content="2026-05-14T09:09:25+10:00">
+<meta name="build-sha" content="d5c877f">
+<meta name="build-time" content="2026-05-14T09:21:13+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -961,7 +961,7 @@ window.addEventListener('keydown', (event) => {
           </select>
         </div>
         <div class="fg">
-          <label for="pkgMethod">Packaging Method<span class="help-icon" title="How to split candidates into work-order packages: by total $ value, by pipe count, by location-only, or single High Criticality bundle (pipes ≥1050 mm OR criticality ≥4.0).">?</span></label>
+          <label for="pkgMethod">Packaging Method<span class="help-icon" title="How to split candidates into work-order packages: by total $ value, by pipe count, by location-only, or single High Criticality bundle (pipes ≥1050 mm OR criticality ≥50).">?</span></label>
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="value" selected>Value based</option>
             <option value="count">Pipe count based</option>
@@ -5626,7 +5626,7 @@ function splitReliningItemsByLocation(items, options) {
 // Max Package Value cap is exceeded, split into multiple packages within the
 // current grouping bin (suburb / cluster / single bin for LGA).
 const HIGH_CRIT_DIAMETER_MM = 1050;
-const HIGH_CRIT_SCORE_THRESHOLD = 4.0;
+const HIGH_CRIT_SCORE_THRESHOLD = 50;
 
 function isHighCriticalityCandidate(item) {
   if (!item) return false;
@@ -12361,7 +12361,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   if (options.method === 'count') {
     ovBullets.push('Packages are split after about <strong>' + (options.pipesPerPackage != null ? Number(options.pipesPerPackage).toLocaleString() : '—') + '</strong> pipes.');
   } else if (options.method === 'highCrit') {
-    ovBullets.push('High Criticality bundle — every pipe <strong>≥1050 mm</strong> OR with criticality ≥ <strong>4.0</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.');
+    ovBullets.push('High Criticality bundle — every pipe <strong>≥1050 mm</strong> OR with criticality ≥ <strong>50</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.');
   } else {
     ovBullets.push('Packages are split when the next pipe would push the package above <strong>' + (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') + '</strong>.');
   }
