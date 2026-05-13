@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="730b306">
-<meta name="build-time" content="2026-05-14T08:48:50+10:00">
+<meta name="build-sha" content="e4ab299">
+<meta name="build-time" content="2026-05-14T08:53:54+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -6098,18 +6098,34 @@ function attachC6AddOns(packages, c6Pool, options = {}) {
 
 // Manual package editing: each generated package gets an opaque anchor_id;
 // the user's per-asset move log is persisted to sessionStorage and replayed
-// on every regeneration. Locks/moves/renames clear when the browser tab is
-// closed but survive page refreshes (sessionStorage semantics). Any legacy
-// localStorage entry from prior versions is purged on first load.
+// on every regeneration. Locks/moves/renames survive F5 refresh but are
+// cleared on tab close (and on Chrome's session-restore reopen — see the
+// navigation-type guard below). Any legacy localStorage entry from prior
+// versions is purged on first load.
 const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
+const RELINING_CLASHED_PIPES_KEY = 'nbcReliningClashedPipes_v1';
 try { localStorage.removeItem(RELINING_MANUAL_MOVES_KEY); } catch (_) {}
+// Plain sessionStorage survives Chrome's "Continue where you left off"
+// session-restore, so locks would resurrect even after the user closed
+// the tab. Guard: only keep stored state when this load is a 'reload'
+// (F5/Ctrl+R). 'navigate' = fresh tab, 'back_forward' = session restore
+// or history nav — both should start clean.
+(function purgeReliningStateIfNotReload() {
+  try {
+    const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+    const type = nav && nav.type ? nav.type : null;
+    if (type !== 'reload') {
+      sessionStorage.removeItem(RELINING_MANUAL_MOVES_KEY);
+      sessionStorage.removeItem(RELINING_CLASHED_PIPES_KEY);
+    }
+  } catch (_) { /* sessionStorage may throw in private mode */ }
+})();
 let reliningManualMoves = loadReliningManualMoves();
 
 // Transient set of asset_ids that were resolved by the user during a
 // lock-file import clash modal. Persisted to sessionStorage so refreshes
 // keep the visual marker; cleared on tab close. Render layer uses this
 // to colour clashed asset_ids black instead of red/green.
-const RELINING_CLASHED_PIPES_KEY = 'nbcReliningClashedPipes_v1';
 let reliningClashedPipes = loadReliningClashedPipes();
 
 function loadReliningClashedPipes() {
