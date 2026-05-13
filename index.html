@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="3d22bb3">
-<meta name="build-time" content="2026-05-13T09:59:51+10:00">
+<meta name="build-sha" content="edaabe4">
+<meta name="build-time" content="2026-05-13T12:33:16+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -48,6 +48,21 @@
     z-index: 10;
     background: var(--navy, #1A2B3C);
     color: #fff;
+  }
+  .asset-hover-popover {
+    position: fixed;
+    display: none;
+    z-index: 10000;
+    max-width: 330px;
+    padding: 10px 12px;
+    border: 1px solid rgba(26,43,60,.18);
+    border-radius: 8px;
+    background: #fbfdff;
+    box-shadow: 0 12px 36px rgba(15,23,42,.22);
+    pointer-events: none;
+  }
+  .asset-hover-popover a {
+    pointer-events: auto;
   }
 </style>
 </head>
@@ -7071,6 +7086,55 @@ function _nextFreeReliningPackageNumber(usedPackageIds) {
   return n;
 }
 
+function _sameAssetIdSet(a, b) {
+  const aa = (a || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean).sort();
+  const bb = (b || []).map(v => String(v == null ? '' : v).trim()).filter(Boolean).sort();
+  if (aa.length !== bb.length) return false;
+  for (let i = 0; i < aa.length; i += 1) {
+    if (aa[i] !== bb[i]) return false;
+  }
+  return true;
+}
+
+async function showReliningPackageIdConflictModal(conflicts, usedIds) {
+  const decisions = new Map();
+  const reserved = new Set((usedIds || []).map(id => String(id || '').trim()).filter(Boolean));
+  for (const conflict of conflicts) {
+    const msg = 'Imported locked package "' + conflict.package_id + '" conflicts with an existing locked package using the same package number.\n\n'
+      + 'OK = rename the imported package.\n'
+      + 'Cancel = rename the current locked package.';
+    const renameImported = confirm(msg);
+    let nextId = '';
+    while (!nextId) {
+      const target = renameImported ? 'imported' : 'current';
+      const proposed = prompt('New package ID for the ' + target + ' locked package:', conflict.package_id);
+      if (proposed == null) return null;
+      const trimmed = String(proposed).trim();
+      if (!trimmed) {
+        alert('Package ID cannot be empty.');
+        continue;
+      }
+      if (trimmed === conflict.package_id) {
+        alert('Choose a different package ID to resolve the conflict.');
+        continue;
+      }
+      if (reserved.has(trimmed)) {
+        alert('Package ID "' + trimmed + '" is already in use by another locked package.');
+        continue;
+      }
+      nextId = trimmed;
+      reserved.add(trimmed);
+    }
+    decisions.set(conflict.package_id, {
+      renameImported,
+      newId: nextId,
+      imported: conflict.imported,
+      current: conflict.current
+    });
+  }
+  return decisions;
+}
+
 // Modal: per-pipe clash resolution. Returns a Promise<Map<asset_id, 'keep_existing'|'use_imported'>>
 // or rejects/resolves(null) when the user cancels. Each row exposes an
 // "Apply to all remaining" shortcut that fills every still-unresolved row
@@ -7293,6 +7357,7 @@ async function loadReliningLocksFile(file) {
     // Source = lastPackagingGeneration.packages where isReliningPackageFullyLocked.
     const currentLocked = new Map(); // asset_id → { anchor_id, package_id, asset_ids[], renamed, manual_origin, suburbs, _pkgRef }
     const currentPackages = new Map(); // anchor_id → ref
+    const currentPackagesById = new Map(); // package_id → ref
     const prevPkgs = (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages))
       ? lastPackagingGeneration.packages : [];
     prevPkgs.forEach(pkg => {
@@ -7311,8 +7376,59 @@ async function loadReliningLocksFile(file) {
         suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
       };
       currentPackages.set(anchorId, ref);
+      currentPackagesById.set(ref.package_id, ref);
       ids.forEach(id => currentLocked.set(id, ref));
     });
+
+    // Package-number conflicts are resolved before pipe clashes. Exact
+    // duplicates are ignored so re-importing the same PM lock file is a
+    // no-op instead of a noisy clash.
+    const duplicatePackages = [];
+    const packageIdConflicts = [];
+    filePackages.forEach((fileRef, packageId) => {
+      const curRef = currentPackagesById.get(packageId);
+      if (!curRef) return;
+      if (_sameAssetIdSet(fileRef.asset_ids, curRef.asset_ids)) {
+        duplicatePackages.push(packageId);
+        filePackages.delete(packageId);
+        fileRef.asset_ids.forEach(id => {
+          if (fileLocked.get(id) === fileRef) fileLocked.delete(id);
+        });
+      } else {
+        packageIdConflicts.push({ package_id: packageId, imported: fileRef, current: curRef });
+      }
+    });
+    if (duplicatePackages.length && !filePackages.size) {
+      alert('Duplicate package imported. No action taken.');
+      return;
+    }
+    if (duplicatePackages.length) {
+      alert('Duplicate package imported. No action taken for: ' + duplicatePackages.join(', '));
+    }
+    if (packageIdConflicts.length) {
+      const usedIds = [
+        ...Array.from(currentPackagesById.keys()),
+        ...Array.from(filePackages.keys())
+      ];
+      const packageDecisions = await showReliningPackageIdConflictModal(packageIdConflicts, usedIds);
+      if (!packageDecisions) {
+        console.info('[Locks] Import cancelled at package-id conflict modal.');
+        return;
+      }
+      packageDecisions.forEach(decision => {
+        const ref = decision.renameImported ? decision.imported : decision.current;
+        const oldId = ref.package_id;
+        ref.package_id = decision.newId;
+        ref.renamed = true;
+        if (decision.renameImported) {
+          filePackages.delete(oldId);
+          filePackages.set(ref.package_id, ref);
+        } else {
+          currentPackagesById.delete(oldId);
+          currentPackagesById.set(ref.package_id, ref);
+        }
+      });
+    }
 
     // ── Compute clashes: pipes locked in BOTH where file ≠ current ──
     const clashes = [];
@@ -7409,23 +7525,27 @@ async function loadReliningLocksFile(file) {
       assetIds.forEach(id => { newPipeLocks[id] = true; });
     });
 
-    // Preserve incoming non-lock state from the file (assignments, c6 lists,
-    // moveOrigins, history) but drop the lockedPackages handoff and replace
-    // the lock dicts wholesale with the merged result above.
-    const fileAssignments   = (parsed.assignments   && typeof parsed.assignments   === 'object') ? parsed.assignments   : {};
-    const fileMoveOrigins   = (parsed.moveOrigins   && typeof parsed.moveOrigins   === 'object') ? parsed.moveOrigins   : {};
-    const fileC6Excluded    = (parsed.c6Excluded    && typeof parsed.c6Excluded    === 'object') ? parsed.c6Excluded    : {};
-    const fileC6Included    = (parsed.c6Included    && typeof parsed.c6Included    === 'object') ? parsed.c6Included    : {};
+    const lockedPackageHandoff = lockedPackages.map(pkg => ({
+      anchor_id: pkg.anchor_id,
+      package_id: pkg.package_id,
+      asset_ids: (pkg.assets || []).map(a => String(a && a.assetId != null ? a.assetId : '').trim()).filter(Boolean),
+      manual_origin: !!pkg.manual_origin,
+      renamed: !!newRenamed[pkg.anchor_id],
+      suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
+    })).filter(entry => entry.asset_ids.length);
 
+    // Imported locked packages are authoritative. Clear unlocked-package edit
+    // state so it cannot drag stale package numbers into the rerun; the engine
+    // will rebuild the unlocked pool around these sealed snapshots.
     reliningManualMoves = {
-      assignments: { ...(reliningManualMoves?.assignments || {}), ...fileAssignments },
+      assignments: {},
       anchorOrigins: newAnchorOrigins,
       locks: { pipes: newPipeLocks, packages: newPkgLocks },
-      moveOrigins: { ...(reliningManualMoves?.moveOrigins || {}), ...fileMoveOrigins },
-      c6Excluded: { ...(reliningManualMoves?.c6Excluded || {}), ...fileC6Excluded },
-      c6Included: { ...(reliningManualMoves?.c6Included || {}), ...fileC6Included },
+      moveOrigins: {},
+      c6Excluded: {},
+      c6Included: {},
       renamedPackages: newRenamed,
-      lockedPackages: [], // engine handoff intentionally empty — engine will not run
+      lockedPackages: lockedPackageHandoff,
       history: reliningManualMoves?.history || []
     };
     persistReliningManualMoves();
@@ -7434,55 +7554,9 @@ async function loadReliningLocksFile(file) {
     clashes.forEach(cl => reliningClashedPipes.add(String(cl.asset_id)));
     persistReliningClashedPipes();
 
-    // ── Build the leftover bucket. ──
-    const lockedAssetIdSet = new Set();
-    lockedPackages.forEach(pkg => (pkg.assets || []).forEach(a => {
-      const id = String(a && a.assetId != null ? a.assetId : '').trim();
-      if (id) lockedAssetIdSet.add(id);
-    }));
-    const leftoverPkgNumber = _nextFreeReliningPackageNumber(lockedPackages.map(p => p.package_id));
-    const leftoverPkgId = `RLN_${String(leftoverPkgNumber).padStart(3, '0')}`;
-    const leftoverPkg = _buildLeftoverReliningPackage(lockedAssetIdSet, options, leftoverPkgId);
-
-    const finalPackages = leftoverPkg ? [...lockedPackages, leftoverPkg] : [...lockedPackages];
-
-    // Stamp priority fields so renderers don't NaN out.
-    const prioritised = addPackagePriority(finalPackages);
-
-    // ── Run sanity check (leftover bucket likely flagged as oversize). ──
-    const sanity = (typeof validateReliningPackageTargets === 'function')
-      ? validateReliningPackageTargets(prioritised, options)
-      : { issues: [], summary: { totalChecked: 0, totalIssues: 0, undersized: 0, oversized: 0 } };
-
-    const totalLength = prioritised.reduce((s, p) => s + (Number(p.total_length_m) || 0), 0);
-    const totalCost   = prioritised.reduce((s, p) => s + (Number(p.total_cost) || 0), 0);
-    const costedCount = prioritised.reduce((s, p) => s + (p.assets || []).filter(a => Number.isFinite(a.pipeCost)).length, 0);
-    const uncostedCount = prioritised.reduce((s, p) => s + (p.assets || []).filter(a => !Number.isFinite(a.pipeCost)).length, 0);
-
-    lastPackagingGeneration = {
-      options,
-      preview: lastReliningPackagingPreview || { eligible: [], costed: [], uncosted: [], withCoords: [], noCoords: [], c6Pool: [], asset_count: reliningAssetsRows.length, suburb_column: suburbCol, streams: [] },
-      package_count: prioritised.length,
-      costed_pipe_count: costedCount,
-      uncosted_pipe_count: uncostedCount,
-      total_length_m: Number(totalLength.toFixed(1)),
-      total_cost: Number(totalCost.toFixed(2)),
-      rate_stale_count: 0,
-      packages: prioritised,
-      uncosted_assets: [],
-      generated_at: new Date().toISOString(),
-      _sanityIssues: sanity,
-      _imported_from_locks: true
-    };
-
-    setPackagingStatus(true, `${prioritised.length.toLocaleString()} packages from import (${lockedPackages.length} locked, ${leftoverPkg ? '1 leftover' : '0 leftover'})`);
-    if (typeof renderGeneratedPackages === 'function') renderGeneratedPackages(lastPackagingGeneration);
-    if (typeof renderReliningPackagesMap === 'function') renderReliningPackagesMap();
-    if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
-    if (sanity.issues.length && typeof showReliningPackageSanityModal === 'function') {
-      showReliningPackageSanityModal(sanity, options);
-    }
-    console.info(`[Locks] Imported ${lockedPackages.length} locked package(s) + ${leftoverPkg ? 1 : 0} leftover (${clashes.length} clash${clashes.length === 1 ? '' : 'es'} resolved) from ${file.name}`);
+    await generateReliningPackages();
+    setPackagingStatus(true, `${lockedPackageHandoff.length.toLocaleString()} locked package${lockedPackageHandoff.length === 1 ? '' : 's'} imported and packages regenerated`);
+    console.info(`[Locks] Imported ${lockedPackageHandoff.length} locked package(s), regenerated unlocked packages (${clashes.length} clash${clashes.length === 1 ? '' : 'es'} resolved) from ${file.name}`);
   } catch (err) {
     alert('Failed to load locks file: ' + (err?.message || err));
   }
@@ -8508,6 +8582,18 @@ const _packageSortState = {
   cctv:     { column: null, dir: 'asc' }
 };
 
+function comparePackageIds(a, b) {
+  const av = String(a?.package_id || a?.id || a || '');
+  const bv = String(b?.package_id || b?.id || b || '');
+  const am = av.match(/^([A-Za-z_]*?)(\d+)$/);
+  const bm = bv.match(/^([A-Za-z_]*?)(\d+)$/);
+  if (am && bm && am[1] === bm[1]) {
+    const d = Number(am[2]) - Number(bm[2]);
+    if (d) return d;
+  }
+  return av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 // Pull the RAW underlying value from a package for sorting — never the
 // formatted display string ("$1,234" sorts wrong lexically).
 function _getPackageSortValue(pkg, column) {
@@ -8531,7 +8617,7 @@ function _getPackageSortValue(pkg, column) {
 
 function _sortPackages(packages, kind) {
   const state = _packageSortState[kind];
-  if (!state || !state.column) return packages.slice();
+  if (!state || !state.column) return packages.slice().sort(comparePackageIds);
   const dir = state.dir === 'desc' ? -1 : 1;
   return packages.slice().sort((a, b) => {
     const av = _getPackageSortValue(a, state.column);
@@ -8634,10 +8720,10 @@ function renderGeneratedPackages(data) {
     </div>
     <table style="width:100%;min-width:1500px;table-layout:fixed">
       <colgroup>${packageHeaders.map(h => `<col style="width:${({
-        package_id: 8.7, suburb: 12.0, pipe_count: 5.7,
+        package_id: 8.7, suburb: 6.5, pipe_count: 5.7,
         condition_6_count: 7.5, condition_7_count: 7.5, condition_8_count: 7.5,
         total_length_m: 7.0, total_cost: 7.0,
-        diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 19.8
+        diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 25.3
       })[h] || 10}%">`).join('')}</colgroup>
       <thead>
         <tr>${packageHeaders.map(h => `<th onclick="sortPackagesByColumn('relining', '${h}')" style="cursor:pointer;user-select:none;white-space:normal;word-break:break-word" title="Click to sort by ${escapeHtml(displayTableHeader(h))}">${escapeHtml(displayTableHeader(h))}${_packageSortIndicator('relining', h)}</th>`).join('')}</tr>
@@ -9520,6 +9606,7 @@ async function generateReliningPackages() {
       packages = attachC6AddOns(packages, preview.c6Pool, options);
       packages = prioritiseAndRenumberReliningPackages(packages);
     }
+    packages = packages.slice().sort(comparePackageIds);
     logReliningPackageDebug(packages, options);
     const totalLength = packages.reduce((sum, pkg) => sum + (Number(pkg.total_length_m) || 0), 0);
     const totalCost = packages.reduce((sum, pkg) => sum + (Number(pkg.total_cost) || 0), 0);
@@ -9728,6 +9815,50 @@ document.addEventListener('click', (event) => {
   if (!link) return;
   event.preventDefault();
   focusReliningAssetOnMap(decodeURIComponent(link.getAttribute('data-relining-asset-id') || ''));
+});
+
+let reliningAssetHoverEl = null;
+function findReliningAssetForHover(assetId) {
+  const id = String(assetId || '');
+  const packages = lastPackagingGeneration?.packages || [];
+  for (const pkg of packages) {
+    const asset = (pkg.assets || []).find(a => String(a.assetId) === id);
+    if (asset) return { pkg, asset };
+  }
+  return null;
+}
+function moveReliningAssetHover(event) {
+  if (!reliningAssetHoverEl) return;
+  const pad = 14;
+  const width = reliningAssetHoverEl.offsetWidth || 260;
+  const height = reliningAssetHoverEl.offsetHeight || 160;
+  let left = event.clientX + pad;
+  let top = event.clientY + pad;
+  if (left + width > window.innerWidth - 8) left = event.clientX - width - pad;
+  if (top + height > window.innerHeight - 8) top = event.clientY - height - pad;
+  reliningAssetHoverEl.style.left = Math.max(8, left) + 'px';
+  reliningAssetHoverEl.style.top = Math.max(8, top) + 'px';
+}
+document.addEventListener('mouseover', (event) => {
+  const link = event.target?.closest?.('[data-relining-asset-id]');
+  if (!link) return;
+  const found = findReliningAssetForHover(decodeURIComponent(link.getAttribute('data-relining-asset-id') || ''));
+  if (!found) return;
+  if (!reliningAssetHoverEl) {
+    reliningAssetHoverEl = document.createElement('div');
+    reliningAssetHoverEl.className = 'asset-hover-popover';
+    document.body.appendChild(reliningAssetHoverEl);
+  }
+  reliningAssetHoverEl.innerHTML = buildPipePopupHtml(found.asset, found.pkg);
+  reliningAssetHoverEl.style.display = 'block';
+  moveReliningAssetHover(event);
+});
+document.addEventListener('mousemove', (event) => {
+  if (event.target?.closest?.('[data-relining-asset-id]')) moveReliningAssetHover(event);
+});
+document.addEventListener('mouseout', (event) => {
+  if (!event.target?.closest?.('[data-relining-asset-id]')) return;
+  if (reliningAssetHoverEl) reliningAssetHoverEl.style.display = 'none';
 });
 
 function focusReliningAssetOnMap(assetId) {
@@ -10013,6 +10144,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     },
     packages: reportPackages,
     pipes: reportPipes,
+    initial_moves: (typeof translateLocksForExport === 'function') ? translateLocksForExport() : null,
     // Full C6 pool (every condition-6 pipe in dataset, not just attached add-ons)
     // Powers the "Show all other C6" toggle in the standalone map.
     c6_pool: previewSnapshot && Array.isArray(previewSnapshot.c6Pool)
@@ -10100,6 +10232,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function loadReportMoves() {
     try {
       const raw = localStorage.getItem(REPORT_MOVES_KEY);
+      if (!raw && data.initial_moves && typeof data.initial_moves === 'object') {
+        return {
+          assignments: data.initial_moves.assignments || {},
+          anchorOrigins: data.initial_moves.anchorOrigins || {},
+          locks: { pipes: (data.initial_moves.locks && data.initial_moves.locks.pipes) || {}, packages: (data.initial_moves.locks && data.initial_moves.locks.packages) || {} },
+          moveOrigins: data.initial_moves.moveOrigins || {},
+          c6Excluded: data.initial_moves.c6Excluded || {},
+          c6Included: data.initial_moves.c6Included || {},
+          renamedPackages: data.initial_moves.renamedPackages || {},
+          lockedPackages: Array.isArray(data.initial_moves.lockedPackages) ? data.initial_moves.lockedPackages : []
+        };
+      }
       if (!raw) return emptyMoves();
       const parsed = JSON.parse(raw);
       return {
@@ -10213,6 +10357,18 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     });
   }
 
+  function compareReportPackageIds(a, b) {
+    var av = String((a && (a.id || a.package_id)) || a || '');
+    var bv = String((b && (b.id || b.package_id)) || b || '');
+    var am = av.match(/^([A-Za-z_]*?)(\\d+)$/);
+    var bm = bv.match(/^([A-Za-z_]*?)(\\d+)$/);
+    if (am && bm && am[1] === bm[1]) {
+      var d = Number(am[2]) - Number(bm[2]);
+      if (d) return d;
+    }
+    return av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
   function prioritiseAndRenumberReportPackages() {
     packages.forEach(function(pkg) {
       const items = pipes.filter(function(p){ return p.package_id === pkg.id; });
@@ -10303,6 +10459,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       if (typeof saveReportMoves === 'function') saveReportMoves();
     }
     pkgIndex = {};
+    packages.sort(compareReportPackageIds);
     packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
   }
 
@@ -10316,16 +10473,14 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     // normal phases run.
     var _isFreshState = (
       !Object.keys(reportManualMoves.assignments || {}).length &&
-      !Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).length &&
-      !Object.keys((reportManualMoves.locks && reportManualMoves.locks.pipes) || {}).length &&
-      !Object.keys(reportManualMoves.anchorOrigins || {}).length &&
       !Object.keys(reportManualMoves.c6Included || {}).length &&
       !Object.keys(reportManualMoves.c6Excluded || {}).length &&
       !Object.keys(reportManualMoves.renamedPackages || {}).length
     );
     if (_isFreshState) {
       packages.length = 0;
-      (data.packages || []).forEach(function(p){ packages.push(p); });
+      (data.packages || []).forEach(function(p){ packages.push(Object.assign({}, p)); });
+      pipes = (data.pipes || []).map(function(p){ return Object.assign({}, p); });
       pkgIndex = {};
       packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
       // Mirror Phase 5 render sequence exactly
@@ -11745,6 +11900,41 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     renderReportPackagesTable();
   }
 
+  function findReportAsset(assetId) {
+    var id = String(assetId || '');
+    for (var i = 0; i < packages.length; i++) {
+      var pkg = packages[i];
+      var pipe = pipes.find(function(p){ return String(p.asset_id) === id && p.package_id === pkg.id; });
+      if (pipe) return { pkg: pkg, pipe: pipe };
+    }
+    return null;
+  }
+
+  function focusReportAsset(assetId) {
+    var found = findReportAsset(assetId);
+    if (!found) return;
+    selectReportPackage(found.pkg.id);
+    var mapEl = document.getElementById('reportPackagesMap');
+    if (mapEl && mapEl.scrollIntoView) mapEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(function() {
+      if (!reportMap) return;
+      var lat = Number(found.pipe.lat);
+      var lon = Number(found.pipe.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+        if (Number.isFinite(found.pipe.start_lat) && Number.isFinite(found.pipe.start_lon) && Number.isFinite(found.pipe.end_lat) && Number.isFinite(found.pipe.end_lon)) {
+          lat = (found.pipe.start_lat + found.pipe.end_lat) / 2;
+          lon = (found.pipe.start_lon + found.pipe.end_lon) / 2;
+        }
+      }
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      reportMap.setView([lat, lon], Math.max(reportMap.getZoom(), 18), { animate: true });
+      L.popup({ closeButton: true, autoPan: true })
+        .setLatLng([lat, lon])
+        .setContent(buildReportPipePopup(found.pipe, found.pkg))
+        .openOn(reportMap);
+    }, 200);
+  }
+
   function refreshReportMap() {
     renderReportPackagesMap({ fit: true });
   }
@@ -11770,6 +11960,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   window.clearReportSelection = clearReportSelection;
   window.renderReportPackagesMap = renderReportPackagesMap;
   window.selectReportPackage = selectReportPackage;
+  window.focusReportAsset = focusReportAsset;
 
   window.switchReportSubtab = function(name) {
     document.querySelectorAll('.subtab').forEach(function(b) { b.classList.toggle('active', b.dataset.subtab === name); });
@@ -11794,9 +11985,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
   function linkAssetId(id) {
     var label = esc(id);
-    var url = buildCiAAssetUrl(id);
-    if (!url) return label;
-    return '<a href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + label + '</a>';
+    return '<a href="#reportPackagesMap" data-report-asset-id="' + encodeURIComponent(id) + '" style="text-decoration:underline;cursor:pointer">' + label + '</a>';
   }
   function linkAssetIdList(ids) {
     if (!ids || !ids.length) return '';
@@ -11987,7 +12176,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     }
   }
   function _sortReportPkgs(arr) {
-    if (!_reportSortState.column) return arr.slice();
+    if (!_reportSortState.column) return arr.slice().sort(compareReportPackageIds);
     var dir = _reportSortState.dir === 'desc' ? -1 : 1;
     return arr.slice().sort(function(a, b) {
       var av = _getReportPkgSortValue(a, _reportSortState.column);
@@ -12046,6 +12235,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       var alignAttr = c.align ? ' class="' + c.align + '"' : '';
       return '<th' + alignAttr + ' style="position:sticky;top:0;z-index:5;background:#1A2B3C;cursor:pointer;user-select:none" onclick="sortReportPackagesByColumn(\\'' + c.key + '\\')" title="Click to sort by ' + esc(c.label) + '">' + esc(c.label) + _reportSortIndicator(c.key) + '</th>';
     }).join('') + '</tr></thead>';
+    var colWidths = { package_id: 8.7, suburb: 6.5, pipe_count: 5.7, condition_6_count: 7.5, condition_7_count: 7.5, condition_8_count: 7.5, total_length_m: 7.0, total_cost: 7.0, diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 25.3 };
+    var colGroupHtml = '<colgroup>' + headerCols.map(function(c){ return '<col style="width:' + (colWidths[c.key] || 10) + '%">'; }).join('') + '</colgroup>';
     var sortedPkgs = _sortReportPkgs(packages);
     var rowsHtml = sortedPkgs.map(function(pkg) {
       var isSelected = pkg.id === selectedReportPackageId;
@@ -12087,10 +12278,16 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       cells.push('<td>' + assetIds + '</td>');
       return '<tr class="package-row' + (isSelected ? ' selected' : '') + '" data-package-id="' + esc(pkg.id) + '">' + cells.join('') + '</tr>';
     }).join('');
-    packagesTbl.innerHTML = captionHtml + headHtml + '<tbody>' + rowsHtml + '</tbody>';
+    packagesTbl.innerHTML = captionHtml + colGroupHtml + headHtml + '<tbody>' + rowsHtml + '</tbody>';
   }
   // PACKAGE MAP CLICK WIRING — package_id link in the table selects+focuses the package on the map
   document.getElementById('packagesTable').addEventListener('click', function(e) {
+    var assetLink = e.target.closest && e.target.closest('[data-report-asset-id]');
+    if (assetLink) {
+      e.preventDefault();
+      focusReportAsset(decodeURIComponent(assetLink.getAttribute('data-report-asset-id') || ''));
+      return;
+    }
     var link = e.target.closest && e.target.closest('[data-report-package-id]');
     if (link) {
       e.preventDefault();
@@ -12104,6 +12301,47 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var row = e.target.closest && e.target.closest('tr.package-row');
     if (!row) return;
     selectReportPackage(row.dataset.packageId);
+  });
+
+  var reportAssetHoverEl = null;
+  function moveReportAssetHover(e) {
+    if (!reportAssetHoverEl) return;
+    var pad = 14;
+    var width = reportAssetHoverEl.offsetWidth || 260;
+    var height = reportAssetHoverEl.offsetHeight || 160;
+    var left = e.clientX + pad;
+    var top = e.clientY + pad;
+    if (left + width > window.innerWidth - 8) left = e.clientX - width - pad;
+    if (top + height > window.innerHeight - 8) top = e.clientY - height - pad;
+    reportAssetHoverEl.style.left = Math.max(8, left) + 'px';
+    reportAssetHoverEl.style.top = Math.max(8, top) + 'px';
+  }
+  document.addEventListener('mouseover', function(e) {
+    var link = e.target.closest && e.target.closest('[data-report-asset-id]');
+    if (!link) return;
+    var found = findReportAsset(decodeURIComponent(link.getAttribute('data-report-asset-id') || ''));
+    if (!found) return;
+    if (!reportAssetHoverEl) {
+      reportAssetHoverEl = document.createElement('div');
+      reportAssetHoverEl.className = 'asset-hover-popover';
+      document.body.appendChild(reportAssetHoverEl);
+    }
+    reportAssetHoverEl.innerHTML = buildReportPipePopup(found.pipe, found.pkg);
+    reportAssetHoverEl.style.display = 'block';
+    moveReportAssetHover(e);
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (e.target.closest && e.target.closest('[data-report-asset-id]')) moveReportAssetHover(e);
+  });
+  document.addEventListener('mouseout', function(e) {
+    if (!e.target.closest || !e.target.closest('[data-report-asset-id]')) return;
+    if (reportAssetHoverEl) reportAssetHoverEl.style.display = 'none';
+  });
+  document.addEventListener('click', function(e) {
+    var assetLink = e.target.closest && e.target.closest('[data-report-asset-id]');
+    if (!assetLink) return;
+    e.preventDefault();
+    focusReportAsset(decodeURIComponent(assetLink.getAttribute('data-report-asset-id') || ''));
   });
 
   applyMovesAndRender();
@@ -12902,6 +13140,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     '.pkg-lock-btn.partial{color:#d97706}',
     '.pkg-lock-btn-pkg{font-size:16px;padding:3px 7px;margin-left:6px}',
     '.edit-pkg-asset-row a{color:inherit}',
+    '.asset-hover-popover{position:fixed;display:none;z-index:10000;max-width:330px;padding:10px 12px;border:1px solid rgba(26,43,60,.18);border-radius:8px;background:#fbfdff;box-shadow:0 12px 36px rgba(15,23,42,.22);pointer-events:none}',
+    '.asset-hover-popover a{pointer-events:auto}',
     '</style>',
     '</head>',
     '<body>',
