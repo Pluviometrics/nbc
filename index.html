@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="43465ed">
-<meta name="build-time" content="2026-05-13T13:29:27+10:00">
+<meta name="build-sha" content="2467a42">
+<meta name="build-time" content="2026-05-13T13:51:12+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -10250,6 +10250,58 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   // --- Manual moves: localStorage persistence ---
   const REPORT_MOVES_KEY = 'nbc-report-moves:' + (data.generated_at || 'unknown');
   let reportManualMoves = loadReportMoves();
+  var reportUndoStack = [];
+  var REPORT_UNDO_MAX = 50;
+
+  function cloneReportStateValue(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function pushReportUndo(label) {
+    try {
+      reportUndoStack.push({
+        label: label || 'Edit',
+        packages: cloneReportStateValue(packages),
+        pipes: cloneReportStateValue(pipes),
+        reportManualMoves: cloneReportStateValue(reportManualMoves),
+        selectedReportPackageId: selectedReportPackageId || null,
+        reportSortState: cloneReportStateValue(_reportSortState || { column: null, dir: 'asc' }),
+        reportEditPackageSort: cloneReportStateValue(_reportEditPackageSort || { key: 'package', dir: 'asc' }),
+        reportEditPipeSorts: cloneReportStateValue(_reportEditPipeSorts || {})
+      });
+      if (reportUndoStack.length > REPORT_UNDO_MAX) reportUndoStack.shift();
+    } catch (e) {
+      console.warn('[Report] Failed to capture undo state:', e);
+    }
+  }
+
+  function renderReportAfterStateRestore() {
+    pkgIndex = {};
+    packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+    if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+    if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+    if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+    if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
+    if (typeof renderReportMetaStrip === 'function') renderReportMetaStrip();
+    if (typeof updateReportC6ToggleVisibility === 'function') updateReportC6ToggleVisibility();
+    if (typeof renderPerPackageReports === 'function') renderPerPackageReports();
+    if (typeof refreshFilterDropdowns === 'function') refreshFilterDropdowns();
+  }
+
+  function undoLastReportAction() {
+    var snap = reportUndoStack.pop();
+    if (!snap) { alert('Nothing to undo in this report session.'); return; }
+    packages = cloneReportStateValue(snap.packages || []);
+    pipes = cloneReportStateValue(snap.pipes || []);
+    reportManualMoves = cloneReportStateValue(snap.reportManualMoves || emptyMoves());
+    selectedReportPackageId = snap.selectedReportPackageId || null;
+    _reportSortState = cloneReportStateValue(snap.reportSortState || { column: null, dir: 'asc' });
+    _reportEditPackageSort = cloneReportStateValue(snap.reportEditPackageSort || { key: 'package', dir: 'asc' });
+    _reportEditPipeSorts = cloneReportStateValue(snap.reportEditPipeSorts || {});
+    saveReportMoves();
+    renderReportAfterStateRestore();
+  }
+  window.undoLastReportAction = undoLastReportAction;
 
   function loadReportMoves() {
     try {
@@ -10306,6 +10358,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       : 'Nothing to clear.';
     if (!summary.length) { alert(msg); return; }
     if (!confirm(msg)) return;
+    pushReportUndo('Reset all manual edits');
     reportManualMoves = emptyMoves();
     saveReportMoves();
     // Restore originally-attached C6 add-ons (and drop any manually-included ones)
@@ -10896,6 +10949,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
         json = await file.text();
       }
       var parsed = JSON.parse(json);
+      pushReportUndo('Load lock file');
       mergeLocksData(parsed);
       setLocksStatus('Locks: loaded from ' + file.name);
     } catch (err) {
@@ -11090,6 +11144,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
 
   function reportToggleAllPackagesLock() {
     ensureReportLocks();
+    pushReportUndo('Toggle all package locks');
     if (getReportGlobalLockState() === 'all') {
       reportManualMoves.locks.pipes = {};
       reportManualMoves.locks.packages = {};
@@ -11115,6 +11170,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     ensureReportLocks();
     var pkg = packages.find(function(p){ return p.id === pkgId; });
     if (!pkg) return;
+    pushReportUndo('Toggle package lock');
     var assets = pipes.filter(function(p){ return p.package_id === pkgId; });
     if (getReportPackageLockState(pkg) === 'all') {
       delete reportManualMoves.locks.packages[pkgId];
@@ -11168,6 +11224,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     }
     ensureReportLocks();
     if (!reportManualMoves.renamedPackages) reportManualMoves.renamedPackages = {};
+    pushReportUndo(swapWith ? 'Swap package numbers' : 'Rename package');
     function swapReportMoveTarget(map, a, b) {
       Object.keys(map || {}).forEach(function(uid) {
         if (map[uid] === a) map[uid] = b;
@@ -11253,6 +11310,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function reportTogglePipeLock(uid, pkgId) {
     ensureReportLocks();
     var u = String(uid);
+    pushReportUndo('Toggle pipe lock');
     if (isReportPipeLocked(u)) {
       delete reportManualMoves.locks.pipes[u];
     } else {
@@ -11275,6 +11333,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     if (pipe.package_id === targetPkgId) return;
     var targetPkg = packages.find(function(p){ return p.id === targetPkgId; });
     if (!targetPkg) { alert('Target package not found.'); return; }
+    pushReportUndo('Move pipe');
     reportManualMoves.assignments[u] = targetPkgId;
     reportManualMoves.locks.pipes[u] = true;
     reportManualMoves.moveOrigins[u] = true;
@@ -11293,6 +11352,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       return Math.max(m, match ? Number(match[1]) : 0);
     }, 0);
     var newPkgId = 'RLN_' + String(maxNum + 1).padStart(3, '0');
+    pushReportUndo('Create package');
     reportManualMoves.assignments[u] = newPkgId;
     reportManualMoves.locks.pipes[u] = true;
     reportManualMoves.moveOrigins[u] = true;
@@ -11305,6 +11365,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     ensureReportLocks();
     var u = String(uid);
     if (!(u in (reportManualMoves.assignments || {}))) return;
+    pushReportUndo('Clear move');
     delete reportManualMoves.assignments[u];
     if (reportManualMoves.moveOrigins) delete reportManualMoves.moveOrigins[u];
     if (reportManualMoves.locks && reportManualMoves.locks.pipes) delete reportManualMoves.locks.pipes[u];
@@ -11316,6 +11377,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   function reportExcludeC6(uid) {
     ensureReportLocks();
     var u = String(uid);
+    pushReportUndo('Remove C6 pipe');
     reportManualMoves.c6Excluded[u] = true;
     if (reportManualMoves.c6Included) delete reportManualMoves.c6Included[u];
     saveReportMoves();
@@ -11328,6 +11390,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var u = String(uid);
     var p = String(pkgId);
     if (!u || !p) return;
+    pushReportUndo('Add C6 pipe');
     reportManualMoves.c6Included[u] = p;
     if (reportManualMoves.c6Excluded) delete reportManualMoves.c6Excluded[u];
     saveReportMoves();
@@ -11502,6 +11565,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       +   '</div>'
       + '</div>'
       + '<div style="display:flex;gap:8px">'
+      +   '<button class="export-btn" type="button" onclick="undoLastReportAction()" title="Undo the last report edit in this browser session"' + (reportUndoStack.length ? '' : ' disabled style="opacity:0.45;cursor:not-allowed"') + '>Undo (' + reportUndoStack.length + ')</button>'
       +   '<button class="export-btn" type="button" onclick="resetReportMoves()">Reset All Manual Edits</button>'
       + '</div>'
       + '</div>';
