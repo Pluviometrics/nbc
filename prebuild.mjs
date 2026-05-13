@@ -1,6 +1,7 @@
-// Pre-deploy build: stamps __BUILD_SHA__ and __BUILD_TIME__ placeholders
-// in index.html with current git short-sha and ISO timestamp.
-// Run via `npm run build` before pushing to main / release.
+// Pre-deploy build: stamps build-sha and build-time meta tags in index.html
+// with current git short-sha and local-time ISO 8601 timestamp.
+// Idempotent — re-running re-stamps in place. Run via `npm run build`
+// before pushing to main / release.
 import { readFileSync, writeFileSync } from 'fs';
 import { execSync } from 'child_process';
 
@@ -14,11 +15,23 @@ try {
   console.warn('[prebuild] git rev-parse failed:', e.message);
 }
 
-const time = new Date().toISOString();
+// Local-time ISO 8601 with offset, e.g. 2026-05-13T09:59:15+10:00.
+const time = (() => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const offsetMin = -d.getTimezoneOffset();
+  const sign = offsetMin >= 0 ? '+' : '-';
+  const offH = pad(Math.floor(Math.abs(offsetMin) / 60));
+  const offM = pad(Math.abs(offsetMin) % 60);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${offH}:${offM}`;
+})();
 
-const before = html.length;
-html = html.replaceAll('__BUILD_SHA__', sha).replaceAll('__BUILD_TIME__', time);
-const replacements = (before - html.length) / 0; // not actually a count; just for visibility
+// Replace either the __BUILD_*__ placeholder or any previously-stamped value.
+html = html
+  .replaceAll('__BUILD_SHA__', sha)
+  .replaceAll('__BUILD_TIME__', time)
+  .replace(/<meta name="build-sha" content="[^"]*">/, `<meta name="build-sha" content="${sha}">`)
+  .replace(/<meta name="build-time" content="[^"]*">/, `<meta name="build-time" content="${time}">`);
 
 writeFileSync(indexPath, html);
 console.log(`[prebuild] stamped sha=${sha} time=${time}`);

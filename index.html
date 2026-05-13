@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="__BUILD_SHA__">
-<meta name="build-time" content="__BUILD_TIME__">
+<meta name="build-sha" content="3d22bb3">
+<meta name="build-time" content="2026-05-13T09:59:51+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -905,7 +905,7 @@ window.addEventListener('keydown', (event) => {
         Import State
         <input type="file" accept=".json" style="display:none" onchange="importNbcStateFromFile(this.files[0]);this.value=''">
       </label>
-      <span id="buildInfoText" style="font-size:9px;color:#5A6B7A;letter-spacing:.04em;margin-left:8px">Build __BUILD_SHA__</span>
+      <span id="buildInfoText" style="font-size:9px;color:#5A6B7A;letter-spacing:.04em;margin-left:8px">Build 3d22bb3</span>
     </div>
   </div>
   <div style="flex:1;min-height:0;overflow:auto">
@@ -1776,6 +1776,12 @@ function buildCiAAssetUrl(assetNumber) {
   const value = String(assetNumber ?? '').trim();
   if (!value || !/^\d+$/.test(value)) return '';
   return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + value + '&suite=CES';
+}
+// Same target as buildCiAAssetUrl but lands on the Attachments tab where CCTV
+// videos and reports live as nb:// URL entries.
+function buildCiAAttachmentsUrl(assetNumber) {
+  const base = buildCiAAssetUrl(assetNumber);
+  return base ? base + '&tab=Tab_AssetAttachmentsSection' : '';
 }
 
 // Renders a table cell value — hyperlinks asset ID columns to CiA, escapes everything else.
@@ -11351,7 +11357,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var address = firstStr(item && item.address, raw['Formatted_Address'], raw['Address'], raw['Pipe_Start_Address'], raw['Street_Address']);
     var streetViewUrl = address ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address) : '';
     var pkgId = firstStr(pkg && pkg.id, item && item.package_id);
+    var condition = firstStr(
+      item && item.conditionLabel, item && item.condition,
+      raw['Observed_Condition'], raw['Observed Condition'],
+      raw['SW_Condition'], raw['SW Condition'],
+      raw['Schedule7_Condition2'], raw['Schedule 7 Condition 2'],
+      raw['Schedule7_Condition'], raw['Schedule 7 Condition']
+    );
     var ciaUrl = (typeof buildCiAAssetUrl === 'function') ? buildCiAAssetUrl(assetId) : '';
+    var ciaAttachmentsUrl = (typeof buildCiAAttachmentsUrl === 'function') ? buildCiAAttachmentsUrl(assetId) : '';
     var assetLabel = esc(assetId || 'Pipe');
     var assetMarkup = ciaUrl
       ? '<a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">' + assetLabel + '</a>'
@@ -11361,8 +11375,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       '<div style="font-weight:800;color:var(--navy);margin-bottom:4px">' + titleHead + (pkgId ? ' - ' + esc(pkgId) : '') + '</div>' +
       '<div><strong>Pipe size:</strong> ' + (sizeMm != null ? Math.round(sizeMm) + ' mm' : '—') + '</div>' +
       '<div><strong>Pipe length:</strong> ' + (lengthM != null ? lengthM.toFixed(1) + ' m' : '—') + '</div>' +
+      '<div><strong>Condition:</strong> ' + (condition ? esc(condition) : '—') + '</div>' +
       '<div><strong>Address:</strong> ' + (address ? esc(address) : '—') + '</div>' +
       (ciaUrl ? '<div style="margin-top:6px"><a href="' + esc(ciaUrl) + '" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open Asset in CiA ↗</a></div>' : '') +
+      (ciaAttachmentsUrl ? '<div style="margin-top:4px"><a href="' + esc(ciaAttachmentsUrl) + '" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">View CCTV / Attachments ↗</a></div>' : '') +
       (streetViewUrl ? '<div style="margin-top:6px"><a href="' + esc(streetViewUrl) + '" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open in Google Street View ↗</a></div>' : '') +
     '</div>';
   }
@@ -11433,6 +11449,10 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     var v = String(id == null ? '' : id).trim();
     if (!v || !/^\\d+$/.test(v)) return '';
     return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
+  }
+  function buildCiAAttachmentsUrl(id) {
+    var base = buildCiAAssetUrl(id);
+    return base ? base + '&tab=Tab_AssetAttachmentsSection' : '';
   }
   function linkAssetId(id) {
     var label = esc(id);
@@ -12018,8 +12038,9 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       cCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
       var ciaCell = ws.getCell(r, COL.CIA);
-      if (ciaUrl) {
-        ciaCell.value = { text: 'Open in CiA', hyperlink: ciaUrl, tooltip: 'Open ' + assetId + ' in CiA' };
+      var attachmentsUrl = buildCiAAttachmentsUrl(assetId);
+      if (attachmentsUrl) {
+        ciaCell.value = { text: 'View Attachments', hyperlink: attachmentsUrl, tooltip: 'View CCTV / attachments for ' + assetId + ' in CiA' };
         ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: true };
       } else {
         ciaCell.value = '';
@@ -12844,6 +12865,10 @@ function buildCctvPackageReportHtml(packages, packagedAssets, options, summary) 
     var v = String(id == null ? '' : id).trim();
     if (!v || !/^\\d+$/.test(v)) return '';
     return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
+  }
+  function buildCiAAttachmentsUrl(id) {
+    var base = buildCiAAssetUrl(id);
+    return base ? base + '&tab=Tab_AssetAttachmentsSection' : '';
   }
   function linkAssetId(id) {
     var label = esc(id);
@@ -14180,6 +14205,10 @@ function buildSinglePackageMapHtml(pkg, options, generatedAt, packageColor, kind
     if (!v || !/^\\d+$/.test(v)) return '';
     return 'https://nbc.t1cloud.com/T1Default/CiAnywhere/Web/NBC/AssetsCore/AssetMyMaintenance/Index?f=$ASC.ASSET.MNT&sk.AssetRegisterName=CZZASSET&sk.KeyedAssetNumber=' + v + '&suite=CES';
   }
+  function buildCiAAttachmentsUrl(id) {
+    var base = buildCiAAssetUrl(id);
+    return base ? base + '&tab=Tab_AssetAttachmentsSection' : '';
+  }
 
   var titleSuffix = pkg.map_title_suffix || 'Pipe Relining Map';
   document.getElementById('mapTitle').textContent = pkg.id + ' — ' + titleSuffix;
@@ -14833,10 +14862,12 @@ function buildStyledPackageWorkbook(meta, items, kind) {
     cCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: TEXT_DARK }, underline: !!ciaUrl };
     cCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
-    // D: CiA ("Open in CiA" hyperlink — empty when no CiA URL)
+    // D: CiA ("View Attachments" hyperlink — empty when no CiA URL).
+    // Lands on the Attachments tab so the CCTV nb:// URLs are one click away.
     const ciaCell = ws.getCell(r, COL.CIA);
-    if (ciaUrl) {
-      ciaCell.value = { text: 'Open in CiA', hyperlink: ciaUrl, tooltip: 'Open ' + assetId + ' in CiA' };
+    const attachmentsUrl = buildCiAAttachmentsUrl(assetId);
+    if (attachmentsUrl) {
+      ciaCell.value = { text: 'View Attachments', hyperlink: attachmentsUrl, tooltip: 'View CCTV / attachments for ' + assetId + ' in CiA' };
       ciaCell.font = { name: 'Arial', size: 9, color: { argb: 'FF3DBDB8' }, underline: true };
     } else {
       ciaCell.value = '';
@@ -15405,7 +15436,15 @@ function buildPipePopupHtml(item, pkg) {
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
     : '';
   const pkgId = firstStr(pkg?.package_id, item?.package_id);
+  const condition = firstStr(
+    item?.conditionLabel, item?.condition,
+    raw['Observed_Condition'], raw['Observed Condition'],
+    raw['SW_Condition'], raw['SW Condition'],
+    raw['Schedule7_Condition2'], raw['Schedule 7 Condition 2'],
+    raw['Schedule7_Condition'], raw['Schedule 7 Condition']
+  );
   const ciaUrl = buildCiAAssetUrl(assetId);
+  const ciaAttachmentsUrl = buildCiAAttachmentsUrl(assetId);
   const assetLabel = escapeHtml(assetId || 'Pipe');
   const assetMarkup = ciaUrl
     ? `<a href="${escapeHtml(ciaUrl)}" target="_blank" rel="noopener noreferrer" style="color:inherit;text-decoration:underline">${assetLabel}</a>`
@@ -15416,8 +15455,10 @@ function buildPipePopupHtml(item, pkg) {
       <div style="font-weight:800;color:var(--navy);margin-bottom:4px">${titleHead}${pkgId ? ` - ${escapeHtml(pkgId)}` : ''}</div>
       <div><strong>Pipe size:</strong> ${sizeMm != null ? `${Math.round(sizeMm)} mm` : '—'}</div>
       <div><strong>Pipe length:</strong> ${lengthM != null ? `${lengthM.toFixed(1)} m` : '—'}</div>
+      <div><strong>Condition:</strong> ${condition ? escapeHtml(condition) : '—'}</div>
       <div><strong>Address:</strong> ${address ? escapeHtml(address) : '—'}</div>
       ${ciaUrl ? `<div style="margin-top:6px"><a href="${escapeHtml(ciaUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open Asset in CiA ↗</a></div>` : ''}
+      ${ciaAttachmentsUrl ? `<div style="margin-top:4px"><a href="${escapeHtml(ciaAttachmentsUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">View CCTV / Attachments ↗</a></div>` : ''}
       ${streetViewUrl ? `<div style="margin-top:6px"><a href="${escapeHtml(streetViewUrl)}" target="_blank" rel="noopener" style="color:var(--teal);font-weight:700">Open in Google Street View ↗</a></div>` : ''}
     </div>`;
 }
