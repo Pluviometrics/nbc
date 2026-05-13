@@ -10307,6 +10307,38 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   }
 
   function applyMovesAndRender() {
+    // FRESH-STATE EARLY-OUT — if there are no manual edits and no locks,
+    // render the embedded data.packages snapshot verbatim. The live tool's
+    // export-time package layout is what the user expects to see; rebuilding
+    // from pipes + renumber here drifts from that snapshot (different IDs
+    // and ordering) until a lock file is loaded. Once any edit lands (or a
+    // lock file populates state), this short-circuit is bypassed and the
+    // normal phases run.
+    var _isFreshState = (
+      !Object.keys(reportManualMoves.assignments || {}).length &&
+      !Object.keys((reportManualMoves.locks && reportManualMoves.locks.packages) || {}).length &&
+      !Object.keys((reportManualMoves.locks && reportManualMoves.locks.pipes) || {}).length &&
+      !Object.keys(reportManualMoves.anchorOrigins || {}).length &&
+      !Object.keys(reportManualMoves.c6Included || {}).length &&
+      !Object.keys(reportManualMoves.c6Excluded || {}).length &&
+      !Object.keys(reportManualMoves.renamedPackages || {}).length
+    );
+    if (_isFreshState) {
+      packages.length = 0;
+      (data.packages || []).forEach(function(p){ packages.push(p); });
+      pkgIndex = {};
+      packages.forEach(function(p, i) { pkgIndex[p.id] = i; });
+      // Mirror Phase 5 render sequence exactly
+      if (typeof renderReportPackageCards === 'function') renderReportPackageCards();
+      if (typeof renderReportPackagesTable === 'function') renderReportPackagesTable();
+      if (typeof renderReportEditPanel === 'function') renderReportEditPanel();
+      if (typeof renderReportPackagesMap === 'function') renderReportPackagesMap({ fit: false });
+      if (typeof renderReportMetaStrip === 'function') renderReportMetaStrip();
+      if (typeof updateReportC6ToggleVisibility === 'function') updateReportC6ToggleVisibility();
+      if (typeof renderPerPackageReports === 'function') renderPerPackageReports();
+      if (typeof refreshFilterDropdowns === 'function') refreshFilterDropdowns();
+      return;
+    }
     // PHASE 0a — translate any leftover anchor_id values from pre-fix localStorage sessions
     var anchorToPkgId = {};
     (data.packages || []).forEach(function(p) {
