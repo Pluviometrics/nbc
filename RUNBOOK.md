@@ -20,7 +20,7 @@ Before pushing the `release` branch, run:
 npm run build
 ```
 
-This executes `prebuild.mjs`, which stamps `__BUILD_SHA__` and `__BUILD_TIME__` placeholders in `index.html` with the current git short-sha and ISO timestamp. Inspect via View Source → search `build-sha`.
+This executes `scripts/prebuild.mjs`, which stamps `__BUILD_SHA__` and `__BUILD_TIME__` placeholders in `index.html` with the current git short-sha and ISO timestamp. Inspect via View Source → search `build-sha`.
 
 ## Deploy procedure
 

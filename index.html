@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="2467a42">
-<meta name="build-time" content="2026-05-13T13:51:12+10:00">
+<meta name="build-sha" content="ad40df0">
+<meta name="build-time" content="2026-05-14T07:44:42+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -1461,9 +1461,9 @@ window.addEventListener('keydown', (event) => {
             Upload inspection file
             <input type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="loadCriticalAssetsInput(event, 'inspection')"/>
           </label>
-          <button class="export-btn" onclick="loadCriticalAssetsDefaults()">Show source paths</button>
+          <button class="export-btn" onclick="loadCriticalAssetsDefaults()">Show required files</button>
         </div>
-        <div class="ca-note" style="margin-top:12px">Source files are loaded by upload because this static site cannot read local folders. The legacy <code>D:\Packaging</code> prototype is stale; this page is the packaging source of truth.</div>
+        <div class="ca-note" style="margin-top:12px">Source files are loaded by upload because this static site cannot read local folders. This page is the packaging source of truth.</div>
       </div>
 
       <div>
@@ -19501,9 +19501,9 @@ const CRITICAL_STATUS_META = {
   green: { label: 'Up to date', color: '#1E8449', className: 'green' },
   unknown: { label: 'Awaiting schedule', color: '#60717D', className: 'unknown' }
 };
-const CRITICAL_DEFAULT_SOURCE_PATH = 'D:\\Packaging\\data\\assets_with_coords.csv';
-const CRITICAL_DEFAULT_COMBINED_PATH = 'D:\\Packaging\\data\\combined_assets.csv';
-const CRITICAL_DEFAULT_INSPECTION_PATH = 'D:\\Packaging\\data\\critical_asset_inspections.xlsx';
+const CRITICAL_DEFAULT_SOURCE_PATH = 'assets_with_coords.csv';
+const CRITICAL_DEFAULT_COMBINED_PATH = 'combined_assets.csv';
+const CRITICAL_DEFAULT_INSPECTION_PATH = 'critical_asset_inspections.xlsx';
 let criticalAssetsMap = null;
 let criticalAssetsLayer = null;
 let criticalAssetsAll = [];
@@ -19977,7 +19977,7 @@ async function loadCriticalAssetsInput(event, kind) {
 function loadCriticalAssetsDefaults() {
   updateCriticalAssetsStatusLabels();
   renderCriticalAssetsView();
-  alert(`Use the upload buttons to load source files from ${CRITICAL_DEFAULT_SOURCE_PATH}, ${CRITICAL_DEFAULT_COMBINED_PATH}, and ${CRITICAL_DEFAULT_INSPECTION_PATH} once available.`);
+  alert(`Use the upload buttons to load ${CRITICAL_DEFAULT_SOURCE_PATH}, ${CRITICAL_DEFAULT_COMBINED_PATH}, and ${CRITICAL_DEFAULT_INSPECTION_PATH} once available.`);
 }
 
 // BOM Gauges

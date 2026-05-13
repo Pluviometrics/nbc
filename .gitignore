@@ -6,3 +6,16 @@ _libs/
 # tooling — added during 2026-05-12 ops-tooling pass
 node_modules/
 .eslintcache
+
+# generated validation/test output
+test-results/
+playwright-report/
+
+# runtime downloads / generated package outputs
+*.zip
+package_report.html
+relining_locks_*.json
+
+# Office temporary files
+~$*
+*.tmp
