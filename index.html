@@ -1852,10 +1852,16 @@ function renderReliningAssetIdsCell(input) {
     const uid = String(asset.assetId);
     const isC6 = asset.is_c6_addon || asset.condition === 6;
     const isLocked = !isC6 && isReliningPipeLocked(uid);
-    const color = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
-    const weight = isC6 ? ';font-weight:700' : '';
+    // Clashed-pipe override: when this asset_id was resolved during a
+    // lock-file import, paint it black so the user can see which pipes
+    // were touched. Beats the lock/C6 colours; cleared via the toolbar.
+    const isClashed = (typeof isReliningClashedPipe === 'function') && isReliningClashedPipe(uid);
+    const baseColor = isC6 ? '#f59e0b' : (isLocked ? '#dc2626' : '#16a34a');
+    const color = isClashed ? '#000' : baseColor;
+    const weight = (isC6 || isClashed) ? ';font-weight:700' : '';
     const style = 'color:' + color + ' !important;text-decoration:underline;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer' + weight;
-    const title = (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + ' — click to show on map';
+    const titleBase = (isC6 ? 'Condition 6 add-on' : 'Condition 7/8') + ' — click to show on map';
+    const title = isClashed ? (titleBase + ' (resolved import clash)') : titleBase;
     const icon = isC6 ? '➕ ' : (isLocked ? '🔒 ' : '🔓 ');
     return '<a href="#reliningPackagesMap" data-relining-asset-id="' + encodeURIComponent(uid) + '" style="' + style + '" title="' + title + '">' + icon + escapeHtml(uid) + '</a>';
   }).join('');
@@ -6007,6 +6013,46 @@ const RELINING_MANUAL_MOVES_KEY = 'nbcReliningManualMoves_v1';
 try { localStorage.removeItem(RELINING_MANUAL_MOVES_KEY); } catch (_) {}
 let reliningManualMoves = loadReliningManualMoves();
 
+// Transient set of asset_ids that were resolved by the user during a
+// lock-file import clash modal. Persisted to sessionStorage so refreshes
+// keep the visual marker; cleared on tab close. Render layer uses this
+// to colour clashed asset_ids black instead of red/green.
+const RELINING_CLASHED_PIPES_KEY = 'nbcReliningClashedPipes_v1';
+let reliningClashedPipes = loadReliningClashedPipes();
+
+function loadReliningClashedPipes() {
+  try {
+    const raw = sessionStorage.getItem(RELINING_CLASHED_PIPES_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.map(String) : []);
+  } catch (_e) { return new Set(); }
+}
+
+function persistReliningClashedPipes() {
+  try {
+    sessionStorage.setItem(RELINING_CLASHED_PIPES_KEY, JSON.stringify([...reliningClashedPipes]));
+  } catch (err) {
+    console.warn('[Relining clash markers] persist failed', err);
+  }
+}
+
+function isReliningClashedPipe(uid) {
+  return reliningClashedPipes && reliningClashedPipes.has(String(uid));
+}
+
+function clearReliningClashedPipes() {
+  if (!reliningClashedPipes || !reliningClashedPipes.size) {
+    alert('No clash markers to clear.');
+    return;
+  }
+  reliningClashedPipes = new Set();
+  persistReliningClashedPipes();
+  if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
+  if (typeof renderGeneratedPackages === 'function' && lastPackagingGeneration) renderGeneratedPackages(lastPackagingGeneration);
+}
+window.clearReliningClashedPipes = clearReliningClashedPipes;
+
 function loadReliningManualMoves() {
   const empty = { assignments: {}, anchorOrigins: {}, locks: { pipes: {}, packages: {} }, moveOrigins: {}, c6Excluded: {}, c6Included: {}, renamedPackages: {}, lockedPackages: [] };
   try {
@@ -6906,83 +6952,243 @@ function resetAllCctvManualMoves() {
   }
 }
 
-// Layer captured pre-import locks back on top of the freshly-imported state.
-// File wins on key conflicts (anchor_id, uid). For v2 imports we also augment
-// the lockedPackages handoff with snapshots for any existing locked anchor not
-// covered by the file, so the engine materialises both sets on regen.
-function _mergeOldMovesIntoCurrent(oldMoves, isSchemaV2, fileResolvedHandoff) {
-  if (!oldMoves || typeof oldMoves !== 'object') return;
-  const cur = reliningManualMoves;
-  if (!cur || typeof cur !== 'object') return;
-  cur.locks = cur.locks || { pipes: {}, packages: {} };
-  cur.locks.pipes    = cur.locks.pipes    || {};
-  cur.locks.packages = cur.locks.packages || {};
-  cur.assignments     = cur.assignments     || {};
-  cur.anchorOrigins   = cur.anchorOrigins   || {};
-  cur.renamedPackages = cur.renamedPackages || {};
-  cur.c6Excluded      = cur.c6Excluded      || {};
-  cur.c6Included      = cur.c6Included      || {};
-  cur.moveOrigins     = cur.moveOrigins     || {};
-  const oldLocks = oldMoves.locks || {};
-  // Union dict-style fields. Existing entries kept where the file (already in
-  // cur) doesn't have a value for the same key — i.e. file wins on conflict.
-  const layer = (target, source) => {
-    if (!source || typeof source !== 'object') return;
-    Object.keys(source).forEach(k => {
-      if (!Object.prototype.hasOwnProperty.call(target, k)) target[k] = source[k];
-    });
-  };
-  layer(cur.locks.packages,  oldLocks.packages);
-  layer(cur.locks.pipes,     oldLocks.pipes);
-  layer(cur.assignments,     oldMoves.assignments);
-  layer(cur.anchorOrigins,   oldMoves.anchorOrigins);
-  layer(cur.renamedPackages, oldMoves.renamedPackages);
-  layer(cur.c6Excluded,      oldMoves.c6Excluded);
-  layer(cur.c6Included,      oldMoves.c6Included);
-  layer(cur.moveOrigins,     oldMoves.moveOrigins);
-  // For v2: augment the lockedPackages handoff so the engine's
-  // _buildLockedSnapshotsFromHandoff materialises ALL locked packages on
-  // regen — not just the file's. Each pre-existing locked anchor that the
-  // file didn't ship gets a handoff entry built from lastPackagingGeneration.
-  if (isSchemaV2 && Array.isArray(fileResolvedHandoff)) {
-    const fileAnchors = new Set(fileResolvedHandoff.map(e => String(e.anchor_id || '')).filter(Boolean));
-    const oldPkgLocks = (oldLocks.packages && typeof oldLocks.packages === 'object') ? oldLocks.packages : {};
-    const oldRenamed  = oldMoves.renamedPackages || {};
-    const oldOrigins  = oldMoves.anchorOrigins   || {};
-    const prevPkgs = (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages))
-      ? lastPackagingGeneration.packages
-      : [];
-    if (prevPkgs.length) {
-      const anchorToPkg = new Map();
-      prevPkgs.forEach(pkg => {
-        if (pkg && pkg.anchor_id) anchorToPkg.set(String(pkg.anchor_id), pkg);
-      });
-      Object.keys(oldPkgLocks).forEach(anchorId => {
-        if (!oldPkgLocks[anchorId]) return;
-        const key = String(anchorId);
-        if (fileAnchors.has(key)) return; // file already ships this anchor
-        const pkg = anchorToPkg.get(key);
-        if (!pkg || !Array.isArray(pkg.assets) || !pkg.assets.length) return;
-        const assetIds = pkg.assets
-          .map(a => (a && a.assetId != null ? String(a.assetId) : ''))
-          .filter(Boolean);
-        if (!assetIds.length) return;
-        const originKind = oldOrigins[key]?.kind;
-        cur.lockedPackages.push({
-          anchor_id: key,
-          package_id: String(pkg.package_id || oldOrigins[key]?.last_package_id || key),
-          asset_ids: assetIds,
-          manual_origin: originKind === 'manual',
-          renamed: !!oldRenamed[key],
-          suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
-        });
-        // Also re-assert pipe locks for these assets so the engine's carve-out
-        // sees them as locked even if the file's pipe-lock dict didn't list
-        // them. (Defensive — layer() above already merged oldLocks.pipes.)
-        assetIds.forEach(id => { cur.locks.pipes[id] = true; });
-      });
+// ──────────────────────────────────────────────────────────────────────
+// Lock-file import (additive merge with per-pipe clash resolution).
+//
+// Replaces the previous merge-vs-replace prompt + engine-rerun flow.
+// New behaviour:
+//   1. Method/option mismatches no longer block the import.
+//   2. Existing locks and imported locks are merged additively. Per-pipe
+//      conflicts (same asset_id assigned to different packages) raise a
+//      clash modal; the user picks "keep existing" or "use imported"
+//      per pipe (with an "apply to all remaining" shortcut).
+//   3. After resolution, the locked side of `lastPackagingGeneration` is
+//      built directly from the merged lock map (no engine cluster pass).
+//      One LEFTOVER package collects every other eligible pipe — sized
+//      as a single bucket the user further packages by hand.
+//   4. Engine `generateReliningPackages()` is NOT called.
+// ──────────────────────────────────────────────────────────────────────
+
+// Materialise a single locked package from a (anchor_id, package_id, asset_ids)
+// triple by resolving the asset_ids against reliningAssetsRows, costing each
+// row, and handing the items to buildReliningPackageObject.
+function _buildLockedPackageFromAssetIds(anchorId, packageId, assetIds, options, suburbCol, idToRow, extra) {
+  const rows = [];
+  (assetIds || []).forEach(rawId => {
+    const id = String(rawId == null ? '' : rawId).trim();
+    if (!id) return;
+    const row = idToRow.get(id);
+    if (row) rows.push({ id, row });
+  });
+  if (!rows.length) return null;
+  const items = rows.map((entry, idx) => {
+    const row = entry.row;
+    const rateInfo = getReliningRateInfoForRow(row, options);
+    const lengthM = Number.isFinite(rateInfo.lengthM) ? rateInfo.lengthM : 0;
+    const diameterMm = Number.isFinite(rateInfo.diameter) ? rateInfo.diameter : (Number(getReliningDiameterValue(row)) || null);
+    let pipeCost = Number.isFinite(rateInfo.rate) && Number.isFinite(lengthM) ? rateInfo.rate * lengthM : null;
+    if (Number.isFinite(pipeCost)) {
+      if (options.trafficControl !== false) pipeCost += 2000;
+      if (options.projectInitiation !== false) pipeCost *= 1.15;
     }
-  }
+    const coord = resolveReliningCoordinate(row);
+    const xMid = cleanNumber(getValueByAliases(row, ['XMid', 'XMid.1']));
+    const yMid = cleanNumber(getValueByAliases(row, ['YMid', 'YMid.1']));
+    const condition = getReliningConditionNumber(row);
+    const suburb = resolveReliningSuburb(row, suburbCol);
+    const usPit = normaliseReliningPit(getValueByAliases(row, ['SW_Upstream_Node', 'US_Pit', 'US Pit', 'Upstream_Node']));
+    const dsPit = normaliseReliningPit(getValueByAliases(row, ['SW_Downstream_Node', 'DS_Pit', 'DS Pit', 'Downstream_Node']));
+    return {
+      assetId: entry.id,
+      asset_id: entry.id,
+      suburb,
+      diameterMm,
+      diameter_mm: diameterMm,
+      lengthM,
+      length_m: lengthM,
+      ratePerM: Number.isFinite(rateInfo.rate) ? rateInfo.rate : null,
+      rate_per_m: Number.isFinite(rateInfo.rate) ? rateInfo.rate : null,
+      pipeCost: Number.isFinite(pipeCost) ? pipeCost : null,
+      pipe_cost: Number.isFinite(pipeCost) ? pipeCost : null,
+      rateDescriptor: rateInfo.descriptor || '',
+      rateMatchCount: Number.isFinite(rateInfo.matchCount) ? rateInfo.matchCount : 0,
+      costStatus: Number.isFinite(pipeCost) ? 'Costed' : 'Uncosted',
+      condition,
+      condition_score: condition,
+      criticalityScore: resolveReliningCriticalityScore(row),
+      lat: coord?.lat ?? null,
+      lon: coord?.lon ?? null,
+      x_mid: xMid,
+      y_mid: yMid,
+      usPit,
+      dsPit,
+      upstream: usPit,
+      downstream: dsPit,
+      is_c6_addon: condition === 6,
+      package_id: packageId,
+      raw: row
+    };
+  });
+  const existing = Object.assign({
+    anchor_id: anchorId,
+    original_package_id: packageId
+  }, extra || {});
+  return buildReliningPackageObject(packageId, items, options, existing);
+}
+
+// Build the leftover bucket: every eligible row not already inside a locked
+// package becomes a single ("RLN_NNN") package at the end. No clustering, no
+// value cap — sanity check will flag oversize, the user can split later.
+function _buildLeftoverReliningPackage(lockedAssetIds, options, leftoverPkgId) {
+  if (!Array.isArray(reliningAssetsRows) || !reliningAssetsRows.length) return null;
+  const suburbCol = resolveSuburbColumn(reliningAssetsRows);
+  const items = [];
+  reliningAssetsRows.forEach((row, idx) => {
+    const id = _getReliningRowAssetId(row, idx);
+    if (!id) return;
+    if (lockedAssetIds.has(id)) return;
+    const candidate = normaliseReliningCandidateRow(row, idx, options, suburbCol);
+    if (!candidate) return;
+    items.push({ ...candidate, package_id: leftoverPkgId });
+  });
+  if (!items.length) return null;
+  return buildReliningPackageObject(leftoverPkgId, items, options, {
+    anchor_id: generateReliningAnchorId(),
+    original_package_id: leftoverPkgId,
+    is_leftover: true
+  });
+}
+
+// Given a list of locked package_ids, pick the next free RLN_NNN integer.
+function _nextFreeReliningPackageNumber(usedPackageIds) {
+  const reserved = new Set();
+  (usedPackageIds || []).forEach(id => {
+    const m = String(id || '').match(/^RLN_(\d+)$/);
+    if (m) reserved.add(Number(m[1]));
+  });
+  let n = 1;
+  while (reserved.has(n)) n++;
+  return n;
+}
+
+// Modal: per-pipe clash resolution. Returns a Promise<Map<asset_id, 'keep_existing'|'use_imported'>>
+// or rejects/resolves(null) when the user cancels. Each row exposes an
+// "Apply to all remaining" shortcut that fills every still-unresolved row
+// with the same choice.
+function showReliningClashResolutionModal(clashes) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('reliningClashModal');
+    if (existing) existing.remove();
+    const decisions = new Map(); // asset_id → choice
+    const overlay = document.createElement('div');
+    overlay.id = 'reliningClashModal';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.62);display:flex;align-items:center;justify-content:center;z-index:99999;padding:20px;font-family:Segoe UI,system-ui,sans-serif';
+
+    const renderBody = () => {
+      const rows = clashes.map(cl => {
+        const existingChoice = decisions.get(cl.asset_id);
+        const keepChecked = existingChoice === 'keep_existing' ? 'checked' : '';
+        const useChecked  = existingChoice === 'use_imported' ? 'checked' : '';
+        const resolvedTag = existingChoice
+          ? '<span style="margin-left:8px;display:inline-block;padding:1px 7px;border-radius:999px;background:#dcfce7;color:#166534;font-size:10px;font-weight:700;text-transform:uppercase">Resolved</span>'
+          : '';
+        return `
+          <tr data-clash-row data-asset-id="${escapeHtml(cl.asset_id)}">
+            <td style="padding:8px 10px;font-weight:700;color:#7B2D26;font-family:Consolas,monospace;font-size:12px">${escapeHtml(cl.asset_id)}${resolvedTag}</td>
+            <td style="padding:8px 10px;font-size:11px;color:#1A2B3C">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="radio" name="clash_${escapeHtml(cl.asset_id)}" data-choice="keep_existing" data-asset-id="${escapeHtml(cl.asset_id)}" ${keepChecked}>
+                <span>Keep <strong>${escapeHtml(cl.current_package_id)}</strong></span>
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;margin-top:4px">
+                <input type="radio" name="clash_${escapeHtml(cl.asset_id)}" data-choice="use_imported" data-asset-id="${escapeHtml(cl.asset_id)}" ${useChecked}>
+                <span>Use <strong>${escapeHtml(cl.imported_package_id)}</strong></span>
+              </label>
+            </td>
+            <td style="padding:8px 10px;text-align:right;vertical-align:top">
+              <button type="button" data-clash-apply-all="keep_existing" data-asset-id="${escapeHtml(cl.asset_id)}" style="display:block;width:100%;padding:3px 8px;font-size:10px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;margin-bottom:3px;color:#1A2B3C">Apply "Keep existing" to all remaining</button>
+              <button type="button" data-clash-apply-all="use_imported" data-asset-id="${escapeHtml(cl.asset_id)}" style="display:block;width:100%;padding:3px 8px;font-size:10px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;color:#1A2B3C">Apply "Use imported" to all remaining</button>
+            </td>
+          </tr>`;
+      }).join('');
+      const resolved = decisions.size;
+      const total = clashes.length;
+      const allResolved = resolved === total;
+      const applyDisabledStyle = allResolved ? '' : ';opacity:0.45;cursor:not-allowed';
+      return `
+        <div style="background:#fff;max-width:880px;width:100%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;border-radius:10px;box-shadow:0 24px 60px rgba(0,0,0,.35)">
+          <div style="padding:16px 22px;border-bottom:1px solid #e5e7eb;background:#FAD2CF">
+            <div style="font-size:16px;font-weight:800;color:#7B2D26">Lock-file import — ${total} clash${total === 1 ? '' : 'es'} need resolution</div>
+            <div style="font-size:12px;color:#7B2D26;margin-top:4px">Each pipe below is locked to a different package in the current session vs. the imported file. Pick one source per pipe, or use the per-row shortcut to apply the same choice to every remaining unresolved row.</div>
+          </div>
+          <div style="padding:0 22px;overflow:auto;flex:1">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead>
+                <tr style="text-align:left;background:#f1f5f9;color:#475569;font-size:10px;text-transform:uppercase;letter-spacing:.05em;position:sticky;top:0">
+                  <th style="padding:8px 10px">Asset</th>
+                  <th style="padding:8px 10px">Choose package</th>
+                  <th style="padding:8px 10px;text-align:right">Apply to all remaining</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div style="padding:14px 22px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fafafa">
+            <div style="font-size:12px;color:#1A2B3C"><strong>${resolved}</strong> of <strong>${total}</strong> clash${total === 1 ? '' : 'es'} resolved</div>
+            <div style="display:flex;gap:10px">
+              <button type="button" id="reliningClashCancel" style="padding:8px 18px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;color:#1A2B3C;font-weight:600;cursor:pointer">Cancel import</button>
+              <button type="button" id="reliningClashApply" ${allResolved ? '' : 'disabled'} style="padding:8px 18px;border-radius:6px;border:1px solid #00847F;background:#00847F;color:#fff;font-weight:700;cursor:pointer${applyDisabledStyle}">Apply</button>
+            </div>
+          </div>
+        </div>`;
+    };
+
+    const close = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+
+    overlay.addEventListener('click', (ev) => { ev.stopPropagation(); });
+
+    const wireUp = () => {
+      overlay.querySelectorAll('input[type="radio"][data-choice]').forEach(input => {
+        input.addEventListener('change', (e) => {
+          const id = e.target.getAttribute('data-asset-id');
+          const choice = e.target.getAttribute('data-choice');
+          if (id && choice) decisions.set(id, choice);
+          overlay.firstChild && overlay.firstChild.remove();
+          overlay.insertAdjacentHTML('afterbegin', renderBody());
+          wireUp();
+        });
+      });
+      overlay.querySelectorAll('button[data-clash-apply-all]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          const choice = e.target.getAttribute('data-clash-apply-all');
+          if (!choice) return;
+          clashes.forEach(cl => {
+            if (!decisions.has(cl.asset_id)) decisions.set(cl.asset_id, choice);
+          });
+          overlay.firstChild && overlay.firstChild.remove();
+          overlay.insertAdjacentHTML('afterbegin', renderBody());
+          wireUp();
+        });
+      });
+      const cancelBtn = overlay.querySelector('#reliningClashCancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => close(null));
+      const applyBtn = overlay.querySelector('#reliningClashApply');
+      if (applyBtn) applyBtn.addEventListener('click', () => {
+        if (decisions.size !== clashes.length) return;
+        close(decisions);
+      });
+    };
+
+    overlay.innerHTML = renderBody();
+    document.body.appendChild(overlay);
+    wireUp();
+  });
 }
 
 async function loadReliningLocksFile(file) {
@@ -7000,217 +7206,283 @@ async function loadReliningLocksFile(file) {
     }
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== 'object') throw new Error('Invalid locks file format.');
-    // Refuse imports where the lock file was generated under different
-    // packaging options (method / mode / grouping etc). Translating
-    // package_ids across mismatched methods produces silently wrong
-    // packages — locks land on the wrong pipes. User must align settings
-    // and re-generate before importing.
-    if (parsed.meta && parsed.meta.options) {
-      const fileOpts = parsed.meta.options;
-      const currentOpts = getReliningPackagingOptions();
-      const labels = {
-        method: 'Packaging Method',
-        reliningMode: 'Pipe Condition Selection',
-        groupingMethod: 'Grouping Method',
-        groupBySuburb: 'Group by Suburb',
-        proximityM: 'Proximity (m)',
-        maxPackageValue: 'Max Package Value',
-        pipesPerPackage: 'Pipes Per Package',
-        topupMode: 'Topup Mode'
-      };
-      const diffs = [];
-      Object.keys(labels).forEach(k => {
-        const a = String(fileOpts[k] ?? '');
-        const b = String(currentOpts[k] ?? '');
-        if (a !== b) diffs.push(`  • ${labels[k]}: file=${a || '(none)'} | current=${b || '(none)'}`);
-      });
-      if (diffs.length) {
-        alert(
-          'Lock file was generated with different packaging settings.\n\n' +
-          diffs.join('\n') +
-          '\n\nAlign these settings on the Pipe Relining tab, regenerate, then re-import.'
-        );
-        return;
-      }
-    }
-    // ── Merge vs Replace prompt ──
-    // If the live tool already has locks (engineer mid-session), don't silently
-    // wipe them when importing a PM's lock file. Capture existing state, then
-    // ask: OK = merge (file wins on key conflicts), Cancel = replace (legacy
-    // overwrite behaviour).
-    let mergeMode = false;
-    let oldMoves = null;
-    const existingMoves = reliningManualMoves || {};
-    const hasExistingLocks =
-      (existingMoves.locks?.packages && Object.keys(existingMoves.locks.packages).length) ||
-      (existingMoves.locks?.pipes    && Object.keys(existingMoves.locks.pipes).length) ||
-      (existingMoves.assignments     && Object.keys(existingMoves.assignments).length) ||
-      (existingMoves.renamedPackages && Object.keys(existingMoves.renamedPackages).length);
-    if (hasExistingLocks) {
-      try { oldMoves = structuredClone(existingMoves); }
-      catch (_e) { oldMoves = JSON.parse(JSON.stringify(existingMoves)); }
-      mergeMode = confirm(
-        'Existing locked packages detected in this session.\n' +
-        '  • OK = MERGE imported locks with existing (file wins on key conflicts).\n' +
-        '  • Cancel = REPLACE existing locks with imported file.'
-      );
-    }
-    reliningManualMoves = {
-      assignments:   parsed.assignments   && typeof parsed.assignments   === 'object' ? parsed.assignments   : {},
-      anchorOrigins: parsed.anchorOrigins && typeof parsed.anchorOrigins === 'object' ? parsed.anchorOrigins : {},
-      locks: {
-        pipes:    parsed.locks?.pipes    && typeof parsed.locks.pipes    === 'object' ? parsed.locks.pipes    : {},
-        packages: parsed.locks?.packages && typeof parsed.locks.packages === 'object' ? parsed.locks.packages : {}
-      },
-      moveOrigins: parsed.moveOrigins && typeof parsed.moveOrigins === 'object' ? parsed.moveOrigins : {},
-      c6Excluded:  parsed.c6Excluded  && typeof parsed.c6Excluded  === 'object' ? parsed.c6Excluded  : {},
-      c6Included:  parsed.c6Included  && typeof parsed.c6Included  === 'object' ? parsed.c6Included  : {},
-      renamedPackages: parsed.renamedPackages && typeof parsed.renamedPackages === 'object' ? parsed.renamedPackages : {},
-      lockedPackages: []
-    };
-    // ── Schema v2 path: lock file carries full per-package pipe-membership ──
-    // When parsed.schema === 2 and parsed.lockedPackages is an array, we use
-    // it as the source of truth for locked packages. The engine consumes this
-    // handoff in generateReliningPackages, carves out the pipes by asset_id,
-    // builds locked package objects via buildReliningPackageObject, and merges
-    // them back before the renumber pass. v1 fields are kept for non-locked
-    // moves and as a fallback for older files.
-    const isSchemaV2 = parsed.schema === 2 && Array.isArray(parsed.lockedPackages);
-    if (isSchemaV2 && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length) {
-      // Build an assetId → row index lookup once (same alias chain the engine uses).
-      const assetIdToRowIndex = new Map();
-      reliningAssetsRows.forEach((row, idx) => {
-        const id = _getReliningRowAssetId(row, idx);
-        if (id && !assetIdToRowIndex.has(id)) assetIdToRowIndex.set(id, idx);
-      });
-      const resolvedHandoff = [];
-      const newPkgLocks = {};
-      const newPipeLocks = { ...reliningManualMoves.locks.pipes };
-      const newAnchorOrigins = { ...reliningManualMoves.anchorOrigins };
-      const newRenamed = { ...reliningManualMoves.renamedPackages };
-      parsed.lockedPackages.forEach(entry => {
-        if (!entry || typeof entry !== 'object') return;
-        const fileAnchor = String(entry.anchor_id || '').trim();
-        const filePkgId = String(entry.package_id || '').trim();
-        if (!filePkgId) return;
-        // Generate a fresh anchor if the file didn't carry one (defensive).
-        const anchorId = fileAnchor || generateReliningAnchorId();
-        const ids = Array.isArray(entry.asset_ids) ? entry.asset_ids : [];
-        const resolvedIds = [];
-        ids.forEach(rawId => {
-          const id = String(rawId == null ? '' : rawId).trim();
-          if (!id) return;
-          // Keep the asset id even if no row matches yet — the engine will
-          // carve out by id-set; missing rows just become "drop-throughs".
-          resolvedIds.push(id);
-          newPipeLocks[id] = true;
-        });
-        if (!resolvedIds.length) return;
-        newPkgLocks[anchorId] = true;
-        if (!newAnchorOrigins[anchorId]) {
-          newAnchorOrigins[anchorId] = {
-            kind: entry.manual_origin ? 'manual' : 'existing',
-            created_at: new Date().toISOString(),
-            last_package_id: filePkgId
-          };
-        } else {
-          newAnchorOrigins[anchorId].last_package_id = filePkgId;
-        }
-        if (entry.renamed) newRenamed[anchorId] = filePkgId;
-        resolvedHandoff.push({
-          anchor_id: anchorId,
-          package_id: filePkgId,
-          asset_ids: resolvedIds,
-          manual_origin: !!entry.manual_origin,
-          renamed: !!entry.renamed,
-          suburbs: Array.isArray(entry.suburbs) ? entry.suburbs.slice() : []
-        });
-      });
-      reliningManualMoves.locks.packages = newPkgLocks;
-      reliningManualMoves.locks.pipes    = newPipeLocks;
-      reliningManualMoves.anchorOrigins  = newAnchorOrigins;
-      reliningManualMoves.renamedPackages = newRenamed;
-      reliningManualMoves.lockedPackages = resolvedHandoff;
-      if (mergeMode && oldMoves) {
-        _mergeOldMovesIntoCurrent(oldMoves, /*v2*/ true, resolvedHandoff);
-      }
-      persistReliningManualMoves();
-      if (typeof generateReliningPackages === 'function' && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
-        generateReliningPackages();
-      } else {
-        renderEditPackagesPanel();
-      }
-      console.info(`[Locks] Loaded v2 lock file: ${resolvedHandoff.length} locked package(s) from ${file.name}`);
+
+    if (!Array.isArray(reliningAssetsRows) || !reliningAssetsRows.length) {
+      alert('Upload the assets file before importing locks.');
       return;
     }
-    // ── Legacy v1 path: fall through to the package_id → anchor_id translation ──
-    // Normalise lock keys: saved files use package_id everywhere, live tool uses anchor_id.
-    // Translate package_id → anchor_id for ALL fields (locks.packages keys,
-    // assignments values, anchorOrigins keys, c6Included values) so every
-    // reference points at the current session's anchors. Without translating
-    // anchorOrigins specifically, applyReliningManualMoves resurrects phantom
-    // packages from stale session-A anchor_ids and pulls pipes into them.
-    if (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages)) {
-      const pkgIdToAnchor = {};
-      lastPackagingGeneration.packages.forEach(p => {
-        if (p && p.package_id && p.anchor_id) pkgIdToAnchor[p.package_id] = p.anchor_id;
-      });
-      const translateTarget = (t) => pkgIdToAnchor[t] || t;
-      const translatedPkgLocks = {};
-      Object.keys(reliningManualMoves.locks.packages).forEach(key => {
-        translatedPkgLocks[translateTarget(key)] = reliningManualMoves.locks.packages[key];
-      });
-      reliningManualMoves.locks.packages = translatedPkgLocks;
-      Object.keys(reliningManualMoves.assignments || {}).forEach(uid => {
-        reliningManualMoves.assignments[uid] = translateTarget(reliningManualMoves.assignments[uid]);
-      });
-      const translatedAnchorOrigins = {};
-      Object.keys(reliningManualMoves.anchorOrigins || {}).forEach(key => {
-        translatedAnchorOrigins[translateTarget(key)] = reliningManualMoves.anchorOrigins[key];
-      });
-      reliningManualMoves.anchorOrigins = translatedAnchorOrigins;
-      Object.keys(reliningManualMoves.c6Included || {}).forEach(uid => {
-        reliningManualMoves.c6Included[uid] = translateTarget(reliningManualMoves.c6Included[uid]);
-      });
-      // Drop dangling targets — a loaded locks file may reference packages that
-      // no longer exist in the current generation. Without this, stale targets
-      // accumulate and silently break later applyReliningManualMoves passes.
-      const validAnchors = new Set();
-      const validPkgIds = new Set();
-      lastPackagingGeneration.packages.forEach(p => {
-        if (p && p.anchor_id) validAnchors.add(String(p.anchor_id));
-        if (p && p.package_id) validPkgIds.add(String(p.package_id));
-      });
-      const knownPkg = (target) => {
-        const t = String(target);
-        return validAnchors.has(t) || validPkgIds.has(t);
-      };
-      Object.keys(reliningManualMoves.assignments || {}).forEach(uid => {
-        const target = reliningManualMoves.assignments[uid];
-        if (!knownPkg(target)) delete reliningManualMoves.assignments[uid];
-      });
-      Object.keys(reliningManualMoves.locks.packages || {}).forEach(key => {
-        if (!knownPkg(key)) delete reliningManualMoves.locks.packages[key];
-      });
-      Object.keys(reliningManualMoves.anchorOrigins || {}).forEach(key => {
-        if (!knownPkg(key)) delete reliningManualMoves.anchorOrigins[key];
-      });
-      Object.keys(reliningManualMoves.c6Included || {}).forEach(uid => {
-        const target = reliningManualMoves.c6Included[uid];
-        if (!knownPkg(target)) delete reliningManualMoves.c6Included[uid];
-      });
+    if (!Array.isArray(reliningRatesRows) || !reliningRatesRows.length) {
+      alert('Upload the panel rates workbook before importing locks.');
+      return;
     }
-    if (mergeMode && oldMoves) {
-      _mergeOldMovesIntoCurrent(oldMoves, /*v2*/ false, null);
-    }
-    persistReliningManualMoves();
-    if (typeof generateReliningPackages === 'function' && Array.isArray(reliningAssetsRows) && reliningAssetsRows.length && Array.isArray(reliningRatesRows) && reliningRatesRows.length) {
-      generateReliningPackages();
+
+    const isSchemaV2 = parsed.schema === 2 && Array.isArray(parsed.lockedPackages);
+    const options = getReliningPackagingOptions();
+
+    // ── Build file_locked_pipes: asset_id → { package_id, anchor_id, asset_ids, renamed, manual_origin } ──
+    // For v2 we read parsed.lockedPackages directly. For v1 we translate the
+    // package_id → current anchor_id via lastPackagingGeneration so that the
+    // pipe-set for each locked package_id can be reconstructed.
+    const fileLocked = new Map(); // asset_id → entry ref
+    const filePackages = new Map(); // package_id (file) → { anchor_id, package_id, asset_ids[], renamed, manual_origin, suburbs }
+
+    if (isSchemaV2) {
+      parsed.lockedPackages.forEach(entry => {
+        if (!entry || typeof entry !== 'object') return;
+        const filePkgId = String(entry.package_id || '').trim();
+        if (!filePkgId) return;
+        const anchorId = String(entry.anchor_id || '').trim() || generateReliningAnchorId();
+        const ids = (Array.isArray(entry.asset_ids) ? entry.asset_ids : [])
+          .map(v => String(v == null ? '' : v).trim())
+          .filter(Boolean);
+        if (!ids.length) return;
+        const ref = {
+          anchor_id: anchorId,
+          package_id: filePkgId,
+          asset_ids: ids,
+          renamed: !!entry.renamed,
+          manual_origin: !!entry.manual_origin,
+          suburbs: Array.isArray(entry.suburbs) ? entry.suburbs.slice() : []
+        };
+        filePackages.set(filePkgId, ref);
+        ids.forEach(id => fileLocked.set(id, ref));
+      });
     } else {
-      renderEditPackagesPanel();
+      // v1 fallback. v1 files key locks by package_id, with no per-package
+      // pipe-membership snapshot. We rebuild the membership from the current
+      // generation by matching package_id; if the current generation is
+      // empty, the v1 file cannot be applied.
+      const v1PkgLocks = (parsed.locks && parsed.locks.packages && typeof parsed.locks.packages === 'object')
+        ? parsed.locks.packages : {};
+      const v1Renamed = (parsed.renamedPackages && typeof parsed.renamedPackages === 'object')
+        ? parsed.renamedPackages : {};
+      if (Object.keys(v1PkgLocks).length) {
+        const prevPkgs = (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages))
+          ? lastPackagingGeneration.packages : [];
+        if (!prevPkgs.length) {
+          alert('v1 lock files require an existing generation. Generate packages first then re-import.');
+          return;
+        }
+        const pkgIdToPkg = new Map();
+        prevPkgs.forEach(p => { if (p && p.package_id) pkgIdToPkg.set(String(p.package_id), p); });
+        Object.keys(v1PkgLocks).forEach(rawKey => {
+          if (!v1PkgLocks[rawKey]) return;
+          const key = String(rawKey);
+          const pkg = pkgIdToPkg.get(key);
+          if (!pkg) return;
+          const ids = (pkg.assets || [])
+            .map(a => String(a && a.assetId != null ? a.assetId : '').trim())
+            .filter(Boolean);
+          if (!ids.length) return;
+          const anchorId = String(pkg.anchor_id || generateReliningAnchorId());
+          const ref = {
+            anchor_id: anchorId,
+            package_id: key,
+            asset_ids: ids,
+            renamed: !!v1Renamed[key],
+            manual_origin: false,
+            suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
+          };
+          filePackages.set(key, ref);
+          ids.forEach(id => fileLocked.set(id, ref));
+        });
+      }
     }
-    const pipeCount = Object.keys(reliningManualMoves.assignments).length;
-    console.info(`[Locks] Loaded ${pipeCount} assignment(s) from ${file.name}`);
+
+    // ── Build current_locked_pipes: asset_id → { package_id, anchor_id } ──
+    // Source = lastPackagingGeneration.packages where isReliningPackageFullyLocked.
+    const currentLocked = new Map(); // asset_id → { anchor_id, package_id, asset_ids[], renamed, manual_origin, suburbs, _pkgRef }
+    const currentPackages = new Map(); // anchor_id → ref
+    const prevPkgs = (lastPackagingGeneration && Array.isArray(lastPackagingGeneration.packages))
+      ? lastPackagingGeneration.packages : [];
+    prevPkgs.forEach(pkg => {
+      if (!pkg || !isReliningPackageFullyLocked(pkg)) return;
+      const ids = (pkg.assets || [])
+        .map(a => String(a && a.assetId != null ? a.assetId : '').trim())
+        .filter(Boolean);
+      if (!ids.length) return;
+      const anchorId = String(pkg.anchor_id || generateReliningAnchorId());
+      const ref = {
+        anchor_id: anchorId,
+        package_id: String(pkg.package_id || anchorId),
+        asset_ids: ids,
+        renamed: !!(reliningManualMoves && reliningManualMoves.renamedPackages && reliningManualMoves.renamedPackages[anchorId]),
+        manual_origin: !!pkg.manual_origin,
+        suburbs: Array.isArray(pkg.suburbs) ? pkg.suburbs.slice() : []
+      };
+      currentPackages.set(anchorId, ref);
+      ids.forEach(id => currentLocked.set(id, ref));
+    });
+
+    // ── Compute clashes: pipes locked in BOTH where file ≠ current ──
+    const clashes = [];
+    fileLocked.forEach((fileRef, assetId) => {
+      const curRef = currentLocked.get(assetId);
+      if (!curRef) return;
+      if (fileRef.package_id === curRef.package_id) return;
+      clashes.push({
+        asset_id: assetId,
+        current_package_id: curRef.package_id,
+        current_anchor_id: curRef.anchor_id,
+        imported_package_id: fileRef.package_id,
+        imported_anchor_id: fileRef.anchor_id
+      });
+    });
+
+    let decisions = new Map();
+    if (clashes.length) {
+      const result = await showReliningClashResolutionModal(clashes);
+      if (!result) {
+        console.info('[Locks] Import cancelled at clash modal.');
+        return;
+      }
+      decisions = result;
+    }
+
+    // ── Build per-asset resolved package map ──
+    // For each clashed pipe: apply user choice. For non-clash pipes: file wins
+    // when both have it (already identical), else whichever side has it.
+    const resolvedPipeToRef = new Map(); // asset_id → ref
+    fileLocked.forEach((fileRef, assetId) => {
+      const curRef = currentLocked.get(assetId);
+      if (curRef && fileRef.package_id !== curRef.package_id) {
+        const choice = decisions.get(assetId);
+        resolvedPipeToRef.set(assetId, choice === 'keep_existing' ? curRef : fileRef);
+      } else {
+        resolvedPipeToRef.set(assetId, fileRef);
+      }
+    });
+    currentLocked.forEach((curRef, assetId) => {
+      if (resolvedPipeToRef.has(assetId)) return; // already covered above
+      resolvedPipeToRef.set(assetId, curRef);
+    });
+
+    // ── Group resolved pipes back into packages, keyed by ref identity. ──
+    // Each ref's asset_ids may shrink if some of its pipes resolved to a
+    // different ref (the loser of a clash). A package whose pipe-set becomes
+    // empty after resolution is dropped.
+    const refToAssetIds = new Map();
+    resolvedPipeToRef.forEach((ref, assetId) => {
+      if (!refToAssetIds.has(ref)) refToAssetIds.set(ref, []);
+      refToAssetIds.get(ref).push(assetId);
+    });
+
+    // ── Materialise locked packages ──
+    const suburbCol = resolveSuburbColumn(reliningAssetsRows);
+    const idToRow = new Map();
+    reliningAssetsRows.forEach((row, idx) => {
+      const id = _getReliningRowAssetId(row, idx);
+      if (id && !idToRow.has(id)) idToRow.set(id, row);
+    });
+
+    const lockedPackages = [];
+    refToAssetIds.forEach((assetIds, ref) => {
+      const pkg = _buildLockedPackageFromAssetIds(
+        ref.anchor_id,
+        ref.package_id,
+        assetIds,
+        options,
+        suburbCol,
+        idToRow,
+        { manual_origin: ref.manual_origin ? 'manual' : undefined, suburbs: ref.suburbs }
+      );
+      if (pkg) lockedPackages.push(pkg);
+    });
+
+    // ── Update reliningManualMoves to reflect the merged locked state. ──
+    // Clear lockedPackages handoff (we're not running the engine), update
+    // locks dicts, anchorOrigins, renamedPackages.
+    const newPipeLocks = {};
+    const newPkgLocks = {};
+    const newAnchorOrigins = {};
+    const newRenamed = {};
+    refToAssetIds.forEach((assetIds, ref) => {
+      if (!assetIds.length) return;
+      newPkgLocks[ref.anchor_id] = true;
+      newAnchorOrigins[ref.anchor_id] = (reliningManualMoves?.anchorOrigins?.[ref.anchor_id]) || {
+        kind: ref.manual_origin ? 'manual' : 'existing',
+        created_at: new Date().toISOString(),
+        last_package_id: ref.package_id
+      };
+      newAnchorOrigins[ref.anchor_id].last_package_id = ref.package_id;
+      if (ref.renamed) newRenamed[ref.anchor_id] = ref.package_id;
+      assetIds.forEach(id => { newPipeLocks[id] = true; });
+    });
+
+    // Preserve incoming non-lock state from the file (assignments, c6 lists,
+    // moveOrigins, history) but drop the lockedPackages handoff and replace
+    // the lock dicts wholesale with the merged result above.
+    const fileAssignments   = (parsed.assignments   && typeof parsed.assignments   === 'object') ? parsed.assignments   : {};
+    const fileMoveOrigins   = (parsed.moveOrigins   && typeof parsed.moveOrigins   === 'object') ? parsed.moveOrigins   : {};
+    const fileC6Excluded    = (parsed.c6Excluded    && typeof parsed.c6Excluded    === 'object') ? parsed.c6Excluded    : {};
+    const fileC6Included    = (parsed.c6Included    && typeof parsed.c6Included    === 'object') ? parsed.c6Included    : {};
+
+    reliningManualMoves = {
+      assignments: { ...(reliningManualMoves?.assignments || {}), ...fileAssignments },
+      anchorOrigins: newAnchorOrigins,
+      locks: { pipes: newPipeLocks, packages: newPkgLocks },
+      moveOrigins: { ...(reliningManualMoves?.moveOrigins || {}), ...fileMoveOrigins },
+      c6Excluded: { ...(reliningManualMoves?.c6Excluded || {}), ...fileC6Excluded },
+      c6Included: { ...(reliningManualMoves?.c6Included || {}), ...fileC6Included },
+      renamedPackages: newRenamed,
+      lockedPackages: [], // engine handoff intentionally empty — engine will not run
+      history: reliningManualMoves?.history || []
+    };
+    persistReliningManualMoves();
+
+    // ── Track clash markers (only the clashed asset_ids, regardless of choice). ──
+    clashes.forEach(cl => reliningClashedPipes.add(String(cl.asset_id)));
+    persistReliningClashedPipes();
+
+    // ── Build the leftover bucket. ──
+    const lockedAssetIdSet = new Set();
+    lockedPackages.forEach(pkg => (pkg.assets || []).forEach(a => {
+      const id = String(a && a.assetId != null ? a.assetId : '').trim();
+      if (id) lockedAssetIdSet.add(id);
+    }));
+    const leftoverPkgNumber = _nextFreeReliningPackageNumber(lockedPackages.map(p => p.package_id));
+    const leftoverPkgId = `RLN_${String(leftoverPkgNumber).padStart(3, '0')}`;
+    const leftoverPkg = _buildLeftoverReliningPackage(lockedAssetIdSet, options, leftoverPkgId);
+
+    const finalPackages = leftoverPkg ? [...lockedPackages, leftoverPkg] : [...lockedPackages];
+
+    // Stamp priority fields so renderers don't NaN out.
+    const prioritised = addPackagePriority(finalPackages);
+
+    // ── Run sanity check (leftover bucket likely flagged as oversize). ──
+    const sanity = (typeof validateReliningPackageTargets === 'function')
+      ? validateReliningPackageTargets(prioritised, options)
+      : { issues: [], summary: { totalChecked: 0, totalIssues: 0, undersized: 0, oversized: 0 } };
+
+    const totalLength = prioritised.reduce((s, p) => s + (Number(p.total_length_m) || 0), 0);
+    const totalCost   = prioritised.reduce((s, p) => s + (Number(p.total_cost) || 0), 0);
+    const costedCount = prioritised.reduce((s, p) => s + (p.assets || []).filter(a => Number.isFinite(a.pipeCost)).length, 0);
+    const uncostedCount = prioritised.reduce((s, p) => s + (p.assets || []).filter(a => !Number.isFinite(a.pipeCost)).length, 0);
+
+    lastPackagingGeneration = {
+      options,
+      preview: lastReliningPackagingPreview || { eligible: [], costed: [], uncosted: [], withCoords: [], noCoords: [], c6Pool: [], asset_count: reliningAssetsRows.length, suburb_column: suburbCol, streams: [] },
+      package_count: prioritised.length,
+      costed_pipe_count: costedCount,
+      uncosted_pipe_count: uncostedCount,
+      total_length_m: Number(totalLength.toFixed(1)),
+      total_cost: Number(totalCost.toFixed(2)),
+      rate_stale_count: 0,
+      packages: prioritised,
+      uncosted_assets: [],
+      generated_at: new Date().toISOString(),
+      _sanityIssues: sanity,
+      _imported_from_locks: true
+    };
+
+    setPackagingStatus(true, `${prioritised.length.toLocaleString()} packages from import (${lockedPackages.length} locked, ${leftoverPkg ? '1 leftover' : '0 leftover'})`);
+    if (typeof renderGeneratedPackages === 'function') renderGeneratedPackages(lastPackagingGeneration);
+    if (typeof renderReliningPackagesMap === 'function') renderReliningPackagesMap();
+    if (typeof renderEditPackagesPanel === 'function') renderEditPackagesPanel();
+    if (sanity.issues.length && typeof showReliningPackageSanityModal === 'function') {
+      showReliningPackageSanityModal(sanity, options);
+    }
+    console.info(`[Locks] Imported ${lockedPackages.length} locked package(s) + ${leftoverPkg ? 1 : 0} leftover (${clashes.length} clash${clashes.length === 1 ? '' : 'es'} resolved) from ${file.name}`);
   } catch (err) {
     alert('Failed to load locks file: ' + (err?.message || err));
   }
@@ -7509,6 +7781,7 @@ function renderEditPackagesPanel() {
       <div style="display:flex;gap:8px">
         <button class="export-btn" type="button" onclick="undoLastReliningMove()" title="Undo the last manual edit (max ${RELINING_HISTORY_MAX})">↶ Undo (${(reliningManualMoves?.history?.length || 0)})</button>
         <button class="export-btn" type="button" onclick="resetAllReliningManualMoves()">Reset All Manual Edits</button>
+        <button class="export-btn" type="button" onclick="clearReliningClashedPipes()" title="Clear black asset_id markers left over from a lock-file import"${reliningClashedPipes && reliningClashedPipes.size ? '' : ' disabled style="opacity:0.45;cursor:not-allowed"'}>Clear clash markers (${reliningClashedPipes ? reliningClashedPipes.size : 0})</button>
       </div>
     </div>
   `;
@@ -7568,8 +7841,12 @@ function renderEditPackagesPanel() {
         ? (isMoveOrigin ? ' <span class="edit-pkg-tag moved">Moved</span>' : ' <span class="edit-pkg-tag locked">Locked</span>')
         : '';
       const c6Tag = isC6 ? ' <span class="edit-pkg-tag" style="background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe">C6' + (asset.c6_manual_include ? ' · manual' : '') + '</span>' : '';
-      const tagHtml = lockedTag + c6Tag;
-      const assetColor = isLocked ? '#dc2626' : '#16a34a';
+      // Clash override: black asset_id when this pipe was resolved during a
+      // lock-file import (transient marker, cleared via toolbar button).
+      const isClashed = (typeof isReliningClashedPipe === 'function') && isReliningClashedPipe(uid);
+      const clashTag = isClashed ? ' <span class="edit-pkg-tag" style="background:#000;color:#fff;border:1px solid #000">Clash</span>' : '';
+      const tagHtml = lockedTag + c6Tag + clashTag;
+      const assetColor = isClashed ? '#000' : (isLocked ? '#dc2626' : '#16a34a');
       const assetStyle = 'color:' + assetColor + ' !important;text-decoration:underline';
       const assetLinkHtml = `<a href="#reliningPackagesMap" data-relining-asset-id="${encodeURIComponent(uid)}" style="${assetStyle};cursor:pointer" title="Show this pipe on the map">${escapeHtml(uid)}</a>`;
       const moveCellHtml = isC6
