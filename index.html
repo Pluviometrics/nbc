@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="fc4fee8">
-<meta name="build-time" content="2026-05-14T09:01:40+10:00">
+<meta name="build-sha" content="276bea4">
+<meta name="build-time" content="2026-05-14T09:09:25+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -5517,9 +5517,14 @@ function validateReliningPackageTargets(packages, options) {
   const method = opts.method || 'value';
   const tol = RELINING_VALUE_TOLERANCE;
   const isCount = method === 'count';
-  const target = isCount
-    ? Math.max(Number(opts.pipesPerPackage) || 0, 0)
-    : Math.max(Number(opts.maxPackageValue) || 0, 0);
+  // High Criticality intentionally ignores Max Package Value — the bundle is
+  // one package regardless of total cost. Setting target=0 short-circuits the
+  // oversized check below so the bundle never flags as a sizing issue.
+  const target = method === 'highCrit'
+    ? 0
+    : (isCount
+        ? Math.max(Number(opts.pipesPerPackage) || 0, 0)
+        : Math.max(Number(opts.maxPackageValue) || 0, 0));
   let totalChecked = 0;
   let undersized = 0;
   let oversized = 0;
@@ -5632,35 +5637,17 @@ function isHighCriticalityCandidate(item) {
   return false;
 }
 
-function splitReliningItemsByHighCrit(items, options) {
-  // Filter: union of (≥1050 mm) OR (criticality_1dp ≥ 4.0, non-C6).
-  // No location/suburb binning — every qualifying pipe is bundled together
-  // regardless of where it sits in the LGA. Value cap only splits when the
-  // running total would exceed Max Package Value.
+function splitReliningItemsByHighCrit(items /* , options */) {
+  // High Criticality bundles ALL qualifying pipes into ONE package, with no
+  // value cap and no distance/suburb binning. A pipe qualifies if either:
+  //   • diameter ≥ 1050 mm, OR
+  //   • criticality_1dp ≥ 4.0 (excluding C6 add-ons).
+  // Max Package Value is intentionally ignored — the user wants every large /
+  // high-crit pipe in a single package regardless of total cost or location.
   const filtered = (items || []).filter(isHighCriticalityCandidate);
   if (!filtered.length) return [];
   const sorted = filtered.slice().sort(reliningClusterSeedCompare);
-  const maxValue = Number(options.maxPackageValue) > 0 ? Number(options.maxPackageValue) : Infinity;
-  const result = [];
-  let pkgCounter = 0;
-  let current = [];
-  let currentValue = 0;
-  const closePackage = () => {
-    if (!current.length) return;
-    pkgCounter += 1;
-    const pkgId = `RLN_${String(pkgCounter).padStart(3, '0')}`;
-    current.forEach(item => result.push({ ...item, package_id: pkgId }));
-    current = [];
-    currentValue = 0;
-  };
-  sorted.forEach(item => {
-    const pipeValue = Number(item.pipeCost) || 0;
-    if (current.length && currentValue + pipeValue > maxValue) closePackage();
-    current.push(item);
-    currentValue += pipeValue;
-  });
-  closePackage();
-  return result;
+  return sorted.map(item => ({ ...item, package_id: 'RLN_001' }));
 }
 
 function maxReliningPackageSpanM(items) {
@@ -8624,7 +8611,7 @@ function renderReliningPackagingReasoning(options, preview = null) {
   const methodText = options.method === 'count'
     ? `Packages are split after about <strong>${options.pipesPerPackage.toLocaleString()}</strong> pipes.`
     : options.method === 'highCrit'
-    ? `High Criticality bundle — every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong> OR with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6) is grouped into a single package regardless of location. Splits only when the running total would push above <strong>${formatCurrency(options.maxPackageValue)}</strong>.`
+    ? `High Criticality bundle — every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong> OR with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.`
     : `Packages are split when the next pipe would push the package above <strong>${formatCurrency(options.maxPackageValue)}</strong>.`;
   const groupingText = options.proximityM
     ? `Pipes are grouped by spatial proximity using the restored anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.`
@@ -8655,7 +8642,9 @@ function togglePackagingInputs() {
   const countWrap = document.getElementById('pkgCountWrap');
   const topupRow = document.getElementById('pkgTopupRow');
   const suburbSelect = document.getElementById('pkgGroupSuburb');
-  if (valueWrap) valueWrap.style.display = method === 'count' ? 'none' : '';
+  // Hide Max Package Value when it isn't applicable: count mode uses pipes
+  // per package, High Criticality ignores value entirely.
+  if (valueWrap) valueWrap.style.display = (method === 'count' || method === 'highCrit') ? 'none' : '';
   if (countWrap) countWrap.style.display = method === 'count' ? '' : 'none';
   if (topupRow) {
     const disabled = method === 'count' || method === 'location' || method === 'highCrit';
@@ -12349,7 +12338,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   var opt = [
     { label: 'Pipe Condition Selection', value: options.reliningMode || '—' },
     { label: 'Packaging Method', value: fmtMethod(options.method) },
-    { label: options.method === 'count' ? 'Pipes Per Package' : 'Max Package Value', value: options.method === 'count' ? (options.pipesPerPackage != null ? options.pipesPerPackage.toLocaleString() : '—') : (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') },
+    { label: options.method === 'count' ? 'Pipes Per Package' : (options.method === 'highCrit' ? 'Size Limit' : 'Max Package Value'), value: options.method === 'count' ? (options.pipesPerPackage != null ? options.pipesPerPackage.toLocaleString() : '—') : (options.method === 'highCrit' ? 'Ignored — single bundle' : (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—')) },
     { label: 'Grouping', value: fmtGroupingMethod(options) },
     { label: 'Top-up Mode', value: options.topupMode || 'No top up' },
     { label: 'Cost Mode', value: options.costMode || 'median' },
@@ -12372,7 +12361,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   if (options.method === 'count') {
     ovBullets.push('Packages are split after about <strong>' + (options.pipesPerPackage != null ? Number(options.pipesPerPackage).toLocaleString() : '—') + '</strong> pipes.');
   } else if (options.method === 'highCrit') {
-    ovBullets.push('High Criticality bundle — every pipe <strong>≥1050 mm</strong> OR with criticality ≥ <strong>4.0</strong> (non-C6) is grouped into a single package regardless of location. Splits only when the running total would push above <strong>' + (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') + '</strong>.');
+    ovBullets.push('High Criticality bundle — every pipe <strong>≥1050 mm</strong> OR with criticality ≥ <strong>4.0</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.');
   } else {
     ovBullets.push('Packages are split when the next pipe would push the package above <strong>' + (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') + '</strong>.');
   }
