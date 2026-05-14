@@ -1,9 +1,12 @@
 #!/bin/sh
-# Pre-commit: lint and prebuild before commit.
-# Install: copy this to .git/hooks/pre-commit and chmod +x
-# OR run: ln -s ../../.husky/pre-commit .git/hooks/pre-commit
+# Pre-commit: run lint and repo validation before commit.
+# Not auto-installed — wire it up once per clone:
+#   ln -s ../../.husky/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+# On Windows without symlinks: copy .husky/pre-commit -> .git/hooks/pre-commit
 
 if command -v npm >/dev/null 2>&1; then
   echo "[pre-commit] running lint…"
-  npm run lint --silent
+  npm run lint --silent || exit 1
+  echo "[pre-commit] running validate…"
+  npm run validate --silent || exit 1
 fi

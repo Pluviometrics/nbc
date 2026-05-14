@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join, normalize } from 'path';
 
 const root = process.cwd();
@@ -16,14 +16,6 @@ const requiredEntrypoints = [
   '_headers',
   '.nojekyll',
   '.github/workflows/deploy.yml',
-  'vendor/leaflet-1.9.4.min.js',
-  'vendor/leaflet-1.9.4.min.css',
-  'vendor/jszip-3.10.1.min.js',
-  'vendor/xlsx-0.20.2.full.min.js',
-  'vendor/exceljs-4.4.0.min.js',
-  'vendor/chart-4.4.1.umd.min.js',
-  'vendor/hammer-2.0.8.min.js',
-  'vendor/chartjs-plugin-zoom-2.2.0.umd.min.js',
   'templates/NBC Rainfall Calculator.xlsm',
   'bom_ifd_cache.js',
   'bom_northern_beaches_all_gauges.js',
@@ -34,9 +26,21 @@ for (const file of requiredEntrypoints) {
   if (!existsSync(join(root, file))) failures.push(`missing required entrypoint/asset: ${file}`);
 }
 
+// Vendor libraries are not hard-listed here — the index.html <head> scan below
+// verifies every individual vendor reference resolves. This only catches the
+// whole directory going missing.
+const vendorDir = join(root, 'vendor');
+if (!existsSync(vendorDir) || readdirSync(vendorDir).length === 0) {
+  failures.push('vendor/ is missing or empty');
+}
+
 const html = readFileSync(join(root, 'index.html'), 'utf8');
+// Static src/href references live in <head>; the body contains report-generator
+// template strings whose src=/href= are runtime constructs, not repo files.
+const headMatch = html.match(/<head[^>]*>([\s\S]*?)<\/head>/i);
+const headHtml = headMatch ? headMatch[1] : html;
 const localAssetPattern = /\b(?:src|href)=["']([^"']+)["']/g;
-for (const match of html.matchAll(localAssetPattern)) {
+for (const match of headHtml.matchAll(localAssetPattern)) {
   const ref = match[1];
   if (isExternalOrInline(ref)) continue;
   if (isRuntimeTemplate(ref)) continue;

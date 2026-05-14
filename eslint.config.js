@@ -15,6 +15,11 @@ export default [
     }
   },
   {
+    // index.html is intentionally ignored: flat-config ESLint cannot lint HTML
+    // without a processor plugin, and the app's inline JS is full of
+    // HTML-in-template-literal strings (the standalone report generator) that
+    // a JS processor would flag as false positives. Lint covers scripts/,
+    // tests/, and config files only.
     ignores: ['index.html', 'vendor/**', 'node_modules/**', '_libs/**', 'Superseeded/**', 'docs/archive/**', 'templates/**']
   }
 ];
