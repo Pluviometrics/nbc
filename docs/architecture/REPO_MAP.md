@@ -19,7 +19,7 @@ This repository is intentionally a static-site repository. The root is both the 
 
 | Path | Classification | Notes |
 |---|---|---|
-| `.github/workflows/` | Deployment config | GitHub Pages deployment from `release`. |
+| `.github/workflows/` | Deployment config | GitHub Pages deployment from `main`. |
 | `.husky/` | Developer tooling | Optional pre-commit hook. |
 | `docs/` | Documentation | Active docs plus archived historical planning material. |
 | `docs/archive/` | Archive | Historical audits/specs/plans retained for traceability only. Not active source of truth. |

@@ -99,7 +99,7 @@ for (const file of activeTextFiles) {
 }
 
 const deployment = readFileSync(join(root, '.github/workflows/deploy.yml'), 'utf8');
-if (!/branches:\s*\[release\]/.test(deployment)) failures.push('deploy workflow is not pinned to release branch');
+if (!/branches:\s*\[main\]/.test(deployment)) failures.push('deploy workflow is not pinned to main branch');
 if (!/upload-pages-artifact@v3/.test(deployment)) failures.push('deploy workflow is missing GitHub Pages artifact upload');
 
 if (warnings.length) {

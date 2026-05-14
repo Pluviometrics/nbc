@@ -14,7 +14,7 @@ Then open http://localhost:5173. Always serve over HTTP — `file://` breaks `fe
 
 ## Pre-deploy
 
-Before pushing the `release` branch, run:
+Before pushing to `main`, run:
 
 ```
 npm run build
@@ -24,23 +24,25 @@ This executes `scripts/prebuild.mjs`, which stamps `__BUILD_SHA__` and `__BUILD_
 
 ## Deploy procedure
 
-Deploys are gated on the `release` branch (not `main`):
+`main` is the deployment branch — every push to `main` deploys via GitHub Actions:
 
-1. Merge tested work into `main` as usual.
-2. Fast-forward `release` from `main`: `git checkout release && git merge --ff-only main`.
+1. Merge reviewed, tested work into `main` from a feature branch.
+2. `npm run validate && npm run lint && npm run test:smoke`
 3. `npm run build`
 4. `git commit -am "build: stamp release"` (only if prebuild changed `index.html`)
-5. `git push origin release`
+5. `git push origin main`
 6. GitHub Actions (`.github/workflows/deploy.yml`) builds and publishes to GitHub Pages.
 
-**One-time GitHub setting:** Repo Settings → Pages → Source = "GitHub Actions" (or "Deploy from branch" with branch = `release` if reverting to legacy mode). The workflow triggers only on `release` pushes.
+CI also runs `npm run build`, so the committed stamp in step 4 is optional — it only keeps the working tree's `index.html` in sync with what is deployed.
+
+**One-time GitHub setting:** Repo Settings → Pages → Source = "GitHub Actions". The workflow triggers only on `main` pushes.
 
 ## Rollback
 
 ```
-git checkout release
+git checkout main
 git revert <bad-sha>
-git push origin release
+git push origin main
 ```
 
 GitHub Actions re-runs and redeploys the reverted state.
@@ -48,16 +50,14 @@ GitHub Actions re-runs and redeploys the reverted state.
 ## Hot-fix
 
 ```
-git checkout release
+git checkout main && git pull --ff-only origin main
 git checkout -b hotfix/<short-name>
 # fix, test
-git checkout release
+git checkout main
 git merge --ff-only hotfix/<short-name>
 npm run build && git commit -am "build: hotfix" || true
-git push origin release
+git push origin main
 ```
-
-Then back-merge into `main` so the fix isn't lost: `git checkout main && git merge release && git push origin main`.
 
 ## External services & failure modes
 
@@ -90,7 +90,7 @@ On Windows without symlinks: copy `.husky/pre-commit` → `.git/hooks/pre-commit
 
 ## Common debugging
 
-- **"Blank page" reported by user:** ask them to View Source and search `build-sha` — this confirms the deployed SHA. If it doesn't match the tip of `release`, the deploy failed silently. Check Actions tab.
+- **"Blank page" reported by user:** ask them to View Source and search `build-sha` — this confirms the deployed SHA. If it doesn't match the tip of `main`, the deploy failed silently. Check Actions tab.
 - **"Stale data" reported:** `localStorage` cache; ask user to hard-refresh (Ctrl+Shift+R) or clear site data via DevTools → Application.
 - **"Map tiles missing":** SIX Maps token expiry or rate limit — switch layer; check console for 401/429.
 

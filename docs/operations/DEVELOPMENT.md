@@ -35,7 +35,7 @@ npm run test:smoke
 
 Do not work directly on `main` for cleanup or feature work. Create a branch, test locally, open a pull request, and merge only after review.
 
-Do not push directly to `release` except during an intentional deployment.
+`main` is the deployment branch — every push to it goes live. Only merge reviewed, validated work into `main`. See [DEPLOYMENT.md](DEPLOYMENT.md) for the release flow.
 
 ## Structure rules
 
