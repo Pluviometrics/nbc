@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="c3b2142">
-<meta name="build-time" content="2026-05-14T09:29:23+10:00">
+<meta name="build-sha" content="d40914a">
+<meta name="build-time" content="2026-05-14T10:05:51+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -961,7 +961,7 @@ window.addEventListener('keydown', (event) => {
           </select>
         </div>
         <div class="fg">
-          <label for="pkgMethod">Packaging Method<span class="help-icon" title="How to split candidates into work-order packages: by total $ value, by pipe count, by location-only, or single High Criticality bundle (pipes ≥1050 mm OR criticality ≥55).">?</span></label>
+          <label for="pkgMethod">Packaging Method<span class="help-icon" title="How to split candidates into work-order packages: by total $ value, by pipe count, by location-only, or High Criticality split (pipes ≥1050 mm and pipes with criticality ≥60).">?</span></label>
           <select id="pkgMethod" onchange="togglePackagingInputs();renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
             <option value="value" selected>Value based</option>
             <option value="count">Pipe count based</option>
@@ -978,10 +978,12 @@ window.addEventListener('keydown', (event) => {
           <input type="number" id="pkgPipeCount" min="1" step="1" value="25"/>
         </div>
         <div class="fg">
-          <label for="pkgGroupSuburb">Group by Suburb</label>
+          <label for="pkgGroupSuburb">Group By</label>
           <select id="pkgGroupSuburb" onchange="renderReliningPackagingReasoning(getReliningPackagingOptions(), lastReliningPackagingPreview)">
-            <option value="yes">Yes</option>
-            <option value="no" selected>No</option>
+            <option value="distance" selected>Distance</option>
+            <option value="suburb">Suburb</option>
+            <option value="crit_high">Criticality 60 and above</option>
+            <option value="crit_mod">Criticality 59 and below</option>
           </select>
         </div>
         <div class="fg">
@@ -4829,11 +4831,20 @@ function getReliningPackagingOptions() {
   const topupMode = (method === 'count' || method === 'location' || method === 'highCrit')
     ? 'No top up'
     : (document.querySelector('input[name="pkgTopupMode"]:checked')?.value || 'No top up');
-  // High Criticality forces group-by-suburb to No regardless of dropdown state.
-  const groupBySuburb = method !== 'highCrit'
-    && !proximityM
-    && groupingMethod === 'suburb'
-    && (document.getElementById('pkgGroupSuburb')?.value || 'yes') === 'yes';
+  // Group By dropdown drives two derived flags:
+  //   groupBySuburb     — true when user picked 'Suburb' (only meaningful when
+  //                       proximityM is null and the Packaging Method is not
+  //                       'highCrit', which has its own scheme).
+  //   criticalityGroup  — 'high' for ≥60, 'mod' for 1-59, else null. Drives
+  //                       a pre-extraction step in the orchestrator that
+  //                       carves those pipes into a dedicated package
+  //                       before the normal splitter runs.
+  const groupByValue = document.getElementById('pkgGroupSuburb')?.value || 'distance';
+  const isHc = method === 'highCrit';
+  const groupBySuburb = !isHc && !proximityM && groupingMethod === 'suburb' && groupByValue === 'suburb';
+  const criticalityGroup = (!isHc && groupByValue === 'crit_high') ? 'high'
+                         : (!isHc && groupByValue === 'crit_mod') ? 'mod'
+                         : null;
   return {
     reliningMode,
     method,
@@ -4843,7 +4854,9 @@ function getReliningPackagingOptions() {
     contractor: null,
     trafficControl: false,
     projectInitiation: document.getElementById('pkgInitiation')?.checked !== false,
+    groupBy: groupByValue,
     groupBySuburb,
+    criticalityGroup,
     groupingMethod,
     proximityM,
     topupMode,
@@ -4864,6 +4877,7 @@ function reliningOptionsFingerprint(options = {}) {
     trafficControl: options.trafficControl !== false,
     projectInitiation: options.projectInitiation !== false,
     groupBySuburb: options.groupBySuburb === true,
+    criticalityGroup: options.criticalityGroup || null,
     groupingMethod: options.groupingMethod || 'suburb',
     proximityM: Number(options.proximityM) || null,
     topupMode: options.topupMode || 'No top up',
@@ -5621,33 +5635,36 @@ function splitReliningItemsByLocation(items, options) {
   return result;
 }
 
-// High Criticality packaging: bundle pipes ≥1050 mm OR with criticality_1dp ≥ 4.0
-// (matching the existing is_high_criticality logic) into a single package. If the
-// Max Package Value cap is exceeded, split into multiple packages within the
-// current grouping bin (suburb / cluster / single bin for LGA).
+// High Criticality packaging: produces TWO output packages, no value cap,
+// no distance/suburb binning.
+//   • Large Diameter package: every unlocked pipe ≥ 1050 mm.
+//   • High Criticality package: every remaining unlocked pipe with
+//     criticality_1dp ≥ HIGH_CRIT_SCORE_THRESHOLD (non-C6).
+// A pipe that meets both criteria stays in the Large Diameter package.
 const HIGH_CRIT_DIAMETER_MM = 1050;
-const HIGH_CRIT_SCORE_THRESHOLD = 55;
+const HIGH_CRIT_SCORE_THRESHOLD = 60;
 
-function isHighCriticalityCandidate(item) {
+function isLargeDiameterPipe(item) {
   if (!item) return false;
   const diam = Number(item.diameterMm);
-  if (Number.isFinite(diam) && diam >= HIGH_CRIT_DIAMETER_MM) return true;
+  return Number.isFinite(diam) && diam >= HIGH_CRIT_DIAMETER_MM;
+}
+
+function isHighCriticalityPipe(item) {
+  if (!item) return false;
   const score = Number(item.criticalityScore);
-  if (Number.isFinite(score) && score >= HIGH_CRIT_SCORE_THRESHOLD && Number(item.condition) !== 6) return true;
-  return false;
+  return Number.isFinite(score) && score >= HIGH_CRIT_SCORE_THRESHOLD && Number(item.condition) !== 6;
 }
 
 function splitReliningItemsByHighCrit(items /* , options */) {
-  // High Criticality bundles ALL qualifying pipes into ONE package, with no
-  // value cap and no distance/suburb binning. A pipe qualifies if either:
-  //   • diameter ≥ 1050 mm, OR
-  //   • criticality_1dp ≥ 4.0 (excluding C6 add-ons).
-  // Max Package Value is intentionally ignored — the user wants every large /
-  // high-crit pipe in a single package regardless of total cost or location.
-  const filtered = (items || []).filter(isHighCriticalityCandidate);
-  if (!filtered.length) return [];
-  const sorted = filtered.slice().sort(reliningClusterSeedCompare);
-  return sorted.map(item => ({ ...item, package_id: 'RLN_001' }));
+  if (!items || !items.length) return [];
+  const largeDia = items.filter(isLargeDiameterPipe);
+  const largeDiaIds = new Set(largeDia.map(item => item.assetId));
+  const highCrit = items.filter(item => !largeDiaIds.has(item.assetId) && isHighCriticalityPipe(item));
+  const result = [];
+  largeDia.slice().sort(reliningClusterSeedCompare).forEach(item => result.push({ ...item, package_id: 'RLN_001' }));
+  highCrit.slice().sort(reliningClusterSeedCompare).forEach(item => result.push({ ...item, package_id: 'RLN_002' }));
+  return result;
 }
 
 function maxReliningPackageSpanM(items) {
@@ -5865,7 +5882,7 @@ function addPackagePriority(packages) {
         diameter_weight,
         condition_score,
         pipe_priority_score,
-        is_high_criticality: !isC6 && criticality_1dp >= 55 ? 1 : 0,
+        is_high_criticality: !isC6 && criticality_1dp >= 60 ? 1 : 0,
         is_large_diameter: !isC6 && (Number(asset.diameterMm) || 0) >= 525 ? 1 : 0
       };
     });
@@ -8611,9 +8628,13 @@ function renderReliningPackagingReasoning(options, preview = null) {
   const methodText = options.method === 'count'
     ? `Packages are split after about <strong>${options.pipesPerPackage.toLocaleString()}</strong> pipes.`
     : options.method === 'highCrit'
-    ? `High Criticality bundle — every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong> OR with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.`
+    ? `High Criticality split — <strong>RLN_001</strong> bundles every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong>; <strong>RLN_002</strong> bundles remaining pipes with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6). Max Package Value and distance/suburb grouping are ignored.`
     : `Packages are split when the next pipe would push the package above <strong>${formatCurrency(options.maxPackageValue)}</strong>.`;
-  const groupingText = options.proximityM
+  const groupingText = options.criticalityGroup === 'high'
+    ? 'Group By Criticality 60+ — every pipe with score ≥ <strong>60</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.'
+    : options.criticalityGroup === 'mod'
+    ? 'Group By Criticality 59− — every pipe with score <strong>1–59</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.'
+    : options.proximityM
     ? `Pipes are grouped by spatial proximity using the restored anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.`
     : options.groupingMethod === 'lga'
     ? 'LGA grouping — distance and suburb bounds are removed; the whole LGA is treated as a single bin.'
@@ -8668,12 +8689,16 @@ function togglePackagingInputs() {
           : (method === 'highCrit' ? 'Top-up is forced off in High Criticality mode.' : ''));
   }
   if (suburbSelect) {
-    // High Criticality forces Group by Suburb to No and disables the control.
+    // High Criticality has its own bundling scheme — disable Group By so the
+    // user can't choose a setting that does nothing. Park the value at
+    // 'distance' (no special grouping) while disabled.
     if (method === 'highCrit') {
-      suburbSelect.value = 'no';
+      suburbSelect.value = 'distance';
       suburbSelect.disabled = true;
+      suburbSelect.title = 'High Criticality builds its own two packages — Group By is not applicable.';
     } else {
       suburbSelect.disabled = false;
+      suburbSelect.title = '';
     }
   }
   // Grouping Method: High Criticality is LGA-wide by design — force the
@@ -9642,18 +9667,48 @@ async function generateReliningPackages() {
     _phase++;
     setLoadTxt('Matching relining rates...', _phase, TOTAL_PHASES);
     await waitForPaint();
+    // Group By Criticality pre-extract — carve qualifying pipes into a
+    // dedicated package BEFORE the normal splitter sees them, then run the
+    // splitter on what's left. Skipped for the highCrit method (it has its
+    // own scheme) and when criticalityGroup is null.
+    let critGroupPackage = null;
+    let splitterInput = preview.costed;
+    if (options.method !== 'highCrit' && options.criticalityGroup) {
+      const matches = (preview.costed || []).filter(item => {
+        const score = Number(item.criticalityScore);
+        if (!Number.isFinite(score)) return false;
+        if (Number(item.condition) === 6) return false;
+        return options.criticalityGroup === 'high'
+          ? score >= 60
+          : (score >= 1 && score <= 59);
+      });
+      if (matches.length) {
+        const placeholderId = '__CRIT_GROUP__';
+        const matchIds = new Set(matches.map(item => item.assetId));
+        splitterInput = (preview.costed || []).filter(item => !matchIds.has(item.assetId));
+        critGroupPackage = matches
+          .slice()
+          .sort(reliningClusterSeedCompare)
+          .map(item => ({ ...item, package_id: placeholderId }));
+      }
+    }
     let packagedItems = options.method === 'count'
-      ? splitReliningItemsByCount(preview.costed, options)
+      ? splitReliningItemsByCount(splitterInput, options)
       : options.method === 'location'
-      ? splitReliningItemsByLocation(preview.costed, options)
+      ? splitReliningItemsByLocation(splitterInput, options)
       : options.method === 'highCrit'
-      ? splitReliningItemsByHighCrit(preview.costed, options)
-      : splitReliningItemsByValue(preview.costed, options);
+      ? splitReliningItemsByHighCrit(splitterInput, options)
+      : splitReliningItemsByValue(splitterInput, options);
     // High Criticality is an LGA-wide bundle by design — bypass the
     // island-pipe carve-out so Scotland Island ≥1050 mm / high-crit pipes
     // stay in the bundle instead of being split into their own packages.
     if (options.method !== 'highCrit') {
       packagedItems = forceIslandSinglePipePackages(packagedItems);
+    }
+    // Merge the criticality-group package (if any). Renumbering downstream
+    // will assign a final RLN_NNN based on package priority.
+    if (critGroupPackage && critGroupPackage.length) {
+      packagedItems = packagedItems.concat(critGroupPackage);
     }
     _phase++;
     setLoadTxt('Building relining packages...', _phase, TOTAL_PHASES);
@@ -10553,7 +10608,7 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
       const items = pipes.filter(function(p){ return p.package_id === pkg.id; });
       pkg.package_total_pipe_priority = items.reduce(function(s,i){ return s + (Number(i.pipe_priority_score)||0); }, 0);
       pkg.package_max_pipe_priority   = items.reduce(function(m,i){ return Math.max(m, Number(i.pipe_priority_score)||0); }, 0);
-      pkg.package_high_crit_count     = items.filter(function(i){ return !i.is_c6_addon && Number(i.criticality_1dp) >= 55; }).length;
+      pkg.package_high_crit_count     = items.filter(function(i){ return !i.is_c6_addon && Number(i.criticality_1dp) >= 60; }).length;
       pkg.package_large_diam_count    = items.filter(function(i){ return !i.is_c6_addon && Number(i.diameter_mm) >= 525; }).length;
       pkg.package_xlarge_diam_count   = items.filter(function(i){ return !i.is_c6_addon && Number(i.diameter_mm) >= 900; }).length;
       pkg.package_worst_condition     = items.reduce(function(m,i){ return Math.max(m, Number(i.condition_score)||0); }, 0);
@@ -12324,6 +12379,8 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
     return g.map(function(arr, i) { return 'Group ' + (i+1) + ': ' + (Array.isArray(arr) && arr.length ? arr.join(', ') + ' mm' : '—'); }).filter(function(s){ return s.indexOf(': —') === -1; }).join(' · ') || 'None configured';
   }
   function fmtGroupingMethod(o) {
+    if (o.criticalityGroup === 'high') return 'Criticality 60 and above';
+    if (o.criticalityGroup === 'mod')  return 'Criticality 59 and below';
     if (o.proximityM) return 'Spatial — ' + o.proximityM.toLocaleString() + ' m radius';
     if (o.groupingMethod === 'lga') return 'LGA (no distance)';
     if (o.groupBySuburb) return 'Suburb';
@@ -12361,11 +12418,15 @@ function buildReliningPackageReportHtml(packages, packagedAssets, options, summa
   if (options.method === 'count') {
     ovBullets.push('Packages are split after about <strong>' + (options.pipesPerPackage != null ? Number(options.pipesPerPackage).toLocaleString() : '—') + '</strong> pipes.');
   } else if (options.method === 'highCrit') {
-    ovBullets.push('High Criticality bundle — every pipe <strong>≥1050 mm</strong> OR with criticality ≥ <strong>55</strong> (non-C6) is grouped into a <strong>single package</strong>. Max Package Value and distance/suburb grouping are ignored — no splits.');
+    ovBullets.push('High Criticality split — RLN_001 bundles every pipe <strong>≥1050 mm</strong>; RLN_002 bundles remaining pipes with criticality ≥ <strong>60</strong> (non-C6). Max Package Value and distance/suburb grouping are ignored.');
   } else {
     ovBullets.push('Packages are split when the next pipe would push the package above <strong>' + (options.maxPackageValue != null ? '$' + Number(options.maxPackageValue).toLocaleString('en-AU') : '—') + '</strong>.');
   }
-  if (options.proximityM) {
+  if (options.criticalityGroup === 'high') {
+    ovBullets.push('Group By Criticality 60+ — every pipe with score ≥ <strong>60</strong> (non-C6) is carved into a dedicated package. Remaining pipes follow the chosen Packaging Method.');
+  } else if (options.criticalityGroup === 'mod') {
+    ovBullets.push('Group By Criticality 59− — every pipe with score <strong>1–59</strong> (non-C6) is carved into a dedicated package. Remaining pipes follow the chosen Packaging Method.');
+  } else if (options.proximityM) {
     ovBullets.push('Pipes are grouped by spatial proximity using anchor-radius clustering within <strong>' + options.proximityM.toLocaleString() + ' m</strong>. Suburb boundaries are ignored.');
   } else if (options.groupingMethod === 'lga') {
     ovBullets.push('LGA grouping — distance and suburb bounds are removed; the whole LGA is treated as a single bin.');
