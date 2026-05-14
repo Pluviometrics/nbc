@@ -8,8 +8,8 @@
 <meta http-equiv="Expires" content="0"/>
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://cdn.sheetjs.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://server.arcgisonline.com https://maps.six.nsw.gov.au; connect-src 'self' https://nsw-rainfall-analyser-api.onrender.com https://wiski.mhl.nsw.gov.au https://api.open-meteo.com https://portal.spatial.nsw.gov.au; font-src 'self' https://cdnjs.cloudflare.com; object-src 'none'; base-uri 'self'; form-action 'self'"/>
 <meta name="referrer" content="strict-origin-when-cross-origin"/>
-<meta name="build-sha" content="d40914a">
-<meta name="build-time" content="2026-05-14T10:05:51+10:00">
+<meta name="build-sha" content="850f6f8">
+<meta name="build-time" content="2026-05-14T10:21:16+10:00">
 <title>NBC Stormwater Tools - Northern Beaches Council</title>
 <link rel="icon" href="data:,">
 <!-- v3 | relining-size-groups-restored-20260429 -->
@@ -4813,11 +4813,11 @@ function getReliningPackagingOptions() {
   const reliningMode = document.getElementById('pkgReliningMode')?.value || 'Condition 7 and 8';
   const maxPackageValue = Number(String(document.getElementById('pkgMaxValue')?.value || '500000').replace(/,/g, ''));
   const pipesPerPackage = Number(String(document.getElementById('pkgPipeCount')?.value || '25').replace(/,/g, ''));
-  // High Criticality is LGA-wide by definition — override whatever the dropdown
-  // shows so downstream code never applies suburb/proximity bounds.
-  const groupingMethod = method === 'highCrit'
-    ? 'lga'
-    : (document.getElementById('pkgGroupingMethod')?.value || 'suburb');
+  // Grouping Method is always read from the dropdown. For HC method, the
+  // engine's two HC packages still ignore distance/suburb internally, but
+  // Group By layering (below) can use the chosen Grouping Method to bucket
+  // the leftover pipes (pipes not in either HC package).
+  const groupingMethod = document.getElementById('pkgGroupingMethod')?.value || 'suburb';
   // proximityM may come from a free-text dropdown; reject NaN/zero/negative
   // values so downstream code can rely on (proximityM === null || >0).
   // 'lga' is treated the same as 'suburb' for proximity (no distance bound).
@@ -4840,10 +4840,9 @@ function getReliningPackagingOptions() {
   //                       carves those pipes into a dedicated package
   //                       before the normal splitter runs.
   const groupByValue = document.getElementById('pkgGroupSuburb')?.value || 'distance';
-  const isHc = method === 'highCrit';
-  const groupBySuburb = !isHc && !proximityM && groupingMethod === 'suburb' && groupByValue === 'suburb';
-  const criticalityGroup = (!isHc && groupByValue === 'crit_high') ? 'high'
-                         : (!isHc && groupByValue === 'crit_mod') ? 'mod'
+  const groupBySuburb = !proximityM && groupingMethod === 'suburb' && groupByValue === 'suburb';
+  const criticalityGroup = groupByValue === 'crit_high' ? 'high'
+                         : groupByValue === 'crit_mod' ? 'mod'
                          : null;
   return {
     reliningMode,
@@ -8628,17 +8627,33 @@ function renderReliningPackagingReasoning(options, preview = null) {
   const methodText = options.method === 'count'
     ? `Packages are split after about <strong>${options.pipesPerPackage.toLocaleString()}</strong> pipes.`
     : options.method === 'highCrit'
-    ? `High Criticality split — <strong>RLN_001</strong> bundles every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong>; <strong>RLN_002</strong> bundles remaining pipes with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6). Max Package Value and distance/suburb grouping are ignored.`
+    ? `High Criticality split — <strong>RLN_001</strong> bundles every pipe <strong>≥${HIGH_CRIT_DIAMETER_MM} mm</strong>; <strong>RLN_002</strong> bundles remaining pipes with criticality ≥ <strong>${HIGH_CRIT_SCORE_THRESHOLD}</strong> (non-C6). Group By controls leftover handling (see below).`
     : `Packages are split when the next pipe would push the package above <strong>${formatCurrency(options.maxPackageValue)}</strong>.`;
-  const groupingText = options.criticalityGroup === 'high'
-    ? 'Group By Criticality 60+ — every pipe with score ≥ <strong>60</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.'
-    : options.criticalityGroup === 'mod'
-    ? 'Group By Criticality 59− — every pipe with score <strong>1–59</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.'
-    : options.proximityM
-    ? `Pipes are grouped by spatial proximity using the restored anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.`
-    : options.groupingMethod === 'lga'
-    ? 'LGA grouping — distance and suburb bounds are removed; the whole LGA is treated as a single bin.'
-    : (options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.');
+  const isHc = options.method === 'highCrit';
+  let groupingText;
+  if (isHc) {
+    if (options.groupBy === 'crit_mod') {
+      groupingText = 'Group By Criticality 59− — leftover pipes (not in either HC package) with score <strong>1–59</strong> (non-C6) form an additional package.';
+    } else if (options.groupBy === 'crit_high') {
+      groupingText = 'Group By Criticality 60+ — redundant with the HC RLN_002 package; no extra leftover package is created.';
+    } else if (options.groupBy === 'suburb') {
+      groupingText = 'Group By Suburb — leftover pipes (not in either HC package) form additional packages bucketed by suburb.';
+    } else {
+      groupingText = options.proximityM
+        ? `Group By Distance — leftover pipes (not in either HC package) form additional packages clustered within <strong>${options.proximityM.toLocaleString()} m</strong>.`
+        : 'Group By Distance — no distance set in Grouping Method, so all leftover pipes form a single additional package.';
+    }
+  } else if (options.criticalityGroup === 'high') {
+    groupingText = 'Group By Criticality 60+ — every pipe with score ≥ <strong>60</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.';
+  } else if (options.criticalityGroup === 'mod') {
+    groupingText = 'Group By Criticality 59− — every pipe with score <strong>1–59</strong> (non-C6) is carved into a dedicated package. The remaining pipes are split by the chosen Packaging Method.';
+  } else if (options.proximityM) {
+    groupingText = `Pipes are grouped by spatial proximity using the restored anchor-radius clustering within <strong>${options.proximityM.toLocaleString()} m</strong>. Suburb boundaries are ignored.`;
+  } else if (options.groupingMethod === 'lga') {
+    groupingText = 'LGA grouping — distance and suburb bounds are removed; the whole LGA is treated as a single bin.';
+  } else {
+    groupingText = options.groupBySuburb ? 'Packages are kept within suburb groups before value or count splitting.' : 'Suburb grouping is switched off — pipes are packaged together across the full dataset.';
+  }
   el.innerHTML = `
     <strong>Packaging Reasoning:</strong>
     <ul style="margin:8px 0 0 18px;line-height:1.7">
@@ -8688,31 +8703,17 @@ function togglePackagingInputs() {
           ? 'Top-up does not apply to pipe-count packaging.'
           : (method === 'highCrit' ? 'Top-up is forced off in High Criticality mode.' : ''));
   }
+  // Group By and Grouping Method stay user-selectable across all packaging
+  // methods, including High Criticality — HC's two packages are built
+  // unconditionally, then Group By is layered on top for the leftover pipes.
   if (suburbSelect) {
-    // High Criticality has its own bundling scheme — disable Group By so the
-    // user can't choose a setting that does nothing. Park the value at
-    // 'distance' (no special grouping) while disabled.
-    if (method === 'highCrit') {
-      suburbSelect.value = 'distance';
-      suburbSelect.disabled = true;
-      suburbSelect.title = 'High Criticality builds its own two packages — Group By is not applicable.';
-    } else {
-      suburbSelect.disabled = false;
-      suburbSelect.title = '';
-    }
+    suburbSelect.disabled = false;
+    suburbSelect.title = '';
   }
-  // Grouping Method: High Criticality is LGA-wide by design — force the
-  // dropdown to 'lga' and disable it so the UI matches the engine behaviour.
   const groupingSelect = document.getElementById('pkgGroupingMethod');
   if (groupingSelect) {
-    if (method === 'highCrit') {
-      groupingSelect.value = 'lga';
-      groupingSelect.disabled = true;
-      groupingSelect.title = 'High Criticality packages bundle every qualifying pipe across the LGA — distance/suburb grouping does not apply.';
-    } else {
-      groupingSelect.disabled = false;
-      groupingSelect.title = '';
-    }
+    groupingSelect.disabled = false;
+    groupingSelect.title = '';
   }
   updateReliningGeneratedSettingsWarning();
 }
@@ -9667,10 +9668,11 @@ async function generateReliningPackages() {
     _phase++;
     setLoadTxt('Matching relining rates...', _phase, TOTAL_PHASES);
     await waitForPaint();
-    // Group By Criticality pre-extract — carve qualifying pipes into a
-    // dedicated package BEFORE the normal splitter sees them, then run the
-    // splitter on what's left. Skipped for the highCrit method (it has its
-    // own scheme) and when criticalityGroup is null.
+    // Group By layering for non-HC methods: pre-extract qualifying pipes into
+    // a dedicated package BEFORE the normal splitter runs. Criticality
+    // options carve out matching pipes; Distance/Suburb defer to the main
+    // splitter's binning. Skipped entirely for the highCrit method, which
+    // handles its own Group By layering below.
     let critGroupPackage = null;
     let splitterInput = preview.costed;
     if (options.method !== 'highCrit' && options.criticalityGroup) {
@@ -9705,10 +9707,64 @@ async function generateReliningPackages() {
     if (options.method !== 'highCrit') {
       packagedItems = forceIslandSinglePipePackages(packagedItems);
     }
-    // Merge the criticality-group package (if any). Renumbering downstream
-    // will assign a final RLN_NNN based on package priority.
+    // Merge the criticality-group package (if any) for non-HC methods.
+    // Renumbering downstream assigns a final RLN_NNN based on package priority.
     if (critGroupPackage && critGroupPackage.length) {
       packagedItems = packagedItems.concat(critGroupPackage);
+    }
+    // HC method: layer Group By on top of the two HC packages. Compute
+    // leftover (pipes not in either HC package) and bucket them based on
+    // Group By. Crit 60+ is redundant (HC already extracts these) and is
+    // skipped. Renumbering downstream assigns final RLN_NNN.
+    if (options.method === 'highCrit') {
+      const hcAssetIds = new Set(packagedItems.map(item => item.assetId));
+      const leftover = (preview.costed || []).filter(item => !hcAssetIds.has(item.assetId));
+      const groupBy = options.groupBy;
+      if (leftover.length && groupBy && groupBy !== 'crit_high') {
+        if (groupBy === 'crit_mod') {
+          const moderate = leftover
+            .filter(item => {
+              const score = Number(item.criticalityScore);
+              return Number.isFinite(score) && score >= 1 && score <= 59 && Number(item.condition) !== 6;
+            })
+            .slice()
+            .sort(reliningClusterSeedCompare)
+            .map(item => ({ ...item, package_id: '__HC_LEFTOVER_CRIT_MOD__' }));
+          if (moderate.length) packagedItems = packagedItems.concat(moderate);
+        } else if (groupBy === 'suburb') {
+          const buckets = new Map();
+          leftover.forEach(item => {
+            const key = item.suburb || 'Unknown';
+            if (!buckets.has(key)) buckets.set(key, []);
+            buckets.get(key).push(item);
+          });
+          [...buckets.keys()].sort((a, b) => String(a).localeCompare(String(b))).forEach(key => {
+            const safe = String(key).replace(/[^A-Za-z0-9]/g, '_').toUpperCase();
+            const id = `__HC_LEFTOVER_SUBURB_${safe}__`;
+            (buckets.get(key) || []).slice().sort(reliningClusterSeedCompare)
+              .forEach(item => packagedItems.push({ ...item, package_id: id }));
+          });
+        } else if (groupBy === 'distance') {
+          if (options.proximityM) {
+            const clustered = assignReliningClusters(leftover, options.proximityM);
+            const byCluster = new Map();
+            clustered.forEach(item => {
+              const key = item._cluster || 'unknown';
+              if (!byCluster.has(key)) byCluster.set(key, []);
+              byCluster.get(key).push(item);
+            });
+            [...byCluster.keys()].sort((a, b) => String(a).localeCompare(String(b))).forEach(key => {
+              const id = `__HC_LEFTOVER_DIST_${key}__`;
+              (byCluster.get(key) || []).slice().sort(reliningClusterSeedCompare)
+                .forEach(item => packagedItems.push({ ...item, package_id: id }));
+            });
+          } else {
+            const id = '__HC_LEFTOVER_DIST_ALL__';
+            leftover.slice().sort(reliningClusterSeedCompare)
+              .forEach(item => packagedItems.push({ ...item, package_id: id }));
+          }
+        }
+      }
     }
     _phase++;
     setLoadTxt('Building relining packages...', _phase, TOTAL_PHASES);
