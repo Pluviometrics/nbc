@@ -9673,11 +9673,13 @@ async function generateReliningPackages() {
       showReliningPackageSanityModal(sanity, options);
     }
   } catch (e) {
-    setPackagingStatus(false, 'Package generation failed');
+    const message = String(e?.message || e || 'Unknown error');
+    console.error('[Relining] Package generation failed:', e);
+    setPackagingStatus(false, `Package generation failed: ${message}`);
     const area = document.getElementById('pkgPackagesArea');
     if (area) {
       area.className = 'pkg-empty';
-      area.textContent = String(e.message || e);
+      area.textContent = message;
     }
   } finally {
     hideLoad();
