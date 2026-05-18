@@ -10156,6 +10156,7 @@ function exportReliningPackagesCsv() {
     'longitude',
     'coordinate_source',
     'centre_distance_m',
+    'topup',
     'cost_status',
     'cost_reason'
   ]];
@@ -10182,6 +10183,7 @@ function exportReliningPackagesCsv() {
         item.lon ?? '',
         item.coordinateSource || '',
         item.package_center_distance_m != null ? item.package_center_distance_m.toFixed(0) : '',
+        item.topup ? 'yes' : '',
         item.costStatus || '',
         item.costReason || ''
       ]);
