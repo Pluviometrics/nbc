@@ -7990,7 +7990,7 @@ function renderEditPackagesPanel() {
             <button class="pkg-lock-btn pkg-lock-btn-pkg ${pkgLockCls}" data-relining-lock-pkg data-anchor-id="${escapeHtml(pkg.anchor_id || '')}" title="${escapeHtml(pkgLockTitle)}">${pkgLockIcon}</button>
             ${renameBtnHtml}
           </div>
-          <div class="edit-pkg-meta">${escapeHtml(suburbs)} · ${assets.length} pipe${assets.length === 1 ? '' : 's'} · ${escapeHtml(formatCurrency(pkg.total_cost))} · ${Number(pkg.total_length_m || 0).toFixed(1)} m</div>
+          <div class="edit-pkg-meta">${escapeHtml(suburbs)} · ${assets.length} pipe${assets.length === 1 ? '' : 's'} · ${escapeHtml(formatCurrency(pkg.total_cost))} · ${Number(pkg.total_length_m || 0).toFixed(1)} m · Crit ${Number(pkg.criticality_score || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
         </div>
       </div>
     `;
@@ -8748,6 +8748,7 @@ function _getPackageSortValue(pkg, column) {
     case 'pipe_count':         return Number(pkg.pipe_count) || 0;
     case 'condition_7_count':  return Number(pkg.condition_7_count) || 0;
     case 'condition_8_count':  return Number(pkg.condition_8_count) || 0;
+    case 'criticality_score':  return Number(pkg.criticality_score) || 0;
     case 'total_length_m':     return Number(pkg.total_length_m) || 0;
     case 'total_cost':         return Number(pkg.total_cost) || 0;
     case 'cctv_hours':         return Number(pkg.cctv_hours) || 0;
@@ -8797,6 +8798,7 @@ window.sortPackagesByColumn = function(kind, column) {
     // Numeric columns: biggest-first usually more useful. Text columns: A→Z.
     const numericCols = new Set([
       'pipe_count','condition_6_count','condition_7_count','condition_8_count',
+      'criticality_score',
       'total_length_m','total_cost','cctv_hours','cctv_rate',
       'max_span_m','max_spread_m','asset_ids'
     ]);
@@ -8828,6 +8830,7 @@ function renderGeneratedPackages(data) {
     if (showC6Col) row.condition_6_count = pkg.condition_6_count || 0;
     row.condition_7_count = pkg.condition_7_count;
     row.condition_8_count = pkg.condition_8_count;
+    row.criticality_score = Number(pkg.criticality_score || 0).toLocaleString(undefined, {maximumFractionDigits: 0});
     row.total_length_m = Number(pkg.total_length_m || 0).toFixed(1);
     row.total_cost = formatCurrency(pkg.total_cost);
     row.diameters_mm = (pkg.diameters_mm || []).map(d => 'Ø' + d).join(', ');
@@ -8867,6 +8870,7 @@ function renderGeneratedPackages(data) {
       <colgroup>${packageHeaders.map(h => `<col style="width:${({
         package_id: 8.7, suburb: 6.5, pipe_count: 5.7,
         condition_6_count: 7.5, condition_7_count: 7.5, condition_8_count: 7.5,
+        criticality_score: 7.0,
         total_length_m: 7.0, total_cost: 7.0,
         diameters_mm: 10.0, max_span_m: 9.3, asset_ids: 25.3
       })[h] || 10}%">`).join('')}</colgroup>
